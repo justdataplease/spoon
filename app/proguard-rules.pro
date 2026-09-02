@@ -1,0 +1,2 @@
+-keepattributes Signature,RuntimeVisibleAnnotations,AnnotationDefault
+-keep class com.justdataplease.spoon.data.model.** { *; }

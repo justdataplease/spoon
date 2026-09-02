@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="el">
+  <head>
+    <title>This title must not be used</title>
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@graph": [
+          {"@type": "WebSite", "name": "Synthetic publisher"},
+          {
+            "@type": "Recipe",
+            "name": "Synthetic salmon street-food bowl",
+            "description": "This description must never enter exported metadata.",
+            "image": ["https://example.invalid/recipe.jpg"],
+            "recipeCategory": ["Fish", "Main dish"],
+            "keywords": "salmon, bowl",
+            "prepTime": "PT1H5M",
+            "cookTime": "PT45M",
+            "totalTime": "PT1H50M",
+            "aggregateRating": {"ratingValue": 4.25, "bestRating": 5, "ratingCount": 20},
+            "recipeIngredient": ["secret ingredient one", "secret ingredient two"],
+            "recipeInstructions": [
+              {
+                "@type": "HowToSection",
+                "name": "First private section",
+                "itemListElement": [
+                  {"@type": "HowToStep", "text": "Private step one"},
+                  {"@type": "HowToStep", "text": "Private step two"}
+                ]
+              },
+              {
+                "@type": "HowToSection",
+                "name": "Second private section",
+                "itemListElement": [
+                  {"@type": "HowToStep", "text": "Private step three"}
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    </script>
+  </head>
+  <body>Unrelated body content must not be used.</body>
+</html>

@@ -1,0 +1,122 @@
+{
+  "id": 123,
+  "user_id": 1,
+  "user_first_name": "Άκης",
+  "user_last_name": "Πετρετζίκης",
+  "recipe_category_id": 5,
+  "slug": "synthetiki-syntagi",
+  "video_url": "https://youtu.be/abc123",
+  "sl_video_url": null,
+  "published": 1,
+  "title": "Μοσχάρι με πατάτες",
+  "method": [
+    {
+      "section": "Για το φαγητό",
+      "steps": [
+        {"id": "123001", "step": "Ψήνουμε στους 180&amp;deg;C."},
+        {"id": "123002", "step": "Σερβίρουμε."}
+      ]
+    }
+  ],
+  "ingredient_sections": [
+    {
+      "id": 9,
+      "title": "Για τη συνταγή",
+      "ingredients": [
+        {
+          "id": 10,
+          "title": "μοσχάρι",
+          "unit": "γρ.",
+          "quantity": "500",
+          "info": "σε κύβους",
+          "internal_link": "/recipe/55/voithitiki",
+          "external_link": "https://example.com/info",
+          "conversions": {
+            "uk": {"unit": "ουγγιές", "quantity": "17.64"},
+            "us": {"unit": "κούπες", "quantity": "2"}
+          }
+        }
+      ]
+    }
+  ],
+  "tip": "<p>Ένα <strong>χρήσιμο</strong> tip.</p>",
+  "nutrition_tips": ["Διατροφική σημείωση"],
+  "extra_description": "<p>Πλήρης περιγραφή.</p>",
+  "make_time": 15,
+  "bake_time": 40,
+  "localized_wait_time": "1 ώρα και 15 λεπτά",
+  "shares": "4 μερίδες",
+  "difficulty": "Μεσαία",
+  "fb_video": null,
+  "average_score": "4.5",
+  "rates_sum": "20",
+  "one": 1,
+  "two": 2,
+  "three": 3,
+  "four": 4,
+  "five": 10,
+  "nutrition": {
+    "nutrition_per": "both",
+    "sections": [
+      {
+        "id": "nutrition-1",
+        "title": "Ανά μερίδα",
+        "kcal_portion_abs": "581",
+        "kcal_portion_per": "29",
+        "kcal_grams_abs": "234",
+        "kcal_grams_per": "12",
+        "fat_portion_abs": "42",
+        "fat_portion_per": "60",
+        "fat_grams_abs": "17",
+        "fat_grams_per": "24",
+        "satfat_portion_abs": "21",
+        "satfat_portion_per": "105",
+        "satfat_grams_abs": "8.4",
+        "satfat_grams_per": "42",
+        "carbs_portion_abs": "12",
+        "carbs_portion_per": "5",
+        "carbs_grams_abs": "4.7",
+        "carbs_grams_per": "2",
+        "sugars_portion_abs": "9.9",
+        "sugars_portion_per": "11",
+        "sugars_grams_abs": "4",
+        "sugars_grams_per": "4",
+        "protein_portion_abs": "38",
+        "protein_portion_per": "76",
+        "protein_grams_abs": "15",
+        "protein_grams_per": "30",
+        "fiber_portion_abs": "2.5",
+        "fiber_portion_per": "10",
+        "fiber_grams_abs": "1",
+        "fiber_grams_per": "4",
+        "sodium_portion_abs": "3.3",
+        "sodium_portion_per": "55",
+        "sodium_grams_abs": "1.3",
+        "sodium_grams_per": "22"
+      }
+    ]
+  },
+  "is_ve": 0,
+  "is_vg": 0,
+  "is_gf": 1,
+  "is_df": 0,
+  "is_ef": 0,
+  "is_sf": 0,
+  "is_nf": 0,
+  "is_ls": 0,
+  "video_schedule": "2026-01-01",
+  "extra_asterisk": "Δεύτερη συμβουλή",
+  "seo_title": "SEO τίτλος",
+  "seo_description": "SEO περιγραφή",
+  "short_url": "https://akispetretzikis.com/recipe/123",
+  "assets": [
+    {"id": 100, "url": "https://akispetretzikis.com/photos/100/dish.jpg", "extra": null},
+    {"id": 101, "url": "https://akispetretzikis.com/photos/101/dish-vertical.jpg", "extra": "vertical"}
+  ],
+  "sponsor_logo": {"url": "https://akispetretzikis.com/photos/102/sponsor.jpg"},
+  "category": {"id": 5, "slug": "moskhari"},
+  "created_at": "2026-01-01T10:00:00.000000Z",
+  "updated_at": "2026-02-01T10:00:00.000000Z",
+  "equipment_used": [{"title": "Κατσαρόλα"}],
+  "future_api_field": {"nested": "retained&amp;safe"}
+}

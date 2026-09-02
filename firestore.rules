@@ -1,0 +1,165 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    function validRecipeId(recipeId) {
+      return recipeId.matches('^[A-Za-z0-9_-]{1,128}$');
+    }
+
+    function validPlanId(planId) {
+      return planId.matches(
+        '^[0-9]{4}-(0[1-9]|1[0-2])-([0-2][0-9]|3[0-1])$'
+      );
+    }
+
+    function validEpochMillis(value) {
+      return value is int &&
+        value > 0 &&
+        value <= 253402300799999;
+    }
+
+    function validCategory(value) {
+      return value in [
+        'legumes',
+        'poultry',
+        'vegetables',
+        'meat',
+        'fish',
+        'street_food',
+        'pasta_rice',
+        'any'
+      ];
+    }
+
+    function validFilters(filters, planCategory) {
+      return filters is map &&
+        filters.keys().hasAll([
+          'category',
+          'easeLevel',
+          'minRating',
+          'maxPrepMinutes'
+        ]) &&
+        filters.keys().hasOnly([
+          'category',
+          'easeLevel',
+          'minRating',
+          'maxPrepMinutes'
+        ]) &&
+        filters.category is string &&
+        filters.category == planCategory &&
+        validCategory(filters.category) &&
+        filters.easeLevel is string &&
+        filters.easeLevel in ['', 'easy', 'moderate', 'involved', 'unknown'] &&
+        filters.minRating is number &&
+        filters.minRating >= 0 &&
+        filters.minRating <= 10 &&
+        filters.maxPrepMinutes is int &&
+        filters.maxPrepMinutes >= 0 &&
+        filters.maxPrepMinutes <= 10080;
+    }
+
+    function validMealPlan(data, planId) {
+      return data.keys().hasAll([
+          'date',
+          'category',
+          'recipeId',
+          'recipeTitle',
+          'filters',
+          'completed',
+          'updatedAtEpochMillis'
+        ]) &&
+        data.keys().hasOnly([
+          'date',
+          'category',
+          'recipeId',
+          'recipeTitle',
+          'filters',
+          'completed',
+          'updatedAtEpochMillis'
+        ]) &&
+        validPlanId(planId) &&
+        data.date is string &&
+        data.date == planId &&
+        data.category is string &&
+        validCategory(data.category) &&
+        data.recipeId is string &&
+        validRecipeId(data.recipeId) &&
+        data.recipeTitle is string &&
+        data.recipeTitle.size() > 0 &&
+        data.recipeTitle.size() <= 300 &&
+        validFilters(data.filters, data.category) &&
+        data.completed is bool &&
+        validEpochMillis(data.updatedAtEpochMillis);
+    }
+
+    function validFavorite(data, favoriteId) {
+      return data.keys().hasAll(['recipeId', 'addedAtEpochMillis']) &&
+        data.keys().hasOnly(['recipeId', 'addedAtEpochMillis']) &&
+        validRecipeId(favoriteId) &&
+        data.recipeId is string &&
+        data.recipeId == favoriteId &&
+        validEpochMillis(data.addedAtEpochMillis);
+    }
+
+    // Trusted Admin SDK importers bypass rules. Signed-in clients can only
+    // read the normalized catalog and can never mutate it.
+    match /spoon_recipes/{recipeId} {
+      allow get, list: if signedIn();
+      allow create, update, delete: if false;
+    }
+
+    // Rich normalized content is fetched only when a recipe is opened. Listing
+    // the whole details collection is deliberately disabled for mobile clients.
+    match /spoon_recipe_details/{recipeId} {
+      allow get: if signedIn() &&
+        validRecipeId(recipeId) &&
+        resource.data.active == true &&
+        resource.data.language == 'el';
+      allow list, create, update, delete: if false;
+    }
+
+    // The complete authorized source envelope is retained for audit/re-import,
+    // but only trusted Admin SDK tooling may access it (Admin bypasses rules).
+    match /spoon_recipe_payloads/{recipeId} {
+      allow read, write: if false;
+    }
+
+    // Exact server-owned status document read by CatalogFreshnessWorker.
+    match /spoon_catalog/status {
+      allow get: if signedIn();
+      allow list, create, update, delete: if false;
+    }
+
+    // Meal plans are owner-readable. The app creates/replaces plans and
+    // updates completion, but has no meal-plan deletion operation.
+    match /spoon/{uid}/mealPlans/{planId} {
+      allow get, list: if isOwner(uid);
+      allow create, update: if isOwner(uid) &&
+        validMealPlan(request.resource.data, planId);
+      allow delete: if false;
+    }
+
+    // Favorites use create/delete toggles. Updates and extra fields are denied.
+    match /spoon/{uid}/favorites/{favoriteId} {
+      allow get, list: if isOwner(uid);
+      allow create: if isOwner(uid) &&
+        validFavorite(request.resource.data, favoriteId);
+      allow update: if false;
+      allow delete: if isOwner(uid);
+    }
+
+    // App Check enforcement is configured for Cloud Firestore in Firebase,
+    // separately from this authentication/authorization rules language.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

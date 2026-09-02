@@ -1,0 +1,9 @@
+<resources>
+    <style name="Theme.Spoon" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:statusBarColor">#FFF8F1</item>
+        <item name="android:navigationBarColor">#FFF8F1</item>
+        <item name="android:windowActionModeOverlay">true</item>
+    </style>
+</resources>
