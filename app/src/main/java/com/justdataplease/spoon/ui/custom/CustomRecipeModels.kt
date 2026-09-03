@@ -7,7 +7,9 @@ import com.justdataplease.spoon.data.model.RecipeIngredientSection
 import com.justdataplease.spoon.data.model.RecipeMethodSection
 import com.justdataplease.spoon.ui.model.AvailableCategories
 import com.justdataplease.spoon.ui.model.RecipeDetailUi
+import kotlinx.serialization.Serializable
 
+@Serializable
 data class CustomIngredientDraftUi(
     val title: String,
     val quantity: String = "",

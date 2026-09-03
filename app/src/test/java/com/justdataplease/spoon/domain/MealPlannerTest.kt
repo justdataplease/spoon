@@ -1,6 +1,7 @@
 package com.justdataplease.spoon.domain
 
 import com.justdataplease.spoon.data.DemoRecipeCatalog
+import com.justdataplease.spoon.data.model.CookedMeal
 import com.justdataplease.spoon.data.model.CustomRecipe
 import com.justdataplease.spoon.data.model.DayMealPlan
 import com.justdataplease.spoon.data.model.EaseLevel
@@ -229,6 +230,90 @@ class MealPlannerTest {
     }
 
     @Test
+    fun `reroll preserves the immutable event for the recipe already cooked that date`() = runBlocking {
+        val date = LocalDate.of(2026, 9, 4)
+        val event = CookedMeal(
+            id = "cooked_20260904_3000",
+            date = date.toString(),
+            recipeId = "old-fish",
+            recipeTitle = "Παλιό ψάρι",
+            completedAtEpochMillis = 3_000,
+        )
+        val old = DayMealPlan(
+            id = date.toString(),
+            date = date.toString(),
+            category = MealCategory.FISH.key,
+            recipeId = event.recipeId,
+            recipeTitle = event.recipeTitle,
+            filters = RecipeFilters(category = MealCategory.FISH.key),
+            completed = true,
+            completionEventId = event.id,
+            updatedAtEpochMillis = event.completedAtEpochMillis,
+        )
+        val replacement = Recipe(
+            id = "new-fish",
+            title = "Νέο ψάρι",
+            category = MealCategory.FISH.key,
+        )
+        val repository = FakeRepository(
+            initialPlans = listOf(old),
+            initialRecipes = listOf(replacement),
+            initialHistory = listOf(event),
+        )
+
+        val selected = MealPlanner(repository, RecipeSelector()).reroll(date)
+
+        assertTrue(selected is MealPlanSelection.Selected)
+        assertEquals(false, repository.plans.value.single().completed)
+        assertEquals(listOf(event), repository.history.value)
+        assertEquals(0, repository.deletedHistoryIds.size)
+    }
+
+    @Test
+    fun `favorite replacement preserves prior cooked event and explicit undo removes only it`() = runBlocking {
+        val date = LocalDate.of(2026, 9, 4)
+        val oldEvent = CookedMeal(
+            id = "cooked_20260904_3000",
+            date = date.toString(),
+            recipeId = "old",
+            recipeTitle = "Παλιό",
+            completedAtEpochMillis = 3_000,
+        )
+        val anotherEvent = oldEvent.copy(
+            id = "cooked_20260903_2000",
+            date = "2026-09-03",
+            recipeId = "another",
+        )
+        val old = DayMealPlan(
+            id = date.toString(),
+            date = date.toString(),
+            recipeId = oldEvent.recipeId,
+            recipeTitle = oldEvent.recipeTitle,
+            completed = true,
+            completionEventId = oldEvent.id,
+            updatedAtEpochMillis = oldEvent.completedAtEpochMillis,
+        )
+        val favorite = Recipe(id = "favorite", title = "Αγαπημένη", category = MealCategory.MEAT.key)
+        val repository = FakeRepository(
+            initialPlans = listOf(old),
+            initialRecipes = listOf(favorite),
+            initialFavorites = setOf(favorite.id),
+            initialHistory = listOf(oldEvent, anotherEvent),
+        )
+        val planner = MealPlanner(repository, RecipeSelector())
+
+        planner.replaceWithFavorite(date, favorite.id)
+        assertEquals(listOf(oldEvent, anotherEvent), repository.history.value)
+
+        planner.deleteCookedHistoryEntry(oldEvent.id)
+
+        assertEquals(listOf(anotherEvent), repository.history.value)
+        assertEquals(listOf(oldEvent.id), repository.deletedHistoryIds)
+        assertEquals(favorite.id, repository.plans.value.single().recipeId)
+        assertEquals(false, repository.plans.value.single().completed)
+    }
+
+    @Test
     fun stale_unfinished_category_is_rerolled_against_current_catalog_truth() = runBlocking {
         val date = LocalDate.of(2026, 9, 4)
         val stale = DayMealPlan(
@@ -426,6 +511,7 @@ class MealPlannerTest {
         initialRecipes: List<Recipe> = DemoRecipeCatalog.recipes,
         initialFavorites: Set<String> = emptySet(),
         initialCustomRecipes: List<CustomRecipe> = emptyList(),
+        initialHistory: List<CookedMeal> = emptyList(),
     ) : SpoonRepository {
         override val backendState = MutableStateFlow<BackendState>(BackendState.Local)
         override val recipes: Flow<List<Recipe>> = MutableStateFlow(initialRecipes)
@@ -435,8 +521,11 @@ class MealPlannerTest {
         override val favoriteRecipeIds: Flow<Set<String>> = favorites
         val custom = MutableStateFlow(initialCustomRecipes)
         override val customRecipes: Flow<List<CustomRecipe>> = custom
+        val history = MutableStateFlow(initialHistory)
+        override val cookedHistory: Flow<List<CookedMeal>> = history
         var ensureReadyCount = 0
         var upsertCount = 0
+        val deletedHistoryIds = mutableListOf<String>()
 
         override suspend fun ensureReady() {
             ensureReadyCount++
@@ -454,6 +543,11 @@ class MealPlannerTest {
             plans.value = plans.value.map {
                 if (it.date == date) it.copy(completed = completed) else it
             }
+        }
+
+        override suspend fun deleteCookedHistoryEntry(historyId: String) {
+            deletedHistoryIds += historyId
+            history.value = history.value.filterNot { it.id == historyId }
         }
 
         override suspend fun toggleFavorite(recipeId: String): Boolean {

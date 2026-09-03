@@ -1,5 +1,6 @@
 package com.justdataplease.spoon.ui.components
 
+import java.text.Normalizer
 import java.util.Locale
 
 /**
@@ -24,7 +25,13 @@ internal fun greekProviderLabel(rawValue: String, kind: ProviderLabelKind): Stri
 }
 
 private fun String.providerLabelKey(): String =
-    lowercase(Locale.ROOT).replace(LabelWhitespace, " ").trim()
+    Normalizer.normalize(trim().replace(LabelWhitespace, " "), Normalizer.Form.NFD)
+        .filterNot { Character.getType(it) == Character.NON_SPACING_MARK.toInt() }
+        .lowercase(Locale.ROOT)
+        .replace('ς', 'σ')
+
+private val LabelWhitespace = Regex("\\s+")
+private val LatinLetter = Regex("[A-Za-z]")
 
 private val KnownProviderLabels = mapOf(
     "air fryer" to "Φριτέζα αέρος",
@@ -59,7 +66,4 @@ private val KnownProviderLabels = mapOf(
     "συνταγές airfryer" to "Συνταγές φριτέζας αέρος",
     "υγιεινά - light γλυκά" to "Υγιεινά ελαφριά γλυκά",
     "χυμοί & smoothies" to "Χυμοί και σμούθι",
-)
-
-private val LabelWhitespace = Regex("\\s+")
-private val LatinLetter = Regex("[A-Za-z]")
+).mapKeys { (rawValue, _) -> rawValue.providerLabelKey() }

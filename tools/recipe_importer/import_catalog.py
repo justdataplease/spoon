@@ -90,6 +90,7 @@ MAX_BATCH_SIZE = 500
 DEFAULT_BATCH_SIZE = 100
 BATCH_COMMIT_MAX_ATTEMPTS = 3
 BATCH_COMMIT_INITIAL_BACKOFF_SECONDS = 1.0
+MAX_FIRESTORE_NESTING_DEPTH = 20
 FULL_STATUS_METADATA_FIELDS = {
     'detailSchemaVersion',
     'activeRecipeCount',
@@ -137,6 +138,78 @@ LICENSED_IMAGE_FIELD = "imageUrl"
 
 class CatalogError(ValueError):
     """Raised for an unsafe or invalid catalog before any writes occur."""
+
+
+def _firestore_child_path(path: str, key: object) -> str:
+    text = str(key)
+    return f"{path}.{text}" if text else f"{path}['']"
+
+
+def _validate_firestore_value(
+    value: object,
+    *,
+    path: str,
+    parent_is_array: bool = False,
+    nesting_depth: int = 0,
+) -> None:
+    """Reject structures the Firestore document encoder cannot persist."""
+
+    if isinstance(value, Mapping):
+        current_depth = nesting_depth + 1
+        if current_depth > MAX_FIRESTORE_NESTING_DEPTH:
+            raise CatalogError(
+                f"Firestore nesting exceeds {MAX_FIRESTORE_NESTING_DEPTH} "
+                f"map/array levels at {path}"
+            )
+        for key, child in value.items():
+            _validate_firestore_value(
+                child,
+                path=_firestore_child_path(path, key),
+                nesting_depth=current_depth,
+            )
+        return
+
+    if isinstance(value, (list, tuple)):
+        if parent_is_array:
+            raise CatalogError(
+                "Firestore forbids an array directly inside another array "
+                f"at {path}"
+            )
+        current_depth = nesting_depth + 1
+        if current_depth > MAX_FIRESTORE_NESTING_DEPTH:
+            raise CatalogError(
+                f"Firestore nesting exceeds {MAX_FIRESTORE_NESTING_DEPTH} "
+                f"map/array levels at {path}"
+            )
+        for index, child in enumerate(value):
+            _validate_firestore_value(
+                child,
+                path=f"{path}[{index}]",
+                parent_is_array=True,
+                nesting_depth=current_depth,
+            )
+
+
+def preflight_firestore_records(records: list[dict[str, Any]]) -> None:
+    """Validate every projected document before the first cloud write."""
+
+    if not records:
+        raise CatalogError("catalog contains no records")
+    projections = [(COLLECTION_NAME, firestore_recipe_payload)]
+    if is_full_record(records[0]):
+        projections.extend([
+            (DETAIL_COLLECTION_NAME, firestore_detail_payload),
+            (PAYLOAD_COLLECTION_NAME, firestore_source_payload),
+        ])
+    for collection_name, projector in projections:
+        for record in records:
+            document_path = f"{collection_name}/{record['id']}"
+            payload = projector(record)
+            for field, value in payload.items():
+                _validate_firestore_value(
+                    value,
+                    path=_firestore_child_path(document_path, field),
+                )
 
 
 def _is_transient_firestore_error(error: Exception) -> bool:
@@ -460,6 +533,7 @@ def validate_catalog(
         raise CatalogError(
             "a catalog must contain exactly one provider so completeness and retirement stay source-scoped"
         )
+    preflight_firestore_records(validated)
     return validated
 
 
@@ -637,6 +711,7 @@ def commit_catalog(
 
     if server_timestamp is None:
         raise CatalogError("a Firestore server timestamp is required for commit")
+    preflight_firestore_records(records)
     full = bool(records and is_full_record(records[0]))
     source_key = records[0]["sourceKey"]
     existing_active_ids = (
@@ -924,6 +999,7 @@ def validate_manifest(records: list[dict[str, Any]], manifest: Mapping[str, Any]
                     AUDITED_EXTERNAL_REDIRECTS,
                     AUDITED_NON_RECIPE_SITEMAP_ENTRIES,
                     AUDITED_NON_GREEK_STUBS,
+                    AUDITED_SOURCE_INCOMPLETE_PAGES,
                     checkpoint_run_key,
                     parser_contract_hash,
                 )
@@ -933,6 +1009,7 @@ def validate_manifest(records: list[dict[str, Any]], manifest: Mapping[str, Any]
                     AUDITED_EXTERNAL_REDIRECTS,
                     AUDITED_NON_RECIPE_SITEMAP_ENTRIES,
                     AUDITED_NON_GREEK_STUBS,
+                    AUDITED_SOURCE_INCOMPLETE_PAGES,
                     checkpoint_run_key,
                     parser_contract_hash,
                 )
@@ -945,6 +1022,7 @@ def validate_manifest(records: list[dict[str, Any]], manifest: Mapping[str, Any]
             "canonicalAliases",
             "externalRedirectExclusions",
             "nonGreekStubExclusions",
+            "sourceIncompletePageExclusions",
             "excludedRecipeUrls",
         )
         for field in list_fields:
@@ -987,9 +1065,58 @@ def validate_manifest(records: list[dict[str, Any]], manifest: Mapping[str, Any]
             }
             for source_url, provider_recipe_id in AUDITED_NON_GREEK_STUBS.items()
         ], key=lambda item: item["sourceUrl"])
+        try:
+            expected_source_incomplete = sorted([
+                {
+                    "sourceUrl": source_url,
+                    "providerRecipeId": details["providerRecipeId"],
+                    "finalStatus": details["finalStatus"],
+                    "sourceError": details["expectedError"],
+                    "reason": details["reason"],
+                }
+                for source_url, details
+                in AUDITED_SOURCE_INCOMPLETE_PAGES.items()
+            ], key=lambda item: item["sourceUrl"])
+        except (KeyError, TypeError) as exc:
+            raise CatalogError(
+                "invalid Gastronomos source-incomplete allowlist"
+            ) from exc
+
+        source_incomplete_contract_valid = True
+        for item in expected_source_incomplete:
+            source_url = item.get("sourceUrl")
+            recipe_path = (
+                urlsplit(source_url).path
+                if isinstance(source_url, str)
+                else ""
+            )
+            id_match = re.fullmatch(
+                r"/syntagh/[^/]+/(?P<provider_id>\d+)/",
+                recipe_path,
+            )
+            provider_recipe_id = item.get("providerRecipeId")
+            if (
+                id_match is None
+                or not isinstance(provider_recipe_id, str)
+                or provider_recipe_id != id_match.group("provider_id")
+                or type(item.get("finalStatus")) is not int
+                or item.get("finalStatus") != 200
+                or not isinstance(item.get("sourceError"), str)
+                or not item["sourceError"].strip()
+                or not isinstance(item.get("reason"), str)
+                or not item["reason"].strip()
+            ):
+                source_incomplete_contract_valid = False
+                break
+        if not source_incomplete_contract_valid:
+            mismatches.append("sourceIncompletePageExclusions")
         expected_exclusions = sorted(
             [{"kind": "externalRedirect", **item} for item in expected_external]
-            + [{"kind": "nonGreekStub", **item} for item in expected_stubs],
+            + [{"kind": "nonGreekStub", **item} for item in expected_stubs]
+            + [
+                {"kind": "sourceIncompletePage", **item}
+                for item in expected_source_incomplete
+            ],
             key=lambda item: item["sourceUrl"],
         )
         expected_non_recipe_sitemap_entries = sorted(
@@ -1006,6 +1133,13 @@ def validate_manifest(records: list[dict[str, Any]], manifest: Mapping[str, Any]
             "nonGreekStubExclusionCount": len(expected_stubs),
             "nonGreekStubExclusions": expected_stubs,
             "nonGreekStubExclusionsHash": _manifest_value_hash(expected_stubs),
+            "sourceIncompletePageExclusionCount": len(
+                expected_source_incomplete
+            ),
+            "sourceIncompletePageExclusions": expected_source_incomplete,
+            "sourceIncompletePageExclusionsHash": _manifest_value_hash(
+                expected_source_incomplete
+            ),
             "excludedRecipeUrlCount": len(expected_exclusions),
             "excludedRecipeUrls": expected_exclusions,
             "excludedRecipeUrlsHash": _manifest_value_hash(expected_exclusions),

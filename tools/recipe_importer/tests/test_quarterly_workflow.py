@@ -48,6 +48,8 @@ def test_quarterly_jobs_respect_hosted_runner_limit_and_exact_commands() -> None
     assert scheduled.count("id-token: write") == 1
     assert scheduled.count("environment: recipe-catalog-production") == 1
     for day in (1, 2, 3):
-        schedule = f"0 3 {day} 1,4,7,10 *"
+        schedule = f"17 3 {day} 1,4,7,10 *"
         assert text.count(f'- cron: "{schedule}"') == 1
         assert scheduled.count(f"github.event.schedule == '{schedule}'") == 3
+    assert 'cron: "0 3 ' not in text
+    assert "github.event.schedule == '0 3 " not in scheduled

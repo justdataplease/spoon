@@ -11,6 +11,7 @@ from tools.recipe_importer.crawl_gastronomos import (
     AUDITED_EXTERNAL_REDIRECTS,
     AUDITED_NON_RECIPE_SITEMAP_ENTRIES,
     AUDITED_NON_GREEK_STUBS,
+    AUDITED_SOURCE_INCOMPLETE_PAGES,
     USER_AGENT,
     CheckpointStore,
     DiscoveredRecipe,
@@ -28,9 +29,96 @@ from tools.recipe_importer.crawl_gastronomos import (
 
 def test_transparent_identity_and_exact_audited_exception_contracts():
     assert USER_AGENT == "PeltesSpoonRecipeImporter/1.0 (+mailto:hey@spoon.gr)"
-    assert AUDITED_EXTERNAL_REDIRECTS == {}
-    assert AUDITED_NON_GREEK_STUBS == {}
-    assert AUDITED_CANONICAL_ALIASES == {}
+    assert AUDITED_EXTERNAL_REDIRECTS == {
+        "https://www.gastronomos.gr/syntagh/nero-gia-apotoxinosi/51467/": {
+            "finalUrl": (
+                "https://www.gastronomos.gr/syntages/symvoules/"
+                "nero-gia-apotoxinosi/95913/"
+            ),
+            "finalStatus": 200,
+        },
+        "https://www.gastronomos.gr/syntagh/soypa-aygokommeni/52638/": {
+            "finalUrl": "https://www.gastronomos.gr/",
+            "finalStatus": 200,
+        },
+        "https://www.gastronomos.gr/syntagh/ta-kokteil-toy-mellontos/51777/": {
+            "finalUrl": (
+                "https://www.gastronomos.gr/oinos-pota/pota/"
+                "ta-kokteil-toy-mellontos/95401/"
+            ),
+            "finalStatus": 200,
+        },
+    }
+    assert AUDITED_NON_GREEK_STUBS == {
+        (
+            "https://www.gastronomos.gr/syntagh/"
+            "moussaka-prepared-asia-minor-style-with-tomato-and-kasseri-cheese-"
+            "and-no-bechamel/164705/"
+        ): "164705",
+    }
+    assert set(AUDITED_CANONICAL_ALIASES) == {
+        "https://www.gastronomos.gr/syntagh/chaloymo-pitakia/50895/",
+        (
+            "https://www.gastronomos.gr/syntagh/"
+            "kotopoylo-foyrnoy-klasiko-kai-kalokairino-2/270507/"
+        ),
+        (
+            "https://www.gastronomos.gr/syntagh/"
+            "krya-pantzarosoypa-se-sfinaki-me-giaoyrti/51607/"
+        ),
+        (
+            "https://www.gastronomos.gr/syntagh/"
+            "melitzanes-gioyvetsi-me-mozzarella-burrata-kai-saltsa-ntomatas-"
+            "piperias-florinis/209330/"
+        ),
+        "https://www.gastronomos.gr/syntagh/melopita/52805/",
+        (
+            "https://www.gastronomos.gr/syntagh/"
+            "moscharisio-rolo-me-agria-manitaria-thymari-kai-dentrolivano/231261/"
+        ),
+        "https://www.gastronomos.gr/syntagh/pasta-froytoy-flora/51935/",
+        (
+            "https://www.gastronomos.gr/syntagh/"
+            "soysame-nio-saragli-nistisimo-apo-ton-evro/99603/"
+        ),
+        (
+            "https://www.gastronomos.gr/syntagh/"
+            "tom-yum-taylandeziki-soypa/52219/"
+        ),
+        "https://www.gastronomos.gr/syntagh/tom-yum/83875/",
+    }
+    assert {
+        details["providerRecipeId"]
+        for details in AUDITED_CANONICAL_ALIASES.values()
+    } == {
+        "249974", "269126", "131465", "207162", "124447",
+        "160128", "98166", "189302", "106238",
+    }
+    assert all(
+        details["canonicalUrl"].endswith(
+            f"/{details['providerRecipeId']}/"
+        )
+        for details in AUDITED_CANONICAL_ALIASES.values()
+    )
+    assert not any("51954" in url for url in AUDITED_NON_GREEK_STUBS)
+    assert {
+        details["providerRecipeId"]
+        for details in AUDITED_SOURCE_INCOMPLETE_PAGES.values()
+    } == {
+        "50725", "50752", "52432", "52428", "50963",
+        "52355", "51850", "51074", "51570", "53124",
+        "50137", "51275", "50275", "51278", "52338",
+    }
+    assert len(AUDITED_SOURCE_INCOMPLETE_PAGES) == 15
+    assert all(
+        details["finalStatus"] == 200
+        and details["expectedError"] in {
+            "Gastronomos JSON-LD Recipe has no ingredients",
+            "Gastronomos JSON-LD Recipe has no instructions",
+        }
+        and bool(details["reason"])
+        for details in AUDITED_SOURCE_INCOMPLETE_PAGES.values()
+    )
     assert AUDITED_NON_RECIPE_SITEMAP_ENTRIES == (
         "https://www.gastronomos.gr/oles-oi-syntages/",
     )
@@ -164,6 +252,22 @@ def test_checkpoint_key_binds_the_exact_non_recipe_sitemap_allowlist(monkeypatch
     assert checkpoint_run_key() != original
 
 
+def test_checkpoint_key_binds_the_exact_source_incomplete_allowlist(monkeypatch):
+    original = checkpoint_run_key()
+    changed = dict(AUDITED_SOURCE_INCOMPLETE_PAGES)
+    first_url = next(iter(changed))
+    changed[first_url] = {
+        **changed[first_url],
+        "reason": "tampered reason",
+    }
+    monkeypatch.setattr(
+        crawl_gastronomos,
+        "AUDITED_SOURCE_INCOMPLETE_PAGES",
+        changed,
+    )
+    assert checkpoint_run_key() != original
+
+
 def test_cli_permission_gate_prevents_client_and_network_initialization(monkeypatch, capsys):
     monkeypatch.setattr(
         crawl_gastronomos,
@@ -290,6 +394,15 @@ def _paths(tmp_path):
 
 
 def _configure_run(monkeypatch, urls):
+    # Synthetic inventories deliberately contain none of the live audited URLs.
+    monkeypatch.setattr(crawl_gastronomos, "AUDITED_EXTERNAL_REDIRECTS", {})
+    monkeypatch.setattr(crawl_gastronomos, "AUDITED_NON_GREEK_STUBS", {})
+    monkeypatch.setattr(crawl_gastronomos, "AUDITED_CANONICAL_ALIASES", {})
+    monkeypatch.setattr(
+        crawl_gastronomos,
+        "AUDITED_SOURCE_INCOMPLETE_PAGES",
+        {},
+    )
     recipes = {url: DiscoveredRecipe(url, "2026-01-01") for url in urls}
     monkeypatch.setattr(
         crawl_gastronomos,
@@ -458,6 +571,133 @@ def test_schema_error_retries_three_fresh_fetches_and_never_publishes(monkeypatc
         "failedRecipeCount": 1,
         "failures": [{"sourceUrl": url, "error": "synthetic mismatch"}],
     }
+
+
+def test_exact_source_incomplete_page_is_accounted_after_three_fresh_checks(
+    monkeypatch,
+    tmp_path,
+):
+    good = "https://www.gastronomos.gr/syntagh/good/100/"
+    incomplete = "https://www.gastronomos.gr/syntagh/incomplete/101/"
+    expected_error = "Gastronomos JSON-LD Recipe has no ingredients"
+    _configure_run(monkeypatch, [good, incomplete])
+    monkeypatch.setattr(
+        crawl_gastronomos,
+        "AUDITED_SOURCE_INCOMPLETE_PAGES",
+        {
+            incomplete: {
+                "providerRecipeId": "101",
+                "expectedError": expected_error,
+                "finalStatus": 200,
+                "reason": "synthetic source omission",
+            }
+        },
+    )
+    client = _DetailClient({good: good, incomplete: incomplete})
+
+    def normalize(html, *, source_url, sitemap_last_modified):
+        del html, sitemap_last_modified
+        if source_url == incomplete:
+            raise crawl_gastronomos.FullSchemaError(expected_error)
+        return _minimal_record(source_url)
+
+    monkeypatch.setattr(crawl_gastronomos, "normalize_gastronomos_page", normalize)
+    monkeypatch.setattr(
+        crawl_gastronomos,
+        "validate_checkpoint_record",
+        lambda record, sitemap_url, sitemap_last_modified: dict(record),
+    )
+
+    manifest = run_gastronomos_crawl(
+        client=client,
+        robots=object(),
+        expected_active_count=1,
+        **_paths(tmp_path),
+    )
+
+    expected = [{
+        "sourceUrl": incomplete,
+        "providerRecipeId": "101",
+        "finalStatus": 200,
+        "sourceError": expected_error,
+        "reason": "synthetic source omission",
+    }]
+    assert manifest["sourceIncompletePageExclusionCount"] == 1
+    assert manifest["sourceIncompletePageExclusions"] == expected
+    assert manifest["excludedRecipeUrls"] == [
+        {"kind": "sourceIncompletePage", **expected[0]}
+    ]
+    assert client.calls.count(incomplete) == 3
+
+
+def test_audited_source_incomplete_page_fails_if_its_observed_error_drifts(
+    monkeypatch,
+    tmp_path,
+):
+    url = "https://www.gastronomos.gr/syntagh/incomplete/101/"
+    _configure_run(monkeypatch, [url])
+    monkeypatch.setattr(
+        crawl_gastronomos,
+        "AUDITED_SOURCE_INCOMPLETE_PAGES",
+        {
+            url: {
+                "providerRecipeId": "101",
+                "expectedError": "expected exact error",
+                "finalStatus": 200,
+                "reason": "synthetic source omission",
+            }
+        },
+    )
+    monkeypatch.setattr(
+        crawl_gastronomos,
+        "normalize_gastronomos_page",
+        lambda html, *, source_url, sitemap_last_modified: (
+            (_ for _ in ()).throw(
+                crawl_gastronomos.FullSchemaError("different error")
+            )
+        ),
+    )
+
+    with pytest.raises(IncompleteGastronomosCrawl, match="1 failures"):
+        run_gastronomos_crawl(
+            client=_DetailClient({url: url}),
+            robots=object(),
+            **_paths(tmp_path),
+        )
+
+
+def test_audited_source_incomplete_page_fails_if_it_becomes_complete(
+    monkeypatch,
+    tmp_path,
+):
+    url = "https://www.gastronomos.gr/syntagh/incomplete/101/"
+    _configure_run(monkeypatch, [url])
+    monkeypatch.setattr(
+        crawl_gastronomos,
+        "AUDITED_SOURCE_INCOMPLETE_PAGES",
+        {
+            url: {
+                "providerRecipeId": "101",
+                "expectedError": "Gastronomos JSON-LD Recipe has no ingredients",
+                "finalStatus": 200,
+                "reason": "synthetic source omission",
+            }
+        },
+    )
+    monkeypatch.setattr(
+        crawl_gastronomos,
+        "normalize_gastronomos_page",
+        lambda html, *, source_url, sitemap_last_modified: _minimal_record(
+            source_url
+        ),
+    )
+
+    with pytest.raises(IncompleteGastronomosCrawl, match="1 failures"):
+        run_gastronomos_crawl(
+            client=_DetailClient({url: url}),
+            robots=object(),
+            **_paths(tmp_path),
+        )
 
 
 def test_unknown_non_recipe_redirect_is_a_failure_not_a_silent_exclusion(monkeypatch, tmp_path):

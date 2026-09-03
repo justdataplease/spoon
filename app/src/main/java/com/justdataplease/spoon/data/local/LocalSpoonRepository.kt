@@ -13,6 +13,7 @@ import com.justdataplease.spoon.data.model.ShoppingListItem
 import com.justdataplease.spoon.data.model.isCustomRecipeId
 import com.justdataplease.spoon.data.model.matchesActiveCompletion
 import com.justdataplease.spoon.data.model.mergeCookedHistory
+import com.justdataplease.spoon.data.model.newCookedMealEventId
 import com.justdataplease.spoon.data.model.requireValid
 import com.justdataplease.spoon.data.model.toCookedMeal
 import com.justdataplease.spoon.data.requireSafeRecipeDocumentId
@@ -102,9 +103,16 @@ class LocalSpoonRepository(
                 }
                 if (current.completed == completed) return@withLock
                 val historyBefore = mergeCookedHistory(_mealPlans.value, _cookedHistory.value)
+                val now = System.currentTimeMillis()
+                val completionEventId = if (completed) {
+                    newCookedMealEventId()
+                } else {
+                    ""
+                }
                 val changed = current.copy(
                     completed = completed,
-                    updatedAtEpochMillis = System.currentTimeMillis(),
+                    completionEventId = completionEventId,
+                    updatedAtEpochMillis = now,
                 )
                 val updated = (_mealPlans.value.filterNot { it.date == date } + changed)
                     .sortedBy(DayMealPlan::date)
@@ -132,7 +140,11 @@ class LocalSpoonRepository(
                 val updatedPlans = if (currentPlan != null && event.matchesActiveCompletion(currentPlan)) {
                     _mealPlans.value.map { plan ->
                         if (plan.date == currentPlan.date) {
-                            plan.copy(completed = false, updatedAtEpochMillis = System.currentTimeMillis())
+                            plan.copy(
+                                completed = false,
+                                completionEventId = "",
+                                updatedAtEpochMillis = System.currentTimeMillis(),
+                            )
                         } else {
                             plan
                         }

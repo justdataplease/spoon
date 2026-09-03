@@ -81,9 +81,240 @@ MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 # Exact, independently audited exceptions may be added after a diagnostic
 # inventory.  Generic redirect, language, or missing-content exclusions are
 # intentionally impossible: an unknown drift fails the entire run closed.
-AUDITED_EXTERNAL_REDIRECTS: dict[str, dict[str, object]] = {}
-AUDITED_NON_GREEK_STUBS: dict[str, str] = {}
-AUDITED_CANONICAL_ALIASES: dict[str, dict[str, str]] = {}
+AUDITED_EXTERNAL_REDIRECTS: dict[str, dict[str, object]] = {
+    "https://www.gastronomos.gr/syntagh/nero-gia-apotoxinosi/51467/": {
+        "finalUrl": (
+            "https://www.gastronomos.gr/syntages/symvoules/"
+            "nero-gia-apotoxinosi/95913/"
+        ),
+        "finalStatus": 200,
+    },
+    "https://www.gastronomos.gr/syntagh/soypa-aygokommeni/52638/": {
+        "finalUrl": "https://www.gastronomos.gr/",
+        "finalStatus": 200,
+    },
+    "https://www.gastronomos.gr/syntagh/ta-kokteil-toy-mellontos/51777/": {
+        "finalUrl": (
+            "https://www.gastronomos.gr/oinos-pota/pota/"
+            "ta-kokteil-toy-mellontos/95401/"
+        ),
+        "finalStatus": 200,
+    },
+}
+AUDITED_NON_GREEK_STUBS: dict[str, str] = {
+    (
+        "https://www.gastronomos.gr/syntagh/"
+        "moussaka-prepared-asia-minor-style-with-tomato-and-kasseri-cheese-"
+        "and-no-bechamel/164705/"
+    ): "164705",
+}
+AUDITED_CANONICAL_ALIASES: dict[str, dict[str, str]] = {
+    "https://www.gastronomos.gr/syntagh/chaloymo-pitakia/50895/": {
+        "canonicalUrl": (
+            "https://www.gastronomos.gr/syntagh/"
+            "kypriaka-chaloymopitakia-me-dyosmo-kai-portokalenia-zymi/249974/"
+        ),
+        "providerRecipeId": "249974",
+    },
+    (
+        "https://www.gastronomos.gr/syntagh/"
+        "kotopoylo-foyrnoy-klasiko-kai-kalokairino-2/270507/"
+    ): {
+        "canonicalUrl": (
+            "https://www.gastronomos.gr/syntagh/"
+            "kotopoylo-foyrnoy-klasiko-kai-kalokairino/269126/"
+        ),
+        "providerRecipeId": "269126",
+    },
+    (
+        "https://www.gastronomos.gr/syntagh/"
+        "krya-pantzarosoypa-se-sfinaki-me-giaoyrti/51607/"
+    ): {
+        "canonicalUrl": (
+            "https://www.gastronomos.gr/syntagh/"
+            "kry-a-soy-pa-sto-poti-ri-me-pantza-ria-kai-giaoy-rti/131465/"
+        ),
+        "providerRecipeId": "131465",
+    },
+    (
+        "https://www.gastronomos.gr/syntagh/"
+        "melitzanes-gioyvetsi-me-mozzarella-burrata-kai-saltsa-ntomatas-"
+        "piperias-florinis/209330/"
+    ): {
+        "canonicalUrl": (
+            "https://www.gastronomos.gr/syntagh/"
+            "gioyvetsi-me-melitzanes-mozzarella-burrata-kai-saltsa-ntomatas-"
+            "piperias-florinis/207162/"
+        ),
+        "providerRecipeId": "207162",
+    },
+    "https://www.gastronomos.gr/syntagh/melopita/52805/": {
+        "canonicalUrl": (
+            "https://www.gastronomos.gr/syntagh/melopita-mykonoy/124447/"
+        ),
+        "providerRecipeId": "124447",
+    },
+    (
+        "https://www.gastronomos.gr/syntagh/"
+        "moscharisio-rolo-me-agria-manitaria-thymari-kai-dentrolivano/231261/"
+    ): {
+        "canonicalUrl": (
+            "https://www.gastronomos.gr/syntagh/"
+            "moscharisio-rolo-me-agria-manitaria/160128/"
+        ),
+        "providerRecipeId": "160128",
+    },
+    "https://www.gastronomos.gr/syntagh/pasta-froytoy-flora/51935/": {
+        "canonicalUrl": (
+            "https://www.gastronomos.gr/syntagh/pa-sta-froy-toy-flo-ra/98166/"
+        ),
+        "providerRecipeId": "98166",
+    },
+    (
+        "https://www.gastronomos.gr/syntagh/"
+        "soysame-nio-saragli-nistisimo-apo-ton-evro/99603/"
+    ): {
+        "canonicalUrl": (
+            "https://www.gastronomos.gr/syntagh/"
+            "soysamenio-saragli-apo-ton-evro/189302/"
+        ),
+        "providerRecipeId": "189302",
+    },
+    "https://www.gastronomos.gr/syntagh/tom-yum-taylandeziki-soypa/52219/": {
+        "canonicalUrl": (
+            "https://www.gastronomos.gr/syntagh/soypa-tom-yum/106238/"
+        ),
+        "providerRecipeId": "106238",
+    },
+    "https://www.gastronomos.gr/syntagh/tom-yum/83875/": {
+        "canonicalUrl": (
+            "https://www.gastronomos.gr/syntagh/soypa-tom-yum/106238/"
+        ),
+        "providerRecipeId": "106238",
+    },
+}
+AUDITED_SOURCE_INCOMPLETE_PAGES: dict[str, dict[str, object]] = {
+    (
+        "https://www.gastronomos.gr/syntagh/"
+        "6-grigores-saltses-gia-fileto-moscharioy/50725/"
+    ): {
+        "providerRecipeId": "50725",
+        "expectedError": "Gastronomos JSON-LD Recipe has no ingredients",
+        "finalStatus": 200,
+        "reason": (
+            "multi-recipe editorial has no safely separable canonical recipe identity"
+        ),
+    },
+    "https://www.gastronomos.gr/syntagh/cheesecake/50752/": {
+        "providerRecipeId": "50752",
+        "expectedError": "Gastronomos JSON-LD Recipe has no ingredients",
+        "finalStatus": 200,
+        "reason": "source omits every ingredient",
+    },
+    (
+        "https://www.gastronomos.gr/syntagh/"
+        "dynamotiko-proino-me-proionta-giotis/52432/"
+    ): {
+        "providerRecipeId": "52432",
+        "expectedError": "Gastronomos JSON-LD Recipe has no ingredients",
+        "finalStatus": 200,
+        "reason": "editorial page has no extractable single recipe",
+    },
+    (
+        "https://www.gastronomos.gr/syntagh/"
+        "i-mageiriki-ginetai-apli-ypothesi/52428/"
+    ): {
+        "providerRecipeId": "52428",
+        "expectedError": "Gastronomos JSON-LD Recipe has no ingredients",
+        "finalStatus": 200,
+        "reason": "editorial page has no extractable single recipe",
+    },
+    "https://www.gastronomos.gr/syntagh/mezedes-gia-mpira/50963/": {
+        "providerRecipeId": "50963",
+        "expectedError": "Gastronomos JSON-LD Recipe has no ingredients",
+        "finalStatus": 200,
+        "reason": "editorial page has no extractable single recipe",
+    },
+    "https://www.gastronomos.gr/syntagh/mpoyfes-me-ta-ola-toy/52355/": {
+        "providerRecipeId": "52355",
+        "expectedError": "Gastronomos JSON-LD Recipe has no ingredients",
+        "finalStatus": 200,
+        "reason": "editorial page has no extractable single recipe",
+    },
+    (
+        "https://www.gastronomos.gr/syntagh/"
+        "negroni-apo-ti-amp-8230-samo/51850/"
+    ): {
+        "providerRecipeId": "51850",
+        "expectedError": "Gastronomos JSON-LD Recipe has no ingredients",
+        "finalStatus": 200,
+        "reason": (
+            "multi-recipe editorial has no safely separable canonical recipe identity"
+        ),
+    },
+    (
+        "https://www.gastronomos.gr/syntagh/"
+        "paprika-aloifi-tis-marias-se-5/51074/"
+    ): {
+        "providerRecipeId": "51074",
+        "expectedError": "Gastronomos JSON-LD Recipe has no instructions",
+        "finalStatus": 200,
+        "reason": "source omits every preparation instruction",
+    },
+    "https://www.gastronomos.gr/syntagh/pascha-en-tachei/51570/": {
+        "providerRecipeId": "51570",
+        "expectedError": "Gastronomos JSON-LD Recipe has no ingredients",
+        "finalStatus": 200,
+        "reason": "editorial page has no extractable single recipe",
+    },
+    "https://www.gastronomos.gr/syntagh/sto-trapezi-tis-lampris/53124/": {
+        "providerRecipeId": "53124",
+        "expectedError": "Gastronomos JSON-LD Recipe has no ingredients",
+        "finalStatus": 200,
+        "reason": "editorial page has no extractable single recipe",
+    },
+    (
+        "https://www.gastronomos.gr/syntagh/"
+        "ti-na-pioyme-otan-den-pinoyme/50137/"
+    ): {
+        "providerRecipeId": "50137",
+        "expectedError": "Gastronomos JSON-LD Recipe has no ingredients",
+        "finalStatus": 200,
+        "reason": "editorial page has no extractable single recipe",
+    },
+    (
+        "https://www.gastronomos.gr/syntagh/"
+        "to-kalokairi-erchetai-mazi-me-lachtarista-glyka-choris-zachari/"
+        "51275/"
+    ): {
+        "providerRecipeId": "51275",
+        "expectedError": "Gastronomos JSON-LD Recipe has no ingredients",
+        "finalStatus": 200,
+        "reason": "editorial page has no extractable single recipe",
+    },
+    "https://www.gastronomos.gr/syntagh/to-psito-tis-kyriakis/50275/": {
+        "providerRecipeId": "50275",
+        "expectedError": "Gastronomos JSON-LD Recipe has no ingredients",
+        "finalStatus": 200,
+        "reason": "editorial page has no extractable single recipe",
+    },
+    (
+        "https://www.gastronomos.gr/syntagh/"
+        "ygieini-diatrofi-me-yperocha-glyka-me-geysi-alla-choris-zachari/"
+        "51278/"
+    ): {
+        "providerRecipeId": "51278",
+        "expectedError": "Gastronomos JSON-LD Recipe has no ingredients",
+        "finalStatus": 200,
+        "reason": "editorial page has no extractable single recipe",
+    },
+    "https://www.gastronomos.gr/syntagh/zymarika-sto-foyrno/52338/": {
+        "providerRecipeId": "52338",
+        "expectedError": "Gastronomos JSON-LD Recipe has no ingredients",
+        "finalStatus": 200,
+        "reason": "editorial page has no extractable single recipe",
+    },
+}
 AUDITED_NON_RECIPE_SITEMAP_ENTRIES = (
     "https://www.gastronomos.gr/oles-oi-syntages/",
 )
@@ -500,6 +731,7 @@ def checkpoint_run_key() -> str:
         "externalRedirectAllowlist": AUDITED_EXTERNAL_REDIRECTS,
         "nonGreekStubAllowlist": AUDITED_NON_GREEK_STUBS,
         "canonicalAliasAllowlist": AUDITED_CANONICAL_ALIASES,
+        "sourceIncompletePageAllowlist": AUDITED_SOURCE_INCOMPLETE_PAGES,
         "nonRecipeSitemapEntryAllowlist": AUDITED_NON_RECIPE_SITEMAP_ENTRIES,
     })
 
@@ -593,6 +825,7 @@ def run_gastronomos_crawl(
     failures: list[dict[str, str]] = []
     external_redirects: list[dict[str, object]] = []
     non_greek_stubs: list[dict[str, object]] = []
+    source_incomplete_pages: list[dict[str, object]] = []
     aliases: list[dict[str, str]] = []
     resumed = 0
     invalidated = 0
@@ -614,6 +847,7 @@ def run_gastronomos_crawl(
                 item.source_url not in AUDITED_EXTERNAL_REDIRECTS
                 and item.source_url not in AUDITED_NON_GREEK_STUBS
                 and item.source_url not in AUDITED_CANONICAL_ALIASES
+                and item.source_url not in AUDITED_SOURCE_INCOMPLETE_PAGES
             ):
                 cached = store.get(item.source_url, item.last_modified)
                 if cached is not None:
@@ -705,6 +939,7 @@ def run_gastronomos_crawl(
                         )
 
                     language_excluded = False
+                    source_incomplete_excluded = False
                     last_schema_error: FullSchemaError | None = None
                     for schema_attempt in range(3):
                         try:
@@ -729,18 +964,53 @@ def run_gastronomos_crawl(
                         except FullSchemaError as exc:
                             last_schema_error = exc
                             if schema_attempt == 2:
-                                raise
+                                expected = AUDITED_SOURCE_INCOMPLETE_PAGES.get(
+                                    item.source_url
+                                )
+                                source_match = RECIPE_PATH_RE.fullmatch(
+                                    urlsplit(item.source_url).path
+                                )
+                                observed = {
+                                    "providerRecipeId": (
+                                        source_match.group("id")
+                                        if source_match is not None
+                                        else ""
+                                    ),
+                                    "expectedError": str(exc),
+                                    "finalStatus": response.status_code,
+                                }
+                                if (
+                                    expected is None
+                                    or any(
+                                        expected.get(key) != value
+                                        for key, value in observed.items()
+                                    )
+                                ):
+                                    raise
+                                source_incomplete_pages.append({
+                                    "sourceUrl": item.source_url,
+                                    "providerRecipeId": observed["providerRecipeId"],
+                                    "finalStatus": observed["finalStatus"],
+                                    "sourceError": observed["expectedError"],
+                                    "reason": str(expected["reason"]),
+                                })
+                                source_incomplete_excluded = True
+                                break
                             response = client.get(item.source_url, robots=robots)
                             if canonical_recipe_location(response.url) != item.source_url:
                                 raise GastronomosCrawlError(
                                     "recipe URL changed during schema retry: "
                                     f"{item.source_url} -> {response.url}"
                                 )
-                    if language_excluded:
+                    if language_excluded or source_incomplete_excluded:
                         continue
                     if item.source_url in AUDITED_NON_GREEK_STUBS:
                         raise GastronomosCrawlError(
                             "audited non-Greek stub unexpectedly normalized as Greek"
+                        )
+                    if item.source_url in AUDITED_SOURCE_INCOMPLETE_PAGES:
+                        raise GastronomosCrawlError(
+                            "audited source-incomplete page unexpectedly normalized"
                         )
                     if record is None and last_schema_error is not None:
                         raise last_schema_error
@@ -792,6 +1062,7 @@ def run_gastronomos_crawl(
 
     external_redirects.sort(key=lambda item: str(item["sourceUrl"]))
     non_greek_stubs.sort(key=lambda item: str(item["sourceUrl"]))
+    source_incomplete_pages.sort(key=lambda item: str(item["sourceUrl"]))
     aliases.sort(key=lambda item: item["sourceUrl"])
     if {str(item["sourceUrl"]) for item in external_redirects} != set(AUDITED_EXTERNAL_REDIRECTS):
         raise GastronomosCrawlError(
@@ -800,6 +1071,12 @@ def run_gastronomos_crawl(
     if {str(item["sourceUrl"]) for item in non_greek_stubs} != set(AUDITED_NON_GREEK_STUBS):
         raise GastronomosCrawlError(
             "observed non-Greek stubs do not match the audited allowlist"
+        )
+    if {
+        str(item["sourceUrl"]) for item in source_incomplete_pages
+    } != set(AUDITED_SOURCE_INCOMPLETE_PAGES):
+        raise GastronomosCrawlError(
+            "observed source-incomplete pages do not match the audited allowlist"
         )
     if {item["sourceUrl"] for item in aliases} != set(AUDITED_CANONICAL_ALIASES):
         raise GastronomosCrawlError(
@@ -813,6 +1090,7 @@ def run_gastronomos_crawl(
         + len(aliases)
         + len(external_redirects)
         + len(non_greek_stubs)
+        + len(source_incomplete_pages)
     )
     if (
         accounted != len(discovery.recipes)
@@ -821,7 +1099,8 @@ def run_gastronomos_crawl(
     ):
         raise GastronomosCrawlError(
             "discovery is not exactly accounted by unique canonical Greek "
-            "recipes, aliases, redirects, and audited non-Greek stubs"
+            "recipes, aliases, redirects, audited non-Greek stubs, and "
+            "source-incomplete pages"
         )
     records_by_url = {
         str(record["canonicalUrl"]): record for record in records
@@ -865,6 +1144,9 @@ def run_gastronomos_crawl(
         {"kind": "externalRedirect", **item} for item in external_redirects
     ] + [
         {"kind": "nonGreekStub", **item} for item in non_greek_stubs
+    ] + [
+        {"kind": "sourceIncompletePage", **item}
+        for item in source_incomplete_pages
     ]
     exclusions.sort(key=lambda item: str(item["sourceUrl"]))
     sizes = [document_sizes(record) for record in records]
@@ -893,6 +1175,9 @@ def run_gastronomos_crawl(
         "nonGreekStubExclusionCount": len(non_greek_stubs),
         "nonGreekStubExclusions": non_greek_stubs,
         "nonGreekStubExclusionsHash": _hash(non_greek_stubs),
+        "sourceIncompletePageExclusionCount": len(source_incomplete_pages),
+        "sourceIncompletePageExclusions": source_incomplete_pages,
+        "sourceIncompletePageExclusionsHash": _hash(source_incomplete_pages),
         "excludedRecipeUrlCount": len(exclusions),
         "excludedRecipeUrls": exclusions,
         "excludedRecipeUrlsHash": _hash(exclusions),

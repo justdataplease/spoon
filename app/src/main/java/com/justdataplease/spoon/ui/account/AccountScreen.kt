@@ -190,7 +190,7 @@ private fun AnonymousStatusCard(isAnonymous: Boolean) {
                 )
                 Text(
                     if (isAnonymous) {
-                        "Κατοχύρωσέ τον με email για να μη χάσεις αγαπημένα, σημειώσεις και λίστες."
+                        "Κατοχύρωσέ τον με την ηλεκτρονική σου διεύθυνση για να μη χάσεις αγαπημένα, σημειώσεις και λίστες."
                     } else {
                         "Συνδέσου ή δημιούργησε λογαριασμό για συγχρονισμό."
                     },
@@ -213,8 +213,8 @@ private fun SignedInAccountCard(state: AccountUiState, onSignOut: () -> Unit) {
                 Icon(Icons.Outlined.CheckCircle, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                 Text(
                     when (state.isEmailVerified) {
-                        true -> "Επιβεβαιωμένο email"
-                        false -> "Email σε αναμονή επιβεβαίωσης"
+                        true -> "Επιβεβαιωμένη ηλεκτρονική διεύθυνση"
+                        false -> "Η ηλεκτρονική διεύθυνση δεν έχει επιβεβαιωθεί"
                         null -> "Συνδεδεμένος λογαριασμός"
                     },
                     modifier = Modifier.padding(start = 7.dp),
@@ -259,7 +259,7 @@ private fun AccountFormCard(
                 onValueChange = onEmailChange,
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
-                label = { Text("Email") },
+                label = { Text("Ηλεκτρονική διεύθυνση") },
                 leadingIcon = { Icon(Icons.Outlined.Email, contentDescription = null) },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
             )
@@ -298,7 +298,7 @@ private fun AccountFormCard(
                         mode == AccountFormMode.CREATE && isAnonymous -> "Κατοχύρωση"
                         mode == AccountFormMode.CREATE -> "Δημιουργία"
                         mode == AccountFormMode.SIGN_IN -> "Σύνδεση"
-                        else -> "Αποστολή email επαναφοράς"
+                        else -> "Αποστολή μηνύματος επαναφοράς"
                     },
                     modifier = Modifier.padding(start = 8.dp),
                 )

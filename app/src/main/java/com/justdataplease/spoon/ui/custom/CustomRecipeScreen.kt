@@ -33,11 +33,6 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -49,54 +44,15 @@ import com.justdataplease.spoon.ui.model.AvailableCategories
 
 @Composable
 fun CustomRecipeScreen(
+    editorState: CustomRecipeEditorState,
+    retainedImageUrl: String,
     isSaving: Boolean,
     onBack: () -> Unit,
-    onSave: (CustomRecipeDraftUi) -> Unit,
+    onStateChange: (CustomRecipeEditorState) -> Unit,
+    onSave: () -> Unit,
     modifier: Modifier = Modifier,
-    initialDraft: CustomRecipeDraftUi? = null,
 ) {
     BackHandler(onBack = onBack)
-    val draftKey = initialDraft?.recipeId.orEmpty()
-    var title by rememberSaveable(draftKey) { mutableStateOf(initialDraft?.title.orEmpty()) }
-    var description by rememberSaveable(draftKey) { mutableStateOf(initialDraft?.description.orEmpty()) }
-    var categoryKey by rememberSaveable(draftKey) {
-        mutableStateOf(
-            initialDraft?.categoryKey
-                ?.takeIf { key -> AvailableCategories.any { it.key == key } }
-                ?: AvailableCategories.first().key,
-        )
-    }
-    var prepMinutes by rememberSaveable(draftKey) {
-        mutableStateOf(initialDraft?.prepMinutes?.takeIf { it > 0 }?.toString().orEmpty())
-    }
-    var cookMinutes by rememberSaveable(draftKey) {
-        mutableStateOf(initialDraft?.cookMinutes?.takeIf { it > 0 }?.toString().orEmpty())
-    }
-    var servings by rememberSaveable(draftKey) { mutableStateOf(initialDraft?.servings.orEmpty()) }
-    // Intentionally not saveable: a photo data URL is too large for Android's saved-state Bundle.
-    var imageDataUrl by remember(draftKey) { mutableStateOf(initialDraft?.imageDataUrl.orEmpty()) }
-    var ingredients by remember(draftKey) { mutableStateOf(initialDraft?.ingredients.orEmpty()) }
-    var ingredientTitle by rememberSaveable(draftKey) { mutableStateOf("") }
-    var ingredientQuantity by rememberSaveable(draftKey) { mutableStateOf("") }
-    var ingredientUnit by rememberSaveable(draftKey) { mutableStateOf("") }
-    var steps by remember(draftKey) { mutableStateOf(initialDraft?.steps.orEmpty()) }
-    var stepText by rememberSaveable(draftKey) { mutableStateOf("") }
-    var formMessage by remember(draftKey) { mutableStateOf<String?>(null) }
-
-    fun draft() = CustomRecipeDraftUi(
-        recipeId = initialDraft?.recipeId.orEmpty(),
-        title = title.trim(),
-        description = description.trim(),
-        categoryKey = categoryKey,
-        prepMinutes = prepMinutes.toIntOrNull()?.coerceAtLeast(0) ?: 0,
-        cookMinutes = cookMinutes.toIntOrNull()?.coerceAtLeast(0) ?: 0,
-        servings = servings.trim(),
-        ingredients = ingredients + ingredientTitle.trim().takeIf(String::isNotBlank)?.let {
-            CustomIngredientDraftUi(it, ingredientQuantity.trim(), ingredientUnit.trim())
-        }.let(::listOfNotNull),
-        steps = steps + stepText.trim().takeIf(String::isNotBlank).let(::listOfNotNull),
-        imageDataUrl = imageDataUrl,
-    )
 
     LazyColumn(
         modifier = modifier.fillMaxSize(),
@@ -110,14 +66,14 @@ fun CustomRecipeScreen(
                 }
                 Column {
                     Text(
-                        if (initialDraft == null) "Δική μου συνταγή" else "Επεξεργασία συνταγής",
+                        if (editorState.isEditing) "Επεξεργασία συνταγής" else "Δική μου συνταγή",
                         style = MaterialTheme.typography.headlineMedium,
                     )
                     Text(
-                        if (initialDraft == null) {
-                            "Γράψε την όπως ακριβώς τη μαγειρεύεις"
-                        } else {
+                        if (editorState.isEditing) {
                             "Άλλαξε κατηγορία ή στοιχεία και αποθήκευσέ την ξανά"
+                        } else {
+                            "Γράψε την όπως ακριβώς τη μαγειρεύεις"
                         },
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -129,15 +85,19 @@ fun CustomRecipeScreen(
                 Column(Modifier.fillMaxWidth().padding(17.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     SectionHeading("Βασικά στοιχεία", Icons.Outlined.EditNote)
                     OutlinedTextField(
-                        value = title,
-                        onValueChange = { title = it },
+                        value = editorState.title,
+                        onValueChange = {
+                            onStateChange(editorState.copy(title = it.take(300), formMessage = null))
+                        },
                         modifier = Modifier.fillMaxWidth(),
                         label = { Text("Τίτλος *") },
                         singleLine = true,
                     )
                     OutlinedTextField(
-                        value = description,
-                        onValueChange = { description = it },
+                        value = editorState.description,
+                        onValueChange = {
+                            onStateChange(editorState.copy(description = it.take(10_000), formMessage = null))
+                        },
                         modifier = Modifier.fillMaxWidth(),
                         label = { Text("Περιγραφή") },
                         minLines = 3,
@@ -146,19 +106,33 @@ fun CustomRecipeScreen(
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         items(AvailableCategories, key = { it.key }) { category ->
                             FilterChip(
-                                selected = categoryKey == category.key,
-                                onClick = { categoryKey = category.key },
+                                selected = editorState.categoryKey == category.key,
+                                onClick = {
+                                    onStateChange(editorState.copy(categoryKey = category.key, formMessage = null))
+                                },
                                 label = { Text("${category.emoji} ${category.label}") },
                             )
                         }
                     }
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        MinuteField("Προετοιμασία", prepMinutes, { prepMinutes = it }, Modifier.weight(1f))
-                        MinuteField("Μαγείρεμα", cookMinutes, { cookMinutes = it }, Modifier.weight(1f))
+                        MinuteField(
+                            "Προετοιμασία",
+                            editorState.prepMinutes,
+                            { onStateChange(editorState.copy(prepMinutes = it, formMessage = null)) },
+                            Modifier.weight(1f),
+                        )
+                        MinuteField(
+                            "Μαγείρεμα",
+                            editorState.cookMinutes,
+                            { onStateChange(editorState.copy(cookMinutes = it, formMessage = null)) },
+                            Modifier.weight(1f),
+                        )
                     }
                     OutlinedTextField(
-                        value = servings,
-                        onValueChange = { servings = it },
+                        value = editorState.servings,
+                        onValueChange = {
+                            onStateChange(editorState.copy(servings = it.take(100), formMessage = null))
+                        },
                         modifier = Modifier.fillMaxWidth(),
                         label = { Text("Μερίδες / ποσότητα") },
                         singleLine = true,
@@ -171,40 +145,63 @@ fun CustomRecipeScreen(
                 Column(Modifier.fillMaxWidth().padding(17.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     SectionHeading("Φωτογραφία", Icons.Outlined.Restaurant)
                     RecipePhotoInput(
-                        imageDataUrl = imageDataUrl,
-                        onImageChanged = { imageDataUrl = it },
-                        onError = { formMessage = it },
+                        selectedPhotoPath = editorState.selectedPhotoPath,
+                        retainedImageUrl = retainedImageUrl,
+                        onImageChanged = { path ->
+                            onStateChange(
+                                editorState.copy(
+                                    selectedPhotoPath = path,
+                                    retainExistingPhoto = false,
+                                    formMessage = null,
+                                ),
+                            )
+                        },
+                        onError = { onStateChange(editorState.copy(formMessage = it)) },
                     )
                 }
             }
         }
         item {
-            EditorCard(title = "Υλικά", count = ingredients.size) {
-                ingredients.forEachIndexed { index, ingredient ->
+            EditorCard(title = "Υλικά", count = editorState.ingredients.size) {
+                editorState.ingredients.forEachIndexed { index, ingredient ->
                     DraftRow(
                         title = ingredient.title,
                         subtitle = listOf(ingredient.quantity, ingredient.unit).filter(String::isNotBlank).joinToString(" "),
-                        onRemove = { ingredients = ingredients.filterIndexed { current, _ -> current != index } },
+                        onRemove = {
+                            onStateChange(
+                                editorState.copy(
+                                    ingredients = editorState.ingredients.filterIndexed { current, _ ->
+                                        current != index
+                                    },
+                                ),
+                            )
+                        },
                     )
                 }
                 OutlinedTextField(
-                    value = ingredientTitle,
-                    onValueChange = { ingredientTitle = it },
+                    value = editorState.ingredientTitle,
+                    onValueChange = {
+                        onStateChange(editorState.copy(ingredientTitle = it.take(200), formMessage = null))
+                    },
                     modifier = Modifier.fillMaxWidth(),
                     label = { Text("Υλικό *") },
                     singleLine = true,
                 )
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     OutlinedTextField(
-                        value = ingredientQuantity,
-                        onValueChange = { ingredientQuantity = it },
+                        value = editorState.ingredientQuantity,
+                        onValueChange = {
+                            onStateChange(editorState.copy(ingredientQuantity = it.take(100)))
+                        },
                         modifier = Modifier.weight(1f),
                         label = { Text("Ποσότητα") },
                         singleLine = true,
                     )
                     OutlinedTextField(
-                        value = ingredientUnit,
-                        onValueChange = { ingredientUnit = it },
+                        value = editorState.ingredientUnit,
+                        onValueChange = {
+                            onStateChange(editorState.copy(ingredientUnit = it.take(100)))
+                        },
                         modifier = Modifier.weight(1f),
                         label = { Text("Μονάδα") },
                         singleLine = true,
@@ -212,19 +209,24 @@ fun CustomRecipeScreen(
                 }
                 OutlinedButton(
                     onClick = {
-                        val ingredient = ingredientTitle.trim()
-                        if (ingredient.isNotBlank()) {
-                            ingredients = ingredients + CustomIngredientDraftUi(
-                                title = ingredient,
-                                quantity = ingredientQuantity.trim(),
-                                unit = ingredientUnit.trim(),
+                        val ingredient = editorState.ingredientTitle.trim()
+                        if (ingredient.isNotBlank() && editorState.ingredients.size < 200) {
+                            onStateChange(
+                                editorState.copy(
+                                    ingredients = editorState.ingredients + CustomIngredientDraftUi(
+                                        title = ingredient,
+                                        quantity = editorState.ingredientQuantity.trim(),
+                                        unit = editorState.ingredientUnit.trim(),
+                                    ),
+                                    ingredientTitle = "",
+                                    ingredientQuantity = "",
+                                    ingredientUnit = "",
+                                    formMessage = null,
+                                ),
                             )
-                            ingredientTitle = ""
-                            ingredientQuantity = ""
-                            ingredientUnit = ""
                         }
                     },
-                    enabled = ingredientTitle.isNotBlank(),
+                    enabled = editorState.ingredientTitle.isNotBlank(),
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Icon(Icons.Outlined.Add, contentDescription = null)
@@ -233,30 +235,43 @@ fun CustomRecipeScreen(
             }
         }
         item {
-            EditorCard(title = "Εκτέλεση", count = steps.size) {
-                steps.forEachIndexed { index, step ->
+            EditorCard(title = "Εκτέλεση", count = editorState.steps.size) {
+                editorState.steps.forEachIndexed { index, step ->
                     DraftRow(
                         title = "Βήμα ${index + 1}",
                         subtitle = step,
-                        onRemove = { steps = steps.filterIndexed { current, _ -> current != index } },
+                        onRemove = {
+                            onStateChange(
+                                editorState.copy(
+                                    steps = editorState.steps.filterIndexed { current, _ -> current != index },
+                                ),
+                            )
+                        },
                     )
                 }
                 OutlinedTextField(
-                    value = stepText,
-                    onValueChange = { stepText = it },
+                    value = editorState.stepText,
+                    onValueChange = {
+                        onStateChange(editorState.copy(stepText = it.take(5_000), formMessage = null))
+                    },
                     modifier = Modifier.fillMaxWidth(),
                     label = { Text("Νέο βήμα *") },
                     minLines = 3,
                 )
                 OutlinedButton(
                     onClick = {
-                        val step = stepText.trim()
-                        if (step.isNotBlank()) {
-                            steps = steps + step
-                            stepText = ""
+                        val step = editorState.stepText.trim()
+                        if (step.isNotBlank() && editorState.steps.size < 100) {
+                            onStateChange(
+                                editorState.copy(
+                                    steps = editorState.steps + step,
+                                    stepText = "",
+                                    formMessage = null,
+                                ),
+                            )
                         }
                     },
-                    enabled = stepText.isNotBlank(),
+                    enabled = editorState.stepText.isNotBlank(),
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Icon(Icons.Outlined.Add, contentDescription = null)
@@ -265,7 +280,7 @@ fun CustomRecipeScreen(
             }
         }
         item {
-            formMessage?.let { message ->
+            editorState.formMessage?.let { message ->
                 Surface(
                     color = MaterialTheme.colorScheme.errorContainer,
                     contentColor = MaterialTheme.colorScheme.onErrorContainer,
@@ -278,8 +293,10 @@ fun CustomRecipeScreen(
         item {
             Button(
                 onClick = {
-                    val value = draft()
-                    value.validationMessage()?.let { formMessage = it } ?: onSave(value)
+                    val value = editorState.completedDraft(photoDataUri = "")
+                    value.validationMessage()?.let { validationMessage ->
+                        onStateChange(editorState.copy(formMessage = validationMessage))
+                    } ?: onSave()
                 },
                 enabled = !isSaving,
                 modifier = Modifier.fillMaxWidth().height(58.dp),

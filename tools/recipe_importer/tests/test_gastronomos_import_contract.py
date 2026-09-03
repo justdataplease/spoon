@@ -109,6 +109,17 @@ def _gastronomos_manifest_contract(monkeypatch):
     stub_allowlist = {
         "https://www.gastronomos.gr/syntagh/english-stub/203401/": "203401"
     }
+    source_incomplete_allowlist = {
+        (
+            "https://www.gastronomos.gr/syntagh/"
+            "source-incomplete/203402/"
+        ): {
+            "providerRecipeId": "203402",
+            "expectedError": "Gastronomos JSON-LD Recipe has no ingredients",
+            "finalStatus": 200,
+            "reason": "source omits every ingredient",
+        }
+    }
     monkeypatch.setattr(
         crawl_gastronomos,
         "AUDITED_CANONICAL_ALIASES",
@@ -123,6 +134,11 @@ def _gastronomos_manifest_contract(monkeypatch):
         crawl_gastronomos,
         "AUDITED_NON_GREEK_STUBS",
         stub_allowlist,
+    )
+    monkeypatch.setattr(
+        crawl_gastronomos,
+        "AUDITED_SOURCE_INCOMPLETE_PAGES",
+        source_incomplete_allowlist,
     )
 
     aliases = sorted(
@@ -157,9 +173,26 @@ def _gastronomos_manifest_contract(monkeypatch):
         ],
         key=lambda item: item["sourceUrl"],
     )
+    source_incomplete = sorted(
+        [
+            {
+                "sourceUrl": source_url,
+                "providerRecipeId": details["providerRecipeId"],
+                "finalStatus": details["finalStatus"],
+                "sourceError": details["expectedError"],
+                "reason": details["reason"],
+            }
+            for source_url, details in source_incomplete_allowlist.items()
+        ],
+        key=lambda item: item["sourceUrl"],
+    )
     exclusions = sorted(
         [{"kind": "externalRedirect", **item} for item in external]
-        + [{"kind": "nonGreekStub", **item} for item in stubs],
+        + [{"kind": "nonGreekStub", **item} for item in stubs]
+        + [
+            {"kind": "sourceIncompletePage", **item}
+            for item in source_incomplete
+        ],
         key=lambda item: item["sourceUrl"],
     )
     non_recipe_sitemap_entries = sorted(
@@ -203,6 +236,11 @@ def _gastronomos_manifest_contract(monkeypatch):
         "nonGreekStubExclusionCount": len(stubs),
         "nonGreekStubExclusions": stubs,
         "nonGreekStubExclusionsHash": importer._manifest_value_hash(stubs),
+        "sourceIncompletePageExclusionCount": len(source_incomplete),
+        "sourceIncompletePageExclusions": source_incomplete,
+        "sourceIncompletePageExclusionsHash": importer._manifest_value_hash(
+            source_incomplete
+        ),
         "excludedRecipeUrlCount": len(exclusions),
         "excludedRecipeUrls": exclusions,
         "excludedRecipeUrlsHash": importer._manifest_value_hash(exclusions),
@@ -220,6 +258,51 @@ def _gastronomos_manifest_contract(monkeypatch):
         ),
     }
     return records, manifest
+
+
+def _replace_source_incomplete_contract(
+    monkeypatch,
+    manifest,
+    *,
+    source_url,
+    details,
+):
+    allowlist = {source_url: details}
+    monkeypatch.setattr(
+        crawl_gastronomos,
+        "AUDITED_SOURCE_INCOMPLETE_PAGES",
+        allowlist,
+    )
+    source_incomplete = [{
+        "sourceUrl": source_url,
+        "providerRecipeId": details["providerRecipeId"],
+        "finalStatus": details["finalStatus"],
+        "sourceError": details["expectedError"],
+        "reason": details["reason"],
+    }]
+    exclusions = sorted(
+        [
+            item
+            for item in manifest["excludedRecipeUrls"]
+            if item["kind"] != "sourceIncompletePage"
+        ]
+        + [
+            {"kind": "sourceIncompletePage", **item}
+            for item in source_incomplete
+        ],
+        key=lambda item: item["sourceUrl"],
+    )
+    return manifest | {
+        "sourceIncompletePageExclusionCount": len(source_incomplete),
+        "sourceIncompletePageExclusions": source_incomplete,
+        "sourceIncompletePageExclusionsHash": importer._manifest_value_hash(
+            source_incomplete
+        ),
+        "excludedRecipeUrlCount": len(exclusions),
+        "excludedRecipeUrls": exclusions,
+        "excludedRecipeUrlsHash": importer._manifest_value_hash(exclusions),
+        "checkpointRunKey": crawl_gastronomos.checkpoint_run_key(),
+    }
 
 
 def test_gastronomos_manifest_accepts_exact_allowlists_hashes_and_algebra(
@@ -241,8 +324,25 @@ def test_gastronomos_manifest_rejects_contract_tampering(monkeypatch):
     tampered_stubs = [
         manifest["nonGreekStubExclusions"][0] | {"providerRecipeId": "999999"}
     ]
+    tampered_source_incomplete = [
+        manifest["sourceIncompletePageExclusions"][0]
+        | {"sourceError": "different source error"}
+    ]
+    tampered_all_exclusions = [
+        (
+            item | {"sourceError": "different source error"}
+            if item["kind"] == "sourceIncompletePage"
+            else item
+        )
+        for item in manifest["excludedRecipeUrls"]
+    ]
     tampered_non_recipe_entries = [
         "https://www.gastronomos.gr/agnosti-selida/"
+    ]
+    exclusions_without_source_incomplete = [
+        item
+        for item in manifest["excludedRecipeUrls"]
+        if item["kind"] != "sourceIncompletePage"
     ]
     cases = (
         {
@@ -261,9 +361,34 @@ def test_gastronomos_manifest_rejects_contract_tampering(monkeypatch):
                 tampered_stubs
             ),
         },
+        {
+            "sourceIncompletePageExclusions": tampered_source_incomplete,
+            "sourceIncompletePageExclusionsHash": importer._manifest_value_hash(
+                tampered_source_incomplete
+            ),
+            "excludedRecipeUrls": tampered_all_exclusions,
+            "excludedRecipeUrlsHash": importer._manifest_value_hash(
+                tampered_all_exclusions
+            ),
+        },
         {"canonicalAliasesHash": "0" * 64},
         {"externalRedirectExclusionsHash": "0" * 64},
         {"nonGreekStubExclusionsHash": "0" * 64},
+        {"sourceIncompletePageExclusionCount": 0},
+        {"sourceIncompletePageExclusionsHash": "0" * 64},
+        {
+            "excludedRecipeUrlCount": len(exclusions_without_source_incomplete),
+            "excludedRecipeUrls": exclusions_without_source_incomplete,
+            "excludedRecipeUrlsHash": importer._manifest_value_hash(
+                exclusions_without_source_incomplete
+            ),
+            "discoveredRecipeUrlCount": (
+                manifest["discoveredRecipeUrlCount"] - 1
+            ),
+            "declaredRecipeEntryCount": (
+                manifest["declaredRecipeEntryCount"] - 1
+            ),
+        },
         {"excludedRecipeUrlsHash": "0" * 64},
         {"nonRecipeSitemapEntryCount": 0},
         {
@@ -289,3 +414,70 @@ def test_gastronomos_manifest_rejects_contract_tampering(monkeypatch):
     for changes in cases:
         with pytest.raises(CatalogError, match="manifest/catalog mismatch"):
             importer.validate_manifest(records, manifest | changes)
+
+
+@pytest.mark.parametrize(
+    ("source_url", "details"),
+    (
+        (
+            "https://www.gastronomos.gr/syntagh/source-incomplete/203402/",
+            {
+                "providerRecipeId": "999999",
+                "expectedError": "missing ingredients",
+                "finalStatus": 200,
+                "reason": "source is incomplete",
+            },
+        ),
+        (
+            "https://www.gastronomos.gr/syntagh/source-incomplete/not-numeric/",
+            {
+                "providerRecipeId": "203402",
+                "expectedError": "missing ingredients",
+                "finalStatus": 200,
+                "reason": "source is incomplete",
+            },
+        ),
+        (
+            "https://www.gastronomos.gr/syntagh/source-incomplete/203402/",
+            {
+                "providerRecipeId": "203402",
+                "expectedError": "missing ingredients",
+                "finalStatus": 200.0,
+                "reason": "source is incomplete",
+            },
+        ),
+        (
+            "https://www.gastronomos.gr/syntagh/source-incomplete/203402/",
+            {
+                "providerRecipeId": "203402",
+                "expectedError": "",
+                "finalStatus": 200,
+                "reason": "source is incomplete",
+            },
+        ),
+        (
+            "https://www.gastronomos.gr/syntagh/source-incomplete/203402/",
+            {
+                "providerRecipeId": "203402",
+                "expectedError": "missing ingredients",
+                "finalStatus": 200,
+                "reason": " ",
+            },
+        ),
+    ),
+)
+def test_gastronomos_manifest_rejects_invalid_source_incomplete_contract(
+    monkeypatch,
+    source_url,
+    details,
+):
+    records, manifest = _gastronomos_manifest_contract(monkeypatch)
+    malformed_manifest = _replace_source_incomplete_contract(
+        monkeypatch,
+        manifest,
+        source_url=source_url,
+        details=details,
+    )
+
+    with pytest.raises(CatalogError, match="sourceIncompletePageExclusions"):
+        importer.validate_manifest(records, malformed_manifest)

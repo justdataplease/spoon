@@ -1,5 +1,7 @@
 package com.justdataplease.spoon.ui
 
+import android.content.Context
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.firebase.FirebaseException
@@ -39,12 +41,17 @@ import com.justdataplease.spoon.ui.explore.ExploreRecipeUi
 import com.justdataplease.spoon.ui.explore.ExploreSearchState
 import com.justdataplease.spoon.ui.explore.exploreFilterInputs
 import com.justdataplease.spoon.ui.explore.toExploreSourceOptionsUi
-import com.justdataplease.spoon.ui.custom.CustomRecipeDraftUi
+import com.justdataplease.spoon.ui.custom.CustomRecipeEditorState
+import com.justdataplease.spoon.ui.custom.CustomRecipeEditorStore
+import com.justdataplease.spoon.ui.custom.deleteDraftPhoto
+import com.justdataplease.spoon.ui.custom.draftPhotoDataUri
 import com.justdataplease.spoon.ui.custom.toDomainCustomRecipe
+import com.justdataplease.spoon.ui.custom.validationMessage
 import com.justdataplease.spoon.ui.history.HistoryEntryUi
 import com.justdataplease.spoon.ui.shopping.ShoppingIngredientDraftUi
 import com.justdataplease.spoon.ui.shopping.ShoppingListItemUi
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import java.text.Normalizer
 import java.time.LocalDate
 import java.time.YearMonth
@@ -122,10 +129,28 @@ private data class ExploreSelection(
 
 @HiltViewModel
 class SpoonViewModel @Inject constructor(
+    savedStateHandle: SavedStateHandle,
+    @ApplicationContext private val applicationContext: Context,
     private val mealPlanner: MealPlanner,
 ) : ViewModel() {
     private val computationScope = CoroutineScope(viewModelScope.coroutineContext + Dispatchers.Default)
     private val exploreSearchState = ExploreSearchState(computationScope)
+    private val customRecipeEditorStore = CustomRecipeEditorStore(savedStateHandle)
+    val customRecipeEditor = customRecipeEditorStore.state
+    val customRecipeEditorRetainedPhoto = combine(
+        customRecipeEditor,
+        mealPlanner.recipes,
+    ) { editor, recipes ->
+        if (editor.retainExistingPhoto) {
+            recipes.firstOrNull { it.id == editor.recipeId }?.imageUrl.orEmpty()
+        } else {
+            ""
+        }
+    }.stateIn(
+        scope = computationScope,
+        started = SharingStarted.WhileSubscribed(5_000),
+        initialValue = "",
+    )
     private val selectedWeekStart = MutableStateFlow(WeeklyPlanDefaults.weekStart(LocalDate.now()))
     private val selectedMonth = MutableStateFlow(YearMonth.now())
     private val editingDate = MutableStateFlow<LocalDate?>(null)
@@ -335,8 +360,9 @@ class SpoonViewModel @Inject constructor(
                     ?: "Άλλο",
                 categoryEmoji = category?.emoji ?: "🍽️",
                 imageUrl = recipe?.imageUrl.orEmpty(),
+                completedAtEpochMillis = cookedMeal.completedAtEpochMillis,
             )
-        }.sortedByDescending(HistoryEntryUi::date)
+        }.sortedByDescending(HistoryEntryUi::completedAtEpochMillis)
         val shoppingItems = snapshot.userContent.shoppingItems.map { item ->
             ShoppingListItemUi(
                 id = item.id,
@@ -637,26 +663,90 @@ class SpoonViewModel @Inject constructor(
         }
     }
 
-    fun saveCustomRecipe(
-        draft: CustomRecipeDraftUi,
-        onSaved: () -> Unit = {},
-    ) {
+    fun createCustomRecipe() {
+        replaceCustomRecipeEditor(CustomRecipeEditorState.create())
+    }
+
+    fun editCustomRecipe(recipe: RecipeDetailUi) {
+        replaceCustomRecipeEditor(CustomRecipeEditorState.edit(recipe))
+    }
+
+    fun updateCustomRecipeEditor(next: CustomRecipeEditorState) {
+        val current = customRecipeEditor.value
+        if (
+            savingCustomRecipe.value ||
+            !current.isOpen ||
+            next.mode != current.mode ||
+            next.recipeId != current.recipeId
+        ) {
+            if (current.selectedPhotoPath != next.selectedPhotoPath) {
+                applicationContext.deleteDraftPhoto(next.selectedPhotoPath)
+            }
+            return
+        }
+        customRecipeEditorStore.set(next)
+        if (current.selectedPhotoPath != next.selectedPhotoPath) {
+            applicationContext.deleteDraftPhoto(current.selectedPhotoPath)
+        }
+    }
+
+    fun dismissCustomRecipeEditor() {
         if (savingCustomRecipe.value) return
+        clearCustomRecipeEditor()
+    }
+
+    private fun clearCustomRecipeEditor() {
+        applicationContext.deleteDraftPhoto(customRecipeEditor.value.selectedPhotoPath)
+        customRecipeEditorStore.clear()
+    }
+
+    fun saveCustomRecipeEditor() {
+        if (savingCustomRecipe.value) return
+        val editor = customRecipeEditor.value.takeIf(CustomRecipeEditorState::isOpen) ?: return
+        val validationMessage = editor.completedDraft(photoDataUri = "").validationMessage()
+        if (validationMessage != null) {
+            customRecipeEditorStore.set(editor.copy(formMessage = validationMessage))
+            return
+        }
+        savingCustomRecipe.value = true
         viewModelScope.launch {
-            savingCustomRecipe.value = true
             try {
-                val saved = withContext(Dispatchers.Default) {
-                    mealPlanner.saveCustomRecipe(draft.toDomainCustomRecipe())
+                val saved = withContext(Dispatchers.IO) {
+                    val photoDataUri = when {
+                        editor.selectedPhotoPath.isNotBlank() ->
+                            applicationContext.draftPhotoDataUri(editor.selectedPhotoPath)
+                                ?: throw DraftPhotoUnavailableException()
+                        editor.retainExistingPhoto ->
+                            mealPlanner.getRecipeDetails(editor.recipeId)?.imageUrl.orEmpty()
+                        else -> ""
+                    }
+                    mealPlanner.saveCustomRecipe(
+                        editor.completedDraft(photoDataUri).toDomainCustomRecipe(),
+                    )
                 }
                 message.value = "Η δική σου συνταγή αποθηκεύτηκε."
+                clearCustomRecipeEditor()
                 showRecipeDetails(saved.id)
-                onSaved()
             } catch (error: Exception) {
-                message.value = error.userMessage()
+                if (error is DraftPhotoUnavailableException) {
+                    customRecipeEditorStore.set(
+                        editor.copy(
+                            formMessage = "Η πρόχειρη φωτογραφία δεν είναι πλέον διαθέσιμη. Διάλεξέ την ξανά.",
+                        ),
+                    )
+                } else {
+                    message.value = error.userMessage()
+                }
             } finally {
                 savingCustomRecipe.value = false
             }
         }
+    }
+
+    private fun replaceCustomRecipeEditor(next: CustomRecipeEditorState) {
+        if (savingCustomRecipe.value) return
+        applicationContext.deleteDraftPhoto(customRecipeEditor.value.selectedPhotoPath)
+        customRecipeEditorStore.set(next)
     }
 
     fun toggleCompleted(date: LocalDate) {
@@ -665,10 +755,18 @@ class SpoonViewModel @Inject constructor(
             date = date,
             calendarMeals = state.calendarMeals,
             weekPlans = state.weekPlans,
-            historyEntries = state.historyEntries,
         )
         viewModelScope.launch {
             runCatching { mealPlanner.setCompleted(date, !completed) }
+                .onFailure { message.value = it.userMessage() }
+        }
+    }
+
+    fun removeCookedHistoryEntry(historyId: String) {
+        if (historyId.isBlank()) return
+        viewModelScope.launch {
+            runCatching { mealPlanner.deleteCookedHistoryEntry(historyId) }
+                .onSuccess { message.value = "Η εγγραφή αφαιρέθηκε από το ιστορικό." }
                 .onFailure { message.value = it.userMessage() }
         }
     }
@@ -690,7 +788,7 @@ class SpoonViewModel @Inject constructor(
     }
 
     fun resetPassword(email: String) {
-        launchAccountOperation("Σου στείλαμε email επαναφοράς κωδικού.") {
+        launchAccountOperation("Σου στείλαμε μήνυμα επαναφοράς κωδικού στην ηλεκτρονική σου διεύθυνση.") {
             mealPlanner.sendPasswordReset(email)
         }
     }
@@ -714,6 +812,7 @@ class SpoonViewModel @Inject constructor(
         viewModelScope.launch {
             mealPlanner.accountState.collect { account ->
                 if (accountOwnerTracker.onAccountState(account)) {
+                    dismissCustomRecipeEditor()
                     clearRecipeSelection()
                     resetWeekEnsureForAccountOwner()
                 }
@@ -953,17 +1052,15 @@ private fun AccountState.toUi(operation: AccountOperationStatus): AccountUiState
 private const val ACCOUNT_GENERIC_ERROR =
     "Δεν ολοκληρώθηκε η ενέργεια λογαριασμού. Δοκίμασε ξανά."
 
+private class DraftPhotoUnavailableException : IllegalStateException()
+
 internal fun completionStateForDate(
     date: LocalDate,
     calendarMeals: List<CalendarMealUi>,
     weekPlans: List<DayPlanUi>,
-    historyEntries: List<HistoryEntryUi> = emptyList(),
-): Boolean = historyEntries.any { it.date == date } ||
-    (
-        calendarMeals.firstOrNull { it.date == date }?.isCompleted
-            ?: weekPlans.firstOrNull { it.date == date }?.isCompleted
-            ?: false
-        )
+): Boolean = calendarMeals.firstOrNull { it.date == date }?.isCompleted
+    ?: weekPlans.firstOrNull { it.date == date }?.isCompleted
+    ?: false
 
 private fun List<ShoppingIngredientDraftUi>.toShoppingItems(): List<ShoppingListItem> {
     val now = System.currentTimeMillis()

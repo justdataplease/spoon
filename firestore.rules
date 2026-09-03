@@ -20,6 +20,11 @@ service cloud.firestore {
       );
     }
 
+    function validHistoryId(historyId) {
+      return validPlanId(historyId) ||
+        historyId.matches('^cooked_([0-9]{8}_[0-9]{1,15}|[0-9a-f]{32})$');
+    }
+
     function validEpochMillis(value) {
       return value is int &&
         value > 0 &&
@@ -173,20 +178,22 @@ service cloud.firestore {
           'recipeTitle',
           'completedAtEpochMillis'
         ]) &&
-        validPlanId(historyId) &&
+        validHistoryId(historyId) &&
         data.date is string &&
-        data.date == historyId &&
+        validPlanId(data.date) &&
         data.recipeId is string &&
         validRecipeId(data.recipeId) &&
         validText(data.recipeTitle, 1, 300) &&
         validEpochMillis(data.completedAtEpochMillis);
     }
 
-    function planHasConsistentHistory(uid, plan, planId) {
-      let historyPath = /databases/$(database)/documents/spoon/$(uid)/cookedHistory/$(planId);
-      return (plan.completed == false && !existsAfter(historyPath)) ||
+    function planHasConsistentHistory(uid, plan) {
+      let safeEventId = plan.completionEventId == '' ? 'none' : plan.completionEventId;
+      let historyPath = /databases/$(database)/documents/spoon/$(uid)/cookedHistory/$(safeEventId);
+      return (plan.completed == false && plan.completionEventId == '') ||
         (
           plan.completed == true &&
+          validHistoryId(plan.completionEventId) &&
           existsAfter(historyPath) &&
           getAfter(historyPath).data.date == plan.date &&
           getAfter(historyPath).data.recipeId == plan.recipeId &&
@@ -196,19 +203,31 @@ service cloud.firestore {
     }
 
     function historyMatchesCompletedPlan(uid, history, historyId) {
-      let planPath = /databases/$(database)/documents/spoon/$(uid)/mealPlans/$(historyId);
+      let planPath = /databases/$(database)/documents/spoon/$(uid)/mealPlans/$(history.date);
       return existsAfter(planPath) &&
         getAfter(planPath).data.completed == true &&
+        getAfter(planPath).data.completionEventId == historyId &&
         getAfter(planPath).data.date == history.date &&
         getAfter(planPath).data.recipeId == history.recipeId &&
         getAfter(planPath).data.recipeTitle == history.recipeTitle &&
         getAfter(planPath).data.updatedAtEpochMillis == history.completedAtEpochMillis;
     }
 
-    function historyCanBeDeleted(uid, historyId) {
-      let planPath = /databases/$(database)/documents/spoon/$(uid)/mealPlans/$(historyId);
-      return existsAfter(planPath) &&
-        getAfter(planPath).data.completed == false;
+    function historyCanBeDeleted(uid, history, historyId) {
+      let planPath = /databases/$(database)/documents/spoon/$(uid)/mealPlans/$(history.date);
+      return !existsAfter(planPath) ||
+        getAfter(planPath).data.completed == false ||
+        (
+          getAfter(planPath).data.get('completionEventId', '') != '' &&
+          getAfter(planPath).data.get('completionEventId', '') != historyId
+        ) ||
+        (
+          getAfter(planPath).data.get('completionEventId', '') == '' &&
+          (
+            getAfter(planPath).data.recipeId != history.recipeId ||
+            getAfter(planPath).data.updatedAtEpochMillis != history.completedAtEpochMillis
+          )
+        );
     }
 
     function validFilters(filters, planCategory) {
@@ -246,6 +265,7 @@ service cloud.firestore {
           'recipeTitle',
           'filters',
           'completed',
+          'completionEventId',
           'updatedAtEpochMillis'
         ]) &&
         data.keys().hasOnly([
@@ -255,6 +275,7 @@ service cloud.firestore {
           'recipeTitle',
           'filters',
           'completed',
+          'completionEventId',
           'updatedAtEpochMillis'
         ]) &&
         validPlanId(planId) &&
@@ -269,7 +290,9 @@ service cloud.firestore {
         data.recipeTitle.size() <= 300 &&
         validFilters(data.filters, data.category) &&
         data.completed is bool &&
-        planHasConsistentHistory(uid, data, planId) &&
+        data.completionEventId is string &&
+        (data.completionEventId == '' || validHistoryId(data.completionEventId)) &&
+        planHasConsistentHistory(uid, data) &&
         validEpochMillis(data.updatedAtEpochMillis);
     }
 
@@ -361,11 +384,13 @@ service cloud.firestore {
 
     match /spoon/{uid}/cookedHistory/{historyId} {
       allow get, list: if isOwner(uid);
-      allow create, update: if isOwner(uid) &&
+      allow create: if isOwner(uid) &&
         validCookedMeal(request.resource.data, historyId) &&
         historyMatchesCompletedPlan(uid, request.resource.data, historyId);
+      allow update: if false;
       allow delete: if isOwner(uid) &&
-        historyCanBeDeleted(uid, historyId);
+        validCookedMeal(resource.data, historyId) &&
+        historyCanBeDeleted(uid, resource.data, historyId);
     }
 
     // App Check enforcement is configured for Cloud Firestore in Firebase,

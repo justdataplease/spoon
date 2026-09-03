@@ -34,6 +34,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -58,13 +59,16 @@ private const val MaxEncodedPhotoBytes = 480_000
 
 @Composable
 internal fun RecipePhotoInput(
-    imageDataUrl: String,
+    selectedPhotoPath: String,
+    retainedImageUrl: String,
     onImageChanged: (String) -> Unit,
     onError: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val latestOnImageChanged by rememberUpdatedState(onImageChanged)
+    val latestOnError by rememberUpdatedState(onError)
     var processing by remember { mutableStateOf(false) }
     var pendingCameraUri by rememberSaveable { mutableStateOf<String?>(null) }
     var pendingCameraFile by rememberSaveable { mutableStateOf<String?>(null) }
@@ -74,18 +78,18 @@ internal fun RecipePhotoInput(
             processing = true
             val result = try {
                 withContext(Dispatchers.IO) {
-                    runCatching { context.compactImageDataUrl(uri) }
+                    runCatching { context.compactImageToDraftPath(uri) }
                 }
             } finally {
                 cleanup()
             }
             processing = false
             result.fold(
-                onSuccess = { data ->
-                    if (data == null) onError("Δεν μπορέσαμε να διαβάσουμε αυτή τη φωτογραφία.")
-                    else onImageChanged(data)
+                onSuccess = { path ->
+                    if (path == null) latestOnError("Δεν μπορέσαμε να διαβάσουμε αυτή τη φωτογραφία.")
+                    else latestOnImageChanged(path)
                 },
-                onFailure = { onError("Η φωτογραφία δεν μπόρεσε να προστεθεί. Δοκίμασε ξανά.") },
+                onFailure = { latestOnError("Η φωτογραφία δεν μπόρεσε να προστεθεί. Δοκίμασε ξανά.") },
             )
         }
     }
@@ -106,9 +110,12 @@ internal fun RecipePhotoInput(
     }
 
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        if (imageDataUrl.isNotBlank()) {
+        val previewModel: Any? = selectedPhotoPath.takeIf(String::isNotBlank)
+            ?.let(::File)
+            ?: retainedImageUrl.takeIf(String::isNotBlank)
+        if (previewModel != null) {
             AsyncImage(
-                model = imageDataUrl,
+                model = previewModel,
                 contentDescription = "Φωτογραφία της δικής μου συνταγής",
                 modifier = Modifier.fillMaxWidth().height(210.dp).clip(RoundedCornerShape(20.dp)),
                 contentScale = ContentScale.Crop,
@@ -164,10 +171,10 @@ internal fun RecipePhotoInput(
                                         file.delete()
                                         pendingCameraFile = null
                                         pendingCameraUri = null
-                                        onError("Δεν βρέθηκε διαθέσιμη εφαρμογή κάμερας.")
+                                        latestOnError("Δεν βρέθηκε διαθέσιμη εφαρμογή κάμερας.")
                                     }
                             },
-                            onFailure = { onError("Δεν ήταν δυνατό να ανοίξει η κάμερα.") },
+                            onFailure = { latestOnError("Δεν ήταν δυνατό να ανοίξει η κάμερα.") },
                         )
                     },
                     modifier = Modifier.weight(1f),
@@ -176,8 +183,8 @@ internal fun RecipePhotoInput(
                     Text("Κάμερα", modifier = Modifier.padding(start = 7.dp))
                 }
             }
-            if (imageDataUrl.isNotBlank()) {
-                OutlinedButton(onClick = { onImageChanged("") }, modifier = Modifier.fillMaxWidth()) {
+            if (previewModel != null) {
+                OutlinedButton(onClick = { latestOnImageChanged("") }, modifier = Modifier.fillMaxWidth()) {
                     Icon(Icons.Outlined.DeleteOutline, contentDescription = null)
                     Text("Αφαίρεση φωτογραφίας", modifier = Modifier.padding(start = 7.dp))
                 }
@@ -187,7 +194,7 @@ internal fun RecipePhotoInput(
 }
 
 // The platform EXIF reader is available on Spoon's API 26 minimum.
-private fun Context.compactImageDataUrl(uri: Uri): String? {
+private fun Context.compactImageToDraftPath(uri: Uri): String? {
     val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
     contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
     if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
@@ -240,8 +247,42 @@ private fun Context.compactImageDataUrl(uri: Uri): String? {
     }
     bitmap.recycle()
     if (bytes.size > MaxEncodedPhotoBytes) return null
+    val directory = File(filesDir, DraftPhotoDirectoryName)
+    if (!directory.exists() && !directory.mkdirs()) return null
+    val file = File.createTempFile("spoon_recipe_draft_", ".jpg", directory)
+    return runCatching {
+        file.writeBytes(bytes)
+        file.absolutePath
+    }.getOrElse {
+        file.delete()
+        null
+    }
+}
+
+internal fun Context.draftPhotoDataUri(path: String): String? {
+    val file = safeDraftPhoto(path) ?: return null
+    if (file.length() !in 1..MaxEncodedPhotoBytes.toLong()) return null
+    val bytes = runCatching { file.readBytes() }.getOrNull() ?: return null
+    if (bytes.isEmpty() || bytes.size > MaxEncodedPhotoBytes) return null
     return "data:image/jpeg;base64,${Base64.encodeToString(bytes, Base64.NO_WRAP)}"
 }
+
+internal fun Context.deleteDraftPhoto(path: String) {
+    safeDraftPhoto(path)?.delete()
+}
+
+private fun Context.safeDraftPhoto(path: String): File? {
+    if (path.isBlank()) return null
+    val directory = File(filesDir, DraftPhotoDirectoryName).canonicalFile
+    val candidate = runCatching { File(path).canonicalFile }.getOrNull() ?: return null
+    val insideDirectory = candidate.path.startsWith(
+        directory.path + File.separator,
+        ignoreCase = true,
+    )
+    return candidate.takeIf { insideDirectory && it.isFile }
+}
+
+private const val DraftPhotoDirectoryName = "custom_recipe_drafts"
 
 private fun Bitmap.toJpeg(quality: Int): ByteArray = ByteArrayOutputStream().use { output ->
     compress(Bitmap.CompressFormat.JPEG, quality, output)

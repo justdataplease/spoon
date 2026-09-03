@@ -32,12 +32,11 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.justdataplease.spoon.data.model.isCustomRecipeId
 import com.justdataplease.spoon.ui.account.AccountScreen
 import com.justdataplease.spoon.ui.calendar.CalendarScreen
 import com.justdataplease.spoon.ui.custom.CustomRecipeScreen
-import com.justdataplease.spoon.ui.custom.CustomRecipeDraftUi
-import com.justdataplease.spoon.ui.custom.toCustomRecipeDraftUi
 import com.justdataplease.spoon.ui.details.RecipeDetailsScreen
 import com.justdataplease.spoon.ui.explore.ExploreScreen
 import com.justdataplease.spoon.ui.favorites.FavoriteReplacementSheet
@@ -75,24 +74,21 @@ fun SpoonApp(
 ) {
     var selectedDestination by rememberSaveable { mutableIntStateOf(0) }
     var morePage by rememberSaveable { mutableStateOf(MorePage.HUB) }
-    var isCreatingRecipe by rememberSaveable { mutableStateOf(false) }
-    var editingCustomRecipeDraft by remember { mutableStateOf<CustomRecipeDraftUi?>(null) }
     val snackbarHostState = remember { SnackbarHostState() }
     val selectedRecipe = state.selectedRecipe
-    val activeEditDraft = editingCustomRecipeDraft
+    val customRecipeEditor by viewModel.customRecipeEditor.collectAsStateWithLifecycle()
+    val retainedCustomRecipePhoto by viewModel.customRecipeEditorRetainedPhoto.collectAsStateWithLifecycle()
 
     BackHandler(
         enabled = selectedRecipe != null ||
             state.favoriteReplacementDate != null ||
-            editingCustomRecipeDraft != null ||
-            isCreatingRecipe ||
+            customRecipeEditor.isOpen ||
             (Destinations[selectedDestination].key == PrimaryDestination.MORE && morePage != MorePage.HUB),
     ) {
         when {
-            editingCustomRecipeDraft != null -> editingCustomRecipeDraft = null
+            customRecipeEditor.isOpen -> viewModel.dismissCustomRecipeEditor()
             selectedRecipe != null -> viewModel.dismissRecipeDetails()
             state.favoriteReplacementDate != null -> viewModel.dismissFavoriteReplacement()
-            isCreatingRecipe -> isCreatingRecipe = false
             else -> morePage = MorePage.HUB
         }
     }
@@ -103,18 +99,12 @@ fun SpoonApp(
             viewModel.clearMessage()
         }
     }
-    LaunchedEffect(selectedRecipe?.recipeId) {
-        if (isCreatingRecipe && selectedRecipe?.recipeId?.startsWith("custom_") == true) {
-            isCreatingRecipe = false
-        }
-    }
-
     Scaffold(
         modifier = modifier,
         containerColor = MaterialTheme.colorScheme.background,
         snackbarHost = { SnackbarHost(snackbarHostState) },
         bottomBar = {
-            if (selectedRecipe == null && !isCreatingRecipe && editingCustomRecipeDraft == null) {
+            if (selectedRecipe == null && !customRecipeEditor.isOpen) {
                 NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
                     Destinations.forEachIndexed { index, destination ->
                         val selected = selectedDestination == index
@@ -141,13 +131,13 @@ fun SpoonApp(
         },
     ) { padding ->
         when {
-            activeEditDraft != null -> CustomRecipeScreen(
+            customRecipeEditor.isOpen -> CustomRecipeScreen(
+                editorState = customRecipeEditor,
+                retainedImageUrl = retainedCustomRecipePhoto,
                 isSaving = state.isSavingCustomRecipe,
-                onBack = { editingCustomRecipeDraft = null },
-                onSave = { draft ->
-                    viewModel.saveCustomRecipe(draft) { editingCustomRecipeDraft = null }
-                },
-                initialDraft = activeEditDraft,
+                onBack = viewModel::dismissCustomRecipeEditor,
+                onStateChange = viewModel::updateCustomRecipeEditor,
+                onSave = viewModel::saveCustomRecipeEditor,
                 modifier = Modifier.padding(padding),
             )
 
@@ -160,20 +150,11 @@ fun SpoonApp(
                 onSaveNote = viewModel::saveRecipeNote,
                 onAddIngredients = viewModel::addIngredientsToShopping,
                 onEdit = if (selectedRecipe.recipeId.isCustomRecipeId()) {
-                    { editingCustomRecipeDraft = selectedRecipe.toCustomRecipeDraftUi() }
+                    { viewModel.editCustomRecipe(selectedRecipe) }
                 } else {
                     null
                 },
                 isLoadingDetails = state.isRecipeDetailsLoading,
-                modifier = Modifier.padding(padding),
-            )
-
-            isCreatingRecipe -> CustomRecipeScreen(
-                isSaving = state.isSavingCustomRecipe,
-                onBack = { isCreatingRecipe = false },
-                onSave = { draft ->
-                    viewModel.saveCustomRecipe(draft) { isCreatingRecipe = false }
-                },
                 modifier = Modifier.padding(padding),
             )
 
@@ -205,7 +186,7 @@ fun SpoonApp(
                     onApplyFilters = viewModel::applyExploreFilters,
                     onOpenRecipe = viewModel::showRecipeDetails,
                     onToggleFavorite = viewModel::toggleFavorite,
-                    onCreateRecipe = { isCreatingRecipe = true },
+                    onCreateRecipe = viewModel::createCustomRecipe,
                     modifier = Modifier.padding(padding),
                 )
 
@@ -230,7 +211,7 @@ fun SpoonApp(
                         onOpenCalendar = { morePage = MorePage.CALENDAR },
                         onOpenHistory = { morePage = MorePage.HISTORY },
                         onOpenAccount = { morePage = MorePage.ACCOUNT },
-                        onCreateRecipe = { isCreatingRecipe = true },
+                        onCreateRecipe = viewModel::createCustomRecipe,
                         modifier = Modifier.padding(padding),
                     )
                     MorePage.CALENDAR -> CalendarScreen(
@@ -246,7 +227,7 @@ fun SpoonApp(
                     MorePage.HISTORY -> HistoryScreen(
                         entries = state.historyEntries,
                         onOpenRecipe = viewModel::showRecipeDetails,
-                        onToggleCompleted = viewModel::toggleCompleted,
+                        onRemoveEntry = viewModel::removeCookedHistoryEntry,
                         modifier = Modifier.padding(padding),
                     )
                     MorePage.ACCOUNT -> AccountScreen(

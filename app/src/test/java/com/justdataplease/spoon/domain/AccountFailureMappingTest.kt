@@ -51,6 +51,7 @@ class AccountFailureMappingTest {
 
         messages.forEach { message ->
             assertFalse(message.isBlank())
+            assertFalse(message.contains("email", ignoreCase = true))
             assertFalse(message.contains("secret-password"))
             assertFalse(message.contains("someone@example.com"))
         }

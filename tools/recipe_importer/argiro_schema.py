@@ -1021,7 +1021,13 @@ def parse_argiro_page(html_text: str) -> tuple[Mapping[str, Any], dict[str, Any]
             float(percent_match.group(1)) if percent_match else None
         ),
         "difficulty": plain_text(" ".join(parser.difficulty_parts)),
-        "tagLinks": list(dict.fromkeys(parser.tag_links)),
+        # Firestore permits arrays of maps but rejects an array directly inside
+        # another array. Preserve both values exactly while giving each
+        # publisher tag link an explicit, self-describing shape.
+        "tagLinks": [
+            {"href": href, "label": label}
+            for href, label in dict.fromkeys(parser.tag_links)
+        ],
         **_extract_scoped_details(html_text),
     }
     return recipes[0], metadata
@@ -1136,7 +1142,13 @@ def _taxonomy(metadata: Mapping[str, Any], recipe: Mapping[str, Any]):
     tags: list[str] = []
     category_slugs: set[str] = set()
     ingredient_paths: list[tuple[str, ...]] = []
-    for href, label in metadata.get("tagLinks", []):
+    for tag_link in metadata.get("tagLinks", []):
+        if not isinstance(tag_link, Mapping):
+            raise FullSchemaError("Argiro tagLinks must contain objects")
+        href = tag_link.get("href")
+        label = tag_link.get("label")
+        if not isinstance(href, str) or not isinstance(label, str):
+            raise FullSchemaError("Argiro tagLinks require string href and label")
         parsed = urlsplit(href)
         if (parsed.hostname or "").casefold().removeprefix("www.") != "argiro.gr":
             continue

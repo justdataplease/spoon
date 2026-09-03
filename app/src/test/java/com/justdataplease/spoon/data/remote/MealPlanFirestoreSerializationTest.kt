@@ -20,6 +20,7 @@ class MealPlanFirestoreSerializationTest {
                 "recipeTitle",
                 "filters",
                 "completed",
+                "completionEventId",
                 "updatedAtEpochMillis",
             ),
             document.keys,
@@ -52,6 +53,7 @@ class MealPlanFirestoreSerializationTest {
         assertEquals("recipe-42", document["recipeId"])
         assertEquals("Ψάρι φούρνου", document["recipeTitle"])
         assertTrue(document["completed"] as Boolean)
+        assertEquals("cooked_20260903_1777777777777", document["completionEventId"])
         assertEquals(1_777_777_777_777L, document["updatedAtEpochMillis"])
     }
 
@@ -68,6 +70,7 @@ class MealPlanFirestoreSerializationTest {
             maxPrepMinutes = 45,
         ),
         completed = true,
+        completionEventId = "cooked_20260903_1777777777777",
         updatedAtEpochMillis = 1_777_777_777_777L,
     )
 }

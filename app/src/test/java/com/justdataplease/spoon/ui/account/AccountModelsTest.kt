@@ -8,8 +8,13 @@ class AccountModelsTest {
     @Test
     fun `create validates email password and confirmation`() {
         assertEquals(
-            "Γράψε μια έγκυρη διεύθυνση email.",
-            validateAccountInput(AccountFormMode.CREATE, "λάθος", "123456", "123456"),
+            "Γράψε μια έγκυρη ηλεκτρονική διεύθυνση.",
+            validateAccountInput(
+                AccountFormMode.CREATE,
+                "λάθος",
+                "Dokimi-Password-8472!",
+                "Dokimi-Password-8472!",
+            ),
         )
         assertEquals(
             "Ο κωδικός πρέπει να έχει τουλάχιστον 6 χαρακτήρες.",
@@ -17,9 +22,21 @@ class AccountModelsTest {
         )
         assertEquals(
             "Οι δύο κωδικοί δεν ταιριάζουν.",
-            validateAccountInput(AccountFormMode.CREATE, "me@example.com", "123456", "654321"),
+            validateAccountInput(
+                AccountFormMode.CREATE,
+                "me@example.com",
+                "Dokimi-Password-8472!",
+                "Different-Test-Password-3916!",
+            ),
         )
-        assertNull(validateAccountInput(AccountFormMode.CREATE, "me@example.com", "123456", "123456"))
+        assertNull(
+            validateAccountInput(
+                AccountFormMode.CREATE,
+                "me@example.com",
+                "Dokimi-Password-8472!",
+                "Dokimi-Password-8472!",
+            ),
+        )
     }
 
     @Test

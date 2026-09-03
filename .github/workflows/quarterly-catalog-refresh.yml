@@ -4,9 +4,10 @@ name: Quarterly Greek recipe catalog refresh
   schedule:
     # One provider per day limits operational blast radius and makes billed
     # three-projection write volume attributable per publisher.
-    - cron: "0 3 1 1,4,7,10 *"
-    - cron: "0 3 2 1,4,7,10 *"
-    - cron: "0 3 3 1,4,7,10 *"
+    # Minute 17 avoids the top-of-hour scheduling congestion documented by GitHub.
+    - cron: "17 3 1 1,4,7,10 *"
+    - cron: "17 3 2 1,4,7,10 *"
+    - cron: "17 3 3 1,4,7,10 *"
   workflow_dispatch: {}
 
 concurrency:
@@ -148,19 +149,19 @@ jobs:
           test -n "$GCP_SERVICE_ACCOUNT" || { echo "Missing GCP_SERVICE_ACCOUNT environment variable" >&2; exit 1; }
 
       - name: Crawl the complete authorized Akis catalog
-        if: github.event.schedule == '0 3 1 1,4,7,10 *'
+        if: github.event.schedule == '17 3 1 1,4,7,10 *'
         run: python tools/recipe_importer/crawl_catalog.py --i-have-permission
 
       - name: Crawl the complete authorized Argiro catalog
-        if: github.event.schedule == '0 3 2 1,4,7,10 *'
+        if: github.event.schedule == '17 3 2 1,4,7,10 *'
         run: python tools/recipe_importer/crawl_argiro.py --i-have-argiro-permission
 
       - name: Crawl the complete authorized Gastronomos catalog
-        if: github.event.schedule == '0 3 3 1,4,7,10 *'
+        if: github.event.schedule == '17 3 3 1,4,7,10 *'
         run: python tools/recipe_importer/crawl_gastronomos.py --i-have-gastronomos-permission
 
       - name: Validate Akis catalog and completeness manifest
-        if: github.event.schedule == '0 3 1 1,4,7,10 *'
+        if: github.event.schedule == '17 3 1 1,4,7,10 *'
         run: >-
           python tools/recipe_importer/import_catalog.py
           tools/recipe_importer/output/akis-greek-full.jsonl
@@ -168,7 +169,7 @@ jobs:
           --i-have-permission
 
       - name: Validate Argiro catalog and completeness manifest
-        if: github.event.schedule == '0 3 2 1,4,7,10 *'
+        if: github.event.schedule == '17 3 2 1,4,7,10 *'
         run: >-
           python tools/recipe_importer/import_catalog.py
           tools/recipe_importer/output/argiro-greek-full.jsonl
@@ -177,7 +178,7 @@ jobs:
           --i-have-argiro-permission
 
       - name: Validate Gastronomos catalog and completeness manifest
-        if: github.event.schedule == '0 3 3 1,4,7,10 *'
+        if: github.event.schedule == '17 3 3 1,4,7,10 *'
         run: >-
           python tools/recipe_importer/import_catalog.py
           tools/recipe_importer/output/gastronomos-greek-full.jsonl
@@ -195,7 +196,7 @@ jobs:
           export_environment_variables: true
 
       - name: Import the validated Akis catalog
-        if: github.event.schedule == '0 3 1 1,4,7,10 *'
+        if: github.event.schedule == '17 3 1 1,4,7,10 *'
         run: >-
           python tools/recipe_importer/import_catalog.py
           tools/recipe_importer/output/akis-greek-full.jsonl
@@ -205,7 +206,7 @@ jobs:
           --project-id "$FIREBASE_PROJECT_ID"
 
       - name: Import the validated Argiro catalog
-        if: github.event.schedule == '0 3 2 1,4,7,10 *'
+        if: github.event.schedule == '17 3 2 1,4,7,10 *'
         run: >-
           python tools/recipe_importer/import_catalog.py
           tools/recipe_importer/output/argiro-greek-full.jsonl
@@ -216,7 +217,7 @@ jobs:
           --project-id "$FIREBASE_PROJECT_ID"
 
       - name: Import the validated Gastronomos catalog
-        if: github.event.schedule == '0 3 3 1,4,7,10 *'
+        if: github.event.schedule == '17 3 3 1,4,7,10 *'
         run: >-
           python tools/recipe_importer/import_catalog.py
           tools/recipe_importer/output/gastronomos-greek-full.jsonl

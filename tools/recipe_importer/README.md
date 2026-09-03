@@ -285,7 +285,7 @@ Firestore data access needed by this job.
 
 ## Quarterly GitHub Actions refresh
 
-`.github/workflows/quarterly-catalog-refresh.yml` runs at 03:00 UTC on January,
+`.github/workflows/quarterly-catalog-refresh.yml` runs at 03:17 UTC on January,
 April, July, and October 1 for Akis, day 2 for Argiro, and day 3 for Gastronomos.
 Splitting providers bounds each run's write burst and isolates failures; it does
 not make the imports cost-free. A full import with
@@ -338,7 +338,9 @@ datastore.entities.update
 There is deliberately no `datastore.entities.delete` permission. Bind this custom
 role only to `spoon-catalog-importer@spoontheplanner.iam.gserviceaccount.com` with
 a recurring IAM condition that permits requests only on January/April/July/October
-1, 2, and 3 from hour 03 through hour 07 UTC (03:00:00–07:59:59 UTC).
+1, 2, and 3 from 03:00:00 through 09:59:59 UTC. The job is scheduled for 03:17
+UTC and has a six-hour runtime limit; the remaining time is deliberate buffer for
+possible GitHub schedule-delivery delay.
 
 Important scope limitation: Firestore IAM cannot collection-scope this project
 binding. During those quarterly windows, the four permissions therefore apply to
@@ -357,7 +359,7 @@ PROJECT_ID="spoontheplanner"
 PROJECT_NUMBER="$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')"
 SERVICE_ACCOUNT="spoon-catalog-importer@spoontheplanner.iam.gserviceaccount.com"
 ROLE_NAME="projects/$PROJECT_ID/roles/spoonCatalogWriter"
-IAM_CONDITION="(request.time.getDate() == 1 || request.time.getDate() == 2 || request.time.getDate() == 3) && (request.time.getMonth() == 0 || request.time.getMonth() == 3 || request.time.getMonth() == 6 || request.time.getMonth() == 9) && request.time.getHours() >= 3 && request.time.getHours() <= 7"
+IAM_CONDITION="(request.time.getDate() == 1 || request.time.getDate() == 2 || request.time.getDate() == 3) && (request.time.getMonth() == 0 || request.time.getMonth() == 3 || request.time.getMonth() == 6 || request.time.getMonth() == 9) && request.time.getHours() >= 3 && request.time.getHours() < 10"
 
 gcloud services enable iamcredentials.googleapis.com sts.googleapis.com \
   firestore.googleapis.com --project="$PROJECT_ID"
@@ -381,7 +383,7 @@ gcloud iam service-accounts add-iam-policy-binding "$SERVICE_ACCOUNT" \
 gcloud projects add-iam-policy-binding "$PROJECT_ID" \
   --member="serviceAccount:$SERVICE_ACCOUNT" \
   --role="$ROLE_NAME" \
-  --condition="title=quarterly_catalog_window,description=UTC quarter-start days 1 through 3 hours 03 through 07,expression=$IAM_CONDITION"
+  --condition="title=quarterly_catalog_window,description=UTC quarter-start days 1 through 3 hours 03 through 09,expression=$IAM_CONDITION"
 gcloud iam workload-identity-pools providers describe spoon-repo \
   --project="$PROJECT_ID" --location=global --workload-identity-pool=github \
   --format='value(name)'

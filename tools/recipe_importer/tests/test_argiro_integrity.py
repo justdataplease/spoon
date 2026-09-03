@@ -163,7 +163,10 @@ def test_argiro_taxonomy_is_rederived_from_preserved_source_evidence():
 
     assert payload["jsonLd"]["recipeCategory"] == ["Όσπρια"]
     assert (
-        ["https://www.argiro.gr/recipe-category/ospria/", "Όσπρια"]
+        {
+            "href": "https://www.argiro.gr/recipe-category/ospria/",
+            "label": "Όσπρια",
+        }
         in payload["htmlMetadata"]["tagLinks"]
     )
 

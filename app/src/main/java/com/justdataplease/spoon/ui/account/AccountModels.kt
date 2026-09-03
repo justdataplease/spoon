@@ -17,7 +17,7 @@ internal fun validateAccountInput(
     password: String = "",
     confirmation: String = "",
 ): String? = when {
-    !email.trim().isPlausibleEmail() -> "Γράψε μια έγκυρη διεύθυνση email."
+    !email.trim().isPlausibleEmail() -> "Γράψε μια έγκυρη ηλεκτρονική διεύθυνση."
     mode == AccountFormMode.RESET -> null
     password.length < 6 -> "Ο κωδικός πρέπει να έχει τουλάχιστον 6 χαρακτήρες."
     mode == AccountFormMode.CREATE && password != confirmation -> "Οι δύο κωδικοί δεν ταιριάζουν."

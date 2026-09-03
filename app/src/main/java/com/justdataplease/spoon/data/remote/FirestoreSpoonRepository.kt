@@ -26,6 +26,7 @@ import com.justdataplease.spoon.data.model.ShoppingListItem
 import com.justdataplease.spoon.data.model.cookedMealEventId
 import com.justdataplease.spoon.data.model.isCustomRecipeId
 import com.justdataplease.spoon.data.model.mergeCookedHistory
+import com.justdataplease.spoon.data.model.newCookedMealEventId
 import com.justdataplease.spoon.data.model.requireValid
 import com.justdataplease.spoon.data.requireSafeRecipeDocumentId
 import com.justdataplease.spoon.domain.repository.BackendFailure
@@ -272,6 +273,7 @@ class FirestoreSpoonRepository(
         val currentUid = awaitUid()
         val planDocument = mealPlans(currentUid).document(date)
         val now = System.currentTimeMillis()
+        val newCompletionEventId = newCookedMealEventId()
         firestore.runTransaction { transaction ->
             val plan = transaction.get(planDocument)
             check(plan.exists()) { "Cannot complete a meal plan that does not exist: $date" }
@@ -279,17 +281,39 @@ class FirestoreSpoonRepository(
             val recipeTitle = checkNotNull(plan.getString(RECIPE_TITLE_FIELD))
             val wasCompleted = plan.getBoolean(COMPLETED_FIELD) == true
             if (wasCompleted != completed) {
+                val storedCompletionEventId = plan.getString(COMPLETION_EVENT_ID_FIELD).orEmpty()
                 val previousUpdatedAt = plan.getLong(UPDATED_AT_FIELD) ?: 0L
+                val historyDocumentsToDelete = when {
+                    completed -> emptyList()
+                    storedCompletionEventId.isNotBlank() -> listOf(
+                        cookedHistoryDocuments(currentUid).document(storedCompletionEventId),
+                    )
+                    else -> buildList {
+                        add(cookedHistoryDocuments(currentUid).document(date))
+                        if (previousUpdatedAt > 0L) {
+                            add(
+                                cookedHistoryDocuments(currentUid)
+                                    .document(cookedMealEventId(date, previousUpdatedAt)),
+                            )
+                        }
+                    }
+                }
+                // Firestore evaluates delete rules for a missing document with a null resource,
+                // so resolve both legacy candidates before issuing any transaction writes.
+                val existingHistoryDocuments = historyDocumentsToDelete.filter { document ->
+                    transaction.get(document).exists()
+                }
                 transaction.update(
                     planDocument,
                     mapOf(
                         COMPLETED_FIELD to completed,
+                        COMPLETION_EVENT_ID_FIELD to if (completed) newCompletionEventId else "",
                         UPDATED_AT_FIELD to now,
                     ),
                 )
                 if (completed) {
                     transaction.set(
-                        cookedHistoryDocuments(currentUid).document(cookedMealEventId(date, now)),
+                        cookedHistoryDocuments(currentUid).document(newCompletionEventId),
                         cookedMealDocument(
                             date = date,
                             recipeId = recipeId,
@@ -298,12 +322,11 @@ class FirestoreSpoonRepository(
                         ),
                     )
                 } else {
-                    transaction.delete(
-                        cookedHistoryDocuments(currentUid)
-                            .document(cookedMealEventId(date, previousUpdatedAt)),
-                    )
-                    // Compatibility with the original one-document-per-date history layout.
-                    transaction.delete(cookedHistoryDocuments(currentUid).document(date))
+                    // Covers the original date id and the later cooked_<date>_<timestamp> id,
+                    // before plans stored an explicit completion event id.
+                    existingHistoryDocuments.forEach { document ->
+                        transaction.delete(document)
+                    }
                 }
             }
         }.await()
@@ -324,6 +347,10 @@ class FirestoreSpoonRepository(
                 val plan = transaction.get(planDocument)
                 val eventIsCurrentPlanCompletion = plan.exists() &&
                     plan.getBoolean(COMPLETED_FIELD) == true &&
+                    (
+                        plan.getString(COMPLETION_EVENT_ID_FIELD).orEmpty() == safeHistoryId ||
+                            plan.getString(COMPLETION_EVENT_ID_FIELD).orEmpty().isBlank()
+                        ) &&
                     plan.getString(RECIPE_ID_FIELD) == recipeId &&
                     plan.getLong(UPDATED_AT_FIELD) == completedAt
                 if (eventIsCurrentPlanCompletion) {
@@ -331,11 +358,30 @@ class FirestoreSpoonRepository(
                         planDocument,
                         mapOf(
                             COMPLETED_FIELD to false,
+                            COMPLETION_EVENT_ID_FIELD to "",
                             UPDATED_AT_FIELD to now,
                         ),
                     )
                 }
                 transaction.delete(historyDocument)
+            } else if (runCatching { java.time.LocalDate.parse(safeHistoryId) }.isSuccess) {
+                // A very old completed plan may predate the dedicated history collection.
+                // Its projected history row uses the date id, so explicit undo still clears it.
+                val planDocument = mealPlans(currentUid).document(safeHistoryId)
+                val plan = transaction.get(planDocument)
+                if (plan.exists() &&
+                    plan.getBoolean(COMPLETED_FIELD) == true &&
+                    plan.getString(COMPLETION_EVENT_ID_FIELD).orEmpty().isBlank()
+                ) {
+                    transaction.update(
+                        planDocument,
+                        mapOf(
+                            COMPLETED_FIELD to false,
+                            COMPLETION_EVENT_ID_FIELD to "",
+                            UPDATED_AT_FIELD to now,
+                        ),
+                    )
+                }
             }
         }.await()
     }
@@ -696,6 +742,7 @@ class FirestoreSpoonRepository(
         private const val UPDATED_AT_FIELD = "updatedAtEpochMillis"
         private const val COMPLETED_AT_FIELD = "completedAtEpochMillis"
         private const val COMPLETED_FIELD = "completed"
+        private const val COMPLETION_EVENT_ID_FIELD = "completionEventId"
         private const val CHECKED_FIELD = "checked"
         private const val RECIPE_ID_FIELD = "recipeId"
         private const val RECIPE_TITLE_FIELD = "recipeTitle"
@@ -723,6 +770,7 @@ internal fun DayMealPlan.toFirestoreDocument(): Map<String, Any> = mapOf(
         "maxPrepMinutes" to filters.maxPrepMinutes,
     ),
     "completed" to completed,
+    "completionEventId" to completionEventId,
     "updatedAtEpochMillis" to updatedAtEpochMillis,
 )
 

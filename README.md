@@ -139,7 +139,7 @@ spoon/{uid}/favorites/{recipeId}         owner-only favorite marker
 spoon/{uid}/shoppingItems/{itemId}       owner-only shopping-list item
 spoon/{uid}/recipeNotes/{recipeId}       owner-only private recipe note
 spoon/{uid}/customRecipes/{recipeId}     owner-only manually authored recipe
-spoon/{uid}/cookedHistory/{yyyy-MM-dd}   owner-only cooked-meal history
+spoon/{uid}/cookedHistory/{eventId}      owner-only immutable cooked event (legacy date ids readable)
 ```
 
 Catalog writes are denied to mobile clients. Raw source payload reads are also
@@ -231,7 +231,7 @@ Two independent mechanisms handle freshness:
   every 90 days. It authenticates and reads only `spoon_catalog/status`; it never
   crawls the publisher or triggers an import.
 - [The quarterly GitHub Actions workflow](.github/workflows/quarterly-catalog-refresh.yml)
-  refreshes Akis at 03:00 UTC on January 1, April 1, July 1, and October 1, then
+  refreshes Akis at 03:17 UTC on January 1, April 1, July 1, and October 1, then
   Argiro at the same time on day 2 and Gastronomos on day 3. Splitting providers
   bounds each run's write burst and isolates provider failures; it does not make
   the imports cost-free. A full provider import with `N` catalog records
@@ -255,7 +255,10 @@ identity checks immutable GitHub repository ID `1355319945` and owner ID
 The dedicated importer service account receives only a custom
 `spoonCatalogWriter` role with Firestore entity create/get/list/update permissions
 and no delete permission. Its recurring IAM condition permits requests only on the
-first three days of January, April, July, and October from 03:00 through 07:59 UTC.
+first three days of January, April, July, and October from 03:00 through 09:59 UTC
+(`request.time.getHours() >= 3 && request.time.getHours() < 10`). Each scheduled
+job has a six-hour runtime limit; this window covers a 03:17 start plus buffer for
+possible GitHub schedule-delivery delay.
 Firestore IAM cannot scope this binding to particular collections, so during that
 window these permissions apply across every Firestore document in the project.
 Outside the window, the binding grants no catalog data access.

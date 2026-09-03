@@ -12,6 +12,7 @@ app/google-services.json
 firebase-admin*.json
 *firebase-adminsdk*.json
 *service-account*.json
+gha-creds-*.json
 *.jks
 *.keystore
 keystore.properties

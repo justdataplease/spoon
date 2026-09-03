@@ -83,11 +83,37 @@ _EXCLUDED_SCOPE_MARKERS = (
     "related", "recommend", "read-more", "more-recipes", "advert", "banner",
     "sidebar", "navigation", "breadcrumb", "social-share",
 )
+_MEDIA_SCOPE_TOKENS = frozenset({
+    "entry-content",
+    "post-content",
+    "article-content",
+    "syntagh-content",
+    "recipe-content",
+    "recipe__content",
+})
+_MEDIA_EXCLUDED_MARKERS = (
+    *_EXCLUDED_SCOPE_MARKERS,
+    "future", "latest", "popular", "suggest",
+)
+_EMBED_VIDEO_HOSTS = frozenset({
+    "youtube.com",
+    "m.youtube.com",
+    "youtu.be",
+    "youtube-nocookie.com",
+    "vimeo.com",
+    "player.vimeo.com",
+})
+_DIRECT_VIDEO_SUFFIXES = (".mp4", ".webm", ".m3u8")
 _INGREDIENT_GROUP_MARKERS = (
     "ingredient-section", "ingredients-section", "ingredient-group",
     "ingredients-group", "recipe-ingredients__group", "recipe_ingredients_group",
     "recipe-ingredients", "ingredients", "ylika",
 )
+_AUDITED_LEGACY_ENTRY_PROFILE_IDS = frozenset({"90262"})
+_LEGACY_INGREDIENT_HEADING = "υλικα"
+_LEGACY_METHOD_HEADING = "διαδικασια"
+_LEGACY_EXPECTED_INGREDIENT_COUNT = 4
+_LEGACY_EXPECTED_METHOD_STEP_COUNTS = (5, 2, 3)
 _FACET_FAMILIES = {
     "vasiko-yliko": "ingredient",
     "eidos-geumatos": "meal_type",
@@ -189,6 +215,10 @@ class _Node:
     parent: "_Node | None" = None
     children: list["_Node"] = field(default_factory=list)
     text: list[str] = field(default_factory=list)
+    # ``text`` and ``children`` are retained for byte-compatible existing
+    # extraction. ``content`` alone preserves the position of inline text
+    # around child elements for the audited legacy entry-content parser.
+    content: list[object] = field(default_factory=list)
 
 
 class _DocumentParser(HTMLParser):
@@ -199,12 +229,14 @@ class _DocumentParser(HTMLParser):
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         name = tag.casefold()
+        parent = self.current
         node = _Node(
             name,
             {key.casefold(): value or "" for key, value in attrs},
-            self.current,
+            parent,
         )
-        self.current.children.append(node)
+        parent.children.append(node)
+        parent.content.append(node)
         if name not in _VOID_ELEMENTS:
             self.current = node
 
@@ -223,6 +255,7 @@ class _DocumentParser(HTMLParser):
 
     def handle_data(self, data: str) -> None:
         self.current.text.append(data)
+        self.current.content.append(data)
 
 
 def _descendants(node: _Node) -> Iterable[_Node]:
@@ -252,6 +285,26 @@ def _raw_node_text(node: _Node) -> str:
     return "".join(parts)
 
 
+def _ordered_node_text(node: _Node) -> str:
+    """Return visible text in source order without changing legacy callers."""
+    parts: list[str] = []
+
+    def visit(current: _Node) -> None:
+        if current.tag in {"script", "style", "noscript"}:
+            return
+        if current.tag == "br":
+            parts.append("\n")
+            return
+        for item in current.content:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, _Node):
+                visit(item)
+
+    visit(node)
+    return plain_text("".join(parts))
+
+
 def _tokens(node: _Node) -> set[str]:
     return {
         item.casefold()
@@ -270,12 +323,15 @@ def _is_recipe_scoped(node: _Node) -> bool:
     cursor: _Node | None = node
     scoped = False
     while cursor is not None:
-        if cursor.tag in {"nav", "footer"} or _has_marker(
-            cursor,
-            _EXCLUDED_SCOPE_MARKERS,
+        if cursor.tag in {"nav", "footer"} or (
+            cursor.tag != "body"
+            and _has_marker(cursor, _EXCLUDED_SCOPE_MARKERS)
         ):
             return False
-        if cursor.tag == "article" or _has_marker(cursor, _SCOPED_CLASS_MARKERS):
+        if cursor.tag != "body" and (
+            cursor.tag == "article"
+            or _has_marker(cursor, _SCOPED_CLASS_MARKERS)
+        ):
             scoped = True
         cursor = cursor.parent
     return scoped
@@ -455,28 +511,70 @@ def _canonical_link(root: _Node) -> str:
     return ""
 
 
+def _is_recipe_media_scoped(node: _Node) -> bool:
+    cursor: _Node | None = node
+    scoped = False
+    while cursor is not None:
+        if cursor.tag in {"header", "nav", "footer"} or (
+            cursor.tag != "body"
+            and _has_marker(cursor, _MEDIA_EXCLUDED_MARKERS)
+        ):
+            return False
+        if _tokens(cursor) & _MEDIA_SCOPE_TOKENS:
+            scoped = True
+        cursor = cursor.parent
+    return scoped
+
+
+def _approved_scoped_video(node: _Node, value: str) -> bool:
+    parts = urlsplit(value)
+    host = (parts.hostname or "").casefold().removeprefix("www.")
+    if node.tag == "iframe":
+        return host in _EMBED_VIDEO_HOSTS
+    return host in _EMBED_VIDEO_HOSTS or parts.path.casefold().endswith(
+        _DIRECT_VIDEO_SUFFIXES
+    )
+
+
 def _scoped_media(root: _Node) -> tuple[list[str], list[str]]:
     images: list[str] = []
     videos: list[str] = []
     for node in _descendants(root):
-        if not _is_recipe_scoped(node):
+        if not _is_recipe_media_scoped(node):
             continue
         if node.tag == "img":
-            for key in ("src", "data-src", "data-lazy-src"):
+            value = ""
+            for key in ("data-src", "data-lazy-src", "src"):
                 value = _safe_https_url(node.attrs.get(key))
-                if value and value not in images:
-                    images.append(value)
-            srcset = node.attrs.get("srcset") or node.attrs.get("data-srcset") or ""
-            for candidate in srcset.split(","):
-                tokens = candidate.strip().split(maxsplit=1)
-                value = _safe_https_url(tokens[0]) if tokens else ""
-                if value and value not in images:
-                    images.append(value)
+                if value:
+                    break
+            if not value:
+                srcset = (
+                    node.attrs.get("data-srcset")
+                    or node.attrs.get("srcset")
+                    or ""
+                )
+                candidates = [
+                    _safe_https_url(tokens[0])
+                    for candidate in srcset.split(",")
+                    if (tokens := candidate.strip().split(maxsplit=1))
+                ]
+                value = next(
+                    (candidate for candidate in reversed(candidates) if candidate),
+                    "",
+                )
+            if value and value not in images:
+                images.append(value)
         if node.tag in {"iframe", "video", "source"}:
             for key in ("src", "data-src"):
                 value = _safe_https_url(node.attrs.get(key))
-                if value and value not in videos:
+                if (
+                    value
+                    and _approved_scoped_video(node, value)
+                    and value not in videos
+                ):
                     videos.append(value)
+                    break
     return images, videos
 
 
@@ -554,6 +652,142 @@ def _ancestors(node: _Node, *, stop: _Node | None = None) -> Iterable[_Node]:
     while cursor is not None and cursor is not stop:
         yield cursor
         cursor = cursor.parent
+
+
+def _legacy_ingredient(text: str) -> dict[str, str]:
+    return {
+        "title": text,
+        "unit": "",
+        "quantity": "",
+        "info": "",
+        "internalLink": "",
+        "externalLink": "",
+        "ukUnit": "",
+        "ukQuantity": "",
+        "usUnit": "",
+        "usQuantity": "",
+    }
+
+
+def _legacy_entry_blocks(root: _Node) -> list[tuple[_Node, str]]:
+    block_tags = {"h2", "h3", "h4", "h5", "h6", "li", "p"}
+    result: list[tuple[_Node, str]] = []
+    for node in _descendants(root):
+        if node.tag not in block_tags or not _is_recipe_scoped(node):
+            continue
+        # A paragraph inside a list item is part of that item, not another
+        # method step. The same rule prevents malformed nested paragraphs from
+        # being emitted twice.
+        if any(
+            ancestor.tag in {"li", "p"}
+            for ancestor in _ancestors(node, stop=root)
+        ):
+            continue
+        text = _ordered_node_text(node)
+        if text:
+            result.append((node, text))
+    return result
+
+
+def _extract_audited_legacy_entry_content(
+    root: _Node,
+    *,
+    provider_id: str,
+) -> dict[str, Any]:
+    """Extract the one audited pre-schema recipe; never guess on other IDs."""
+    if provider_id not in _AUDITED_LEGACY_ENTRY_PROFILE_IDS:
+        return {}
+
+    entry_roots = [
+        node for node in _descendants(root)
+        if "entry-content" in _tokens(node) and _is_recipe_scoped(node)
+    ]
+    entry_roots = [
+        node for node in entry_roots
+        if not any("entry-content" in _tokens(child) for child in _descendants(node))
+    ]
+    if len(entry_roots) != 1:
+        raise FullSchemaError(
+            f"Gastronomos audited legacy entry profile {provider_id} changed entry-content roots"
+        )
+
+    blocks = _legacy_entry_blocks(entry_roots[0])
+    ingredient_markers = [
+        index for index, (node, text) in enumerate(blocks)
+        if node.tag in {"h2", "h3", "h4", "h5", "h6"}
+        and _normalized_label(text) == _LEGACY_INGREDIENT_HEADING
+    ]
+    method_markers = [
+        index for index, (node, text) in enumerate(blocks)
+        if node.tag in {"h2", "h3", "h4", "h5", "h6"}
+        and _normalized_label(text) == _LEGACY_METHOD_HEADING
+    ]
+    if (
+        len(ingredient_markers) != 1
+        or len(method_markers) != 1
+        or ingredient_markers[0] >= method_markers[0]
+    ):
+        raise FullSchemaError(
+            f"Gastronomos audited legacy entry profile {provider_id} changed section markers"
+        )
+
+    ingredient_index = ingredient_markers[0]
+    method_index = method_markers[0]
+    ingredient_paragraphs = [
+        text for node, text in blocks[ingredient_index + 1:method_index]
+        if node.tag == "p" and text.lstrip().startswith("•")
+    ]
+    if len(ingredient_paragraphs) != 1:
+        raise FullSchemaError(
+            f"Gastronomos audited legacy entry profile {provider_id} changed ingredient blocks"
+        )
+    ingredient_texts = [
+        " ".join(plain_text(part).split())
+        for part in ingredient_paragraphs[0].split("•")[1:]
+        if plain_text(part)
+    ]
+    if (
+        len(ingredient_texts) != _LEGACY_EXPECTED_INGREDIENT_COUNT
+        or any(not any(character.isalpha() for character in item) for item in ingredient_texts)
+    ):
+        raise FullSchemaError(
+            f"Gastronomos audited legacy entry profile {provider_id} changed ingredient count"
+        )
+
+    heading_tags = {"h2", "h3", "h4", "h5", "h6"}
+    method_sections: list[dict[str, Any]] = []
+    section_title = blocks[method_index][1]
+    section_steps: list[str] = []
+
+    def flush_method_section() -> None:
+        nonlocal section_steps
+        if section_steps:
+            method_sections.append({"title": section_title, "steps": section_steps})
+        section_steps = []
+
+    for node, text in blocks[method_index + 1:]:
+        if node.tag in heading_tags:
+            flush_method_section()
+            section_title = text
+        elif node.tag in {"li", "p"}:
+            section_steps.append(text)
+    flush_method_section()
+    if tuple(len(section["steps"]) for section in method_sections) != (
+        _LEGACY_EXPECTED_METHOD_STEP_COUNTS
+    ):
+        raise FullSchemaError(
+            f"Gastronomos audited legacy entry profile {provider_id} changed method shape"
+        )
+
+    ingredient_title = blocks[ingredient_index][1]
+    return {
+        "legacyEntryProfile": "entry-content-90262-v1",
+        "legacyIngredientSections": [{
+            "title": ingredient_title,
+            "ingredients": [_legacy_ingredient(item) for item in ingredient_texts],
+        }],
+        "legacyMethodSections": method_sections,
+    }
 
 
 def _labelled_values(root: _Node) -> list[dict[str, str]]:
@@ -655,6 +889,12 @@ def parse_gastronomos_page(
         "equipment": _scoped_text_collection(parser.root, ("equipment", "exoplismos")),
         "invalidJsonLdBlockCount": invalid_jsonld_count,
     }
+    legacy_details = _extract_audited_legacy_entry_content(
+        parser.root,
+        provider_id=provider_id,
+    )
+    if legacy_details:
+        metadata.update(legacy_details)
     return recipe, metadata
 
 
@@ -783,6 +1023,293 @@ def _category_matches(values: Iterable[object]) -> list[str]:
     ]
 
 
+def _exact_label_keys(values: Iterable[str]) -> frozenset[str]:
+    return frozenset(_normalized_label(value) for value in values)
+
+
+_SCHEMA_MEAL_TYPE_KEY_ALLOWLIST = _exact_label_keys((
+    "Κυρίως Γεύμα",
+    "Γλυκό",
+    "Ορεκτικό / Μεζές",
+    "Σαλάτα",
+    "Συνοδευτικά",
+    "Πρωινό",
+    "Σνακ",
+    "Κοκτέιλ",
+    "Ροφήματα",
+))
+_KEYWORD_FACET_KEY_ALLOWLISTS = {
+    "cuisine": _exact_label_keys((
+        "Ιταλική Κουζίνα",
+        "Μικρασιατική Κουζίνα",
+        "Πολίτικη κουζίνα",
+        "Σμυρνέικη Κουζίνα",
+    )),
+    "diet": _exact_label_keys((
+        "Light",
+        "Vegan",
+        "Νηστίσιμα",
+        "Νηστεία",
+        "Χορτοφαγικά",
+        "Χωρίς γαλακτοκομικά",
+        "Χωρίς γλουτένη",
+        "Χωρίς ζάχαρη",
+    )),
+    "meal_type": _exact_label_keys(("Brunch",)),
+    "occasion": _exact_label_keys((
+        "25η Μαρτίου",
+        "Halloween",
+        "Απόκριες",
+        "Καθαρά Δευτέρα",
+        "Πάσχα",
+        "Σαρακοστή",
+        "Τσικνοπέμπτη",
+        "Χριστούγεννα",
+    )),
+    "method": _exact_label_keys(("BBQ",)),
+    # Filled only from the independently audited, exact publisher vocabulary.
+    # An unknown future keyword remains a visible tag instead of being guessed
+    # into an ingredient filter.
+    "ingredient": _exact_label_keys((
+        "Αβοκάντο",
+        "Αγγούρι",
+        "Αγκινάρες",
+        "Αγριογούρουνο",
+        "Αθερίνα / Μαρίδα",
+        "Ακτινίδιο",
+        "Αλεύρι (ζύμες)",
+        "Αλκοόλ",
+        "Αλλαντικά",
+        "Αμύγδαλα",
+        "Ανάμεικτος κιμάς",
+        "Ανανάς",
+        "Αντίδια",
+        "Απάκι",
+        "Αρακάς",
+        "Αρνί",
+        "Αρνίσιος κιμάς",
+        "Αστακός",
+        "Αυγά",
+        "Αυγοτάραχο",
+        "Αχλάδι",
+        "Βατόμουρα",
+        "Βερίκοκα",
+        "Βλίτα",
+        "Βούτυρο",
+        "Βραστόψαρα",
+        "Βρώμη",
+        "Βότκα",
+        "Βύσσινο",
+        "Γάλα",
+        "Γάλα Αμυγδάλου",
+        "Γάλα Καρύδας",
+        "Γάλα Ρυζιού",
+        "Γαλακτοκομικά",
+        "Γαλοπούλα",
+        "Γαρίδες",
+        "Γαύρος",
+        "Γιαούρτι",
+        "Γκρέιπφρουτ",
+        "Γλυκαντικά",
+        "Γλυκοπατάτα",
+        "Γλώσσα",
+        "Γόπες",
+        "Δαμάσκηνα",
+        "Δημητριακά",
+        "Διάφορα χόρτα εποχής",
+        "Ελάφι",
+        "Ελιά",
+        "Ζάχαρη",
+        "Ζυμαρικά",
+        "Θαλασσινά",
+        "Κάσιους",
+        "Κάστανα",
+        "Κέφαλος",
+        "Κίτρο",
+        "Καβούρι",
+        "Κακάο",
+        "Καλαμάρι / Θράψαλο",
+        "Καπόνι",
+        "Καραβίδες",
+        "Καρπούζι",
+        "Καρότα",
+        "Καρύδα",
+        "Καρύδια",
+        "Κατσίκι",
+        "Κεράσι",
+        "Κιμάς",
+        "Κιμάς γαλοπούλας",
+        "Κιμάς κοτόπουλου",
+        "Κινόα",
+        "Κοκκινόψαρο",
+        "Κολιός",
+        "Κολοκυθάκια",
+        "Κολοκύθα",
+        "Κονιάκ",
+        "Κοτόπουλο",
+        "Κουκιά",
+        "Κουκουνάρι",
+        "Κουνέλι",
+        "Κουνουπίδι",
+        "Κους κους",
+        "Κουτσομούρες",
+        "Κράνμπερι",
+        "Κρέας",
+        "Κρέμα Γάλακτος",
+        "Κρασί",
+        "Κρεμμύδι",
+        "Κριθαράκι",
+        "Κυδώνι",
+        "Κυδώνια / Όστρακα",
+        "Κόκορας",
+        "Κόλιανδρος",
+        "Λάιμ",
+        "Λάχανο",
+        "Λαβράκι",
+        "Λακέρδα",
+        "Λαχανικά",
+        "Λεμόνι",
+        "Λικέρ",
+        "Λουκάνικα",
+        "Μάνγκο",
+        "Μάραθος",
+        "Μέλι",
+        "Μήλο",
+        "Μαγιάτικο",
+        "Μανιτάρια",
+        "Μανταρίνι",
+        "Μαρούλι",
+        "Μαϊντανός",
+        "Μελιτζάνες",
+        "Μοσχάρι",
+        "Μοσχαρίσιος κιμάς",
+        "Μούσμουλα",
+        "Μπάμιες",
+        "Μπέικον",
+        "Μπακαλιάρος",
+        "Μπανάνα",
+        "Μπαρμπούνια",
+        "Μπρόκολο",
+        "Μυρώνια",
+        "Μύδια",
+        "Μύρτιλο",
+        "Νεκταρίνια",
+        "Νεράντζι",
+        "Νουντλς",
+        "Ντομάτα",
+        "Ξερά βερίκοκα",
+        "Ξερά δαμάσκηνα",
+        "Ξερά σύκα",
+        "Ξερά φρούτα",
+        "Ξηροί καρποί",
+        "Ουίσκι",
+        "Ούζο",
+        "Πάπια",
+        "Πέρκα",
+        "Πέστροφα",
+        "Παλαμίδα",
+        "Παντζάρια",
+        "Πατάτες",
+        "Πεπόνι",
+        "Περγαμόντο",
+        "Πεσκανδρίτσα",
+        "Πιπεριές",
+        "Πλιγούρι",
+        "Πορτοκάλι",
+        "Πουλερικά",
+        "Πράσα",
+        "Προβατίνα",
+        "Ρέγκα",
+        "Ραδίκια",
+        "Ρεβύθια",
+        "Ροδάκινο",
+        "Ροφός",
+        "Ρούμι",
+        "Ρόδι",
+        "Ρύζι",
+        "Σέσκουλα",
+        "Σαγκουίνι",
+        "Σαλάχι",
+        "Σαρδέλα",
+        "Σαφρίδια",
+        "Σελινόριζα",
+        "Σιμιγδάλι",
+        "Σιρόπι αγαύης",
+        "Σκορπίνα",
+        "Σκόρδο",
+        "Σμέουρα",
+        "Σοκολάτα",
+        "Σολομός",
+        "Σουπιές",
+        "Σουσάμι",
+        "Σπανάκι",
+        "Σπαράγγια",
+        "Σταφίδες",
+        "Σταφύλι",
+        "Συκώτι",
+        "Συναγρίδα",
+        "Σύκο",
+        "Ταραμάς",
+        "Ταχίνι",
+        "Τεκίλα",
+        "Τζιν",
+        "Τραχανάς",
+        "Τροπικά φρούτα",
+        "Τσίπουρο + Ρακή",
+        "Τσιπούρα",
+        "Τυρί",
+        "Τόνος",
+        "Φάβα",
+        "Φέτα",
+        "Φακές",
+        "Φασιανός",
+        "Φασολάκια",
+        "Φασόλια",
+        "Φινόκιο",
+        "Φουντούκια",
+        "Φράουλα",
+        "Φρούτα",
+        "Φρούτο του πάθους",
+        "Φυστίκια",
+        "Φυτικά γάλατα",
+        "Χάνος",
+        "Χοιρινό",
+        "Χοιρινός κιμάς",
+        "Χουρμάδες",
+        "Χριστόψαρο",
+        "Χταπόδι",
+        "Χυλοπίτες",
+        "Χόρτα / Μυρωδικά",
+        "Ψάρι",
+        "Όσπρια",
+    )),
+}
+_AUDITED_KEYWORD_TAG_ONLY_KEYS = _exact_label_keys((
+    "Leftovers",
+    "Sponsored",
+    "Άγιο Όρος",
+    "Αγία Αικατερίνη",
+    "Βασιλόπιτα κέικ",
+    "Γλυκό Κουταλιού",
+    "Καν' το μόνος σου",
+    "Κεράσματα",
+    "Κουραμπιέδες",
+    "Μελομακάρονα",
+    "Μοναχός Επιφάνιος",
+    "Ρώμη",
+    "Τούρτες",
+    "τσιξ",
+    "Χαλβάς",
+    "Όρος Σινά",
+))
+_AUDITED_FACET_NAVIGATION_LABEL_KEYS = _exact_label_keys((
+    "Άρθρα και Συνταγές για Κοκτέιλ",
+    "Άρθρα και Συνταγές για Κυρίως Γεύμα",
+    "Άρθρα και Συνταγές με Αλεύρι (ζύμες)",
+    "Άρθρα και Συνταγές με Ζυμαρικά",
+))
+
+
 def _taxonomy(metadata: Mapping[str, Any], recipe: Mapping[str, Any]) -> tuple[list[str], dict[str, list[str]], list[str]]:
     labels: dict[str, list[str]] = {facet: [] for facet in FACET_KEYS}
     tags: list[str] = []
@@ -795,6 +1322,11 @@ def _taxonomy(metadata: Mapping[str, Any], recipe: Mapping[str, Any]) -> tuple[l
         family = str(raw.get("family") or "").casefold()
         slug = str(raw.get("slug") or "").casefold()
         if not label:
+            continue
+        # The two audited legacy pages expose four navigation links beside
+        # their actual facet links.  Their slugs look authoritative, but the
+        # link labels describe archive navigation rather than this recipe.
+        if _normalized_label(label) in _AUDITED_FACET_NAVIGATION_LABEL_KEYS:
             continue
         tags.append(label)
         facet = _FACET_FAMILIES.get(family)
@@ -810,9 +1342,21 @@ def _taxonomy(metadata: Mapping[str, Any], recipe: Mapping[str, Any]) -> tuple[l
             authoritative_values.extend((label, slug))
 
     schema_categories = _strings(recipe.get("recipeCategory"))
+    # The publisher keywords field is its own exact tag list. It is valid
+    # taxonomy evidence, unlike recipe titles, descriptions, or ingredient
+    # prose, which can mention a food without defining the recipe category.
+    keyword_values = _split_keywords(recipe.get("keywords"))
     authoritative_values.extend(schema_categories)
     tags.extend(schema_categories)
-    tags.extend(_split_keywords(recipe.get("keywords")))
+    tags.extend(keyword_values)
+    for value in schema_categories:
+        if _normalized_label(value) in _SCHEMA_MEAL_TYPE_KEY_ALLOWLIST:
+            labels["meal_type"].append(value)
+    for value in keyword_values:
+        key = _normalized_label(value)
+        for facet, allowlist in _KEYWORD_FACET_KEY_ALLOWLISTS.items():
+            if key in allowlist:
+                labels[facet].append(value)
     for value in _strings(recipe.get("recipeCuisine")):
         labels["cuisine"].append(value)
         tags.append(value)
@@ -820,13 +1364,28 @@ def _taxonomy(metadata: Mapping[str, Any], recipe: Mapping[str, Any]) -> tuple[l
         key = urlsplit(raw).path.rstrip("/").rsplit("/", 1)[-1].casefold()
         labels["diet"].append(_SCHEMA_DIETS.get(key, plain_text(raw)))
 
-    authoritative_normalized = {_normalized_label(value) for value in authoritative_values}
+    authoritative_normalized = {
+        _normalized_label(value) for value in authoritative_values
+    }
+    keyword_normalized = {
+        _normalized_label(value) for value in keyword_values
+    }
     dessert_values = {_normalized_label(value) for value in _CATEGORY_LABEL_MAP["dessert"]}
     other_values = {_normalized_label(value) for value in _TERMINAL_OTHER}
     street_values = {_normalized_label(value) for value in _STREET_FORMATS}
     explicit_keys = _category_matches(authoritative_values)
     ingredient_keys = _category_matches(ingredient_values)
+    keyword_keys = _category_matches(keyword_values)
+    authoritative_terminal = bool(
+        authoritative_normalized
+        & (dessert_values | other_values | street_values)
+    )
 
+    # Structured recipe categories and page facets always outrank keywords.
+    # This prevents a secondary keyword such as "Γλυκά" from turning an
+    # authoritative όσπρια recipe into dessert. Publisher keywords are used
+    # only when neither structured recipe nor ingredient-facet evidence can
+    # classify the record.
     if authoritative_normalized & dessert_values:
         primary = "dessert"
     elif authoritative_normalized & other_values:
@@ -837,10 +1396,23 @@ def _taxonomy(metadata: Mapping[str, Any], recipe: Mapping[str, Any]) -> tuple[l
         primary = explicit_keys[0]
     elif ingredient_keys:
         primary = ingredient_keys[0]
+    elif keyword_normalized & dessert_values:
+        primary = "dessert"
+    elif keyword_normalized & other_values:
+        primary = "other"
+    elif keyword_normalized & street_values:
+        primary = "street_food"
+    elif keyword_keys:
+        primary = keyword_keys[0]
     else:
         primary = "other"
     keys = [primary]
-    for group in (explicit_keys, ingredient_keys):
+    secondary_groups = (
+        (explicit_keys, ingredient_keys)
+        if authoritative_terminal or explicit_keys or ingredient_keys
+        else (keyword_keys,)
+    )
+    for group in secondary_groups:
         for key in group:
             if key != primary and key not in keys:
                 keys.append(key)
@@ -873,6 +1445,28 @@ def _has_substantive_greek(values: Sequence[str]) -> bool:
     greek = len(re.findall(r"[\u0370-\u03ff\u1f00-\u1fff]", text))
     latin = len(re.findall(r"[A-Za-z]", text))
     return greek >= 3 and greek >= latin
+
+
+def _has_greek_recipe_evidence(
+    *,
+    title: str,
+    description: str,
+    ingredients: Sequence[str],
+    steps: Sequence[str],
+) -> bool:
+    # English brand names can legitimately dominate an ingredient list. Keep
+    # the aggregate guard, but also accept independently Greek title + method
+    # evidence. An English recipe with a misleading site-level ``lang=el``
+    # still fails because both recipe-scoped signals must be Greek.
+    return _has_substantive_greek([
+        title,
+        description,
+        *ingredients,
+        *steps,
+    ]) or (
+        _has_substantive_greek([title])
+        and any(_has_substantive_greek([step]) for step in steps)
+    )
 
 
 def _time_values(metadata: Mapping[str, Any]) -> dict[str, int]:
@@ -970,8 +1564,9 @@ def _dedupe_media(values: Iterable[str], *, videos: bool = False) -> list[str]:
     return result
 
 
-def normalize_gastronomos_page(
-    html_text: str,
+def normalize_gastronomos_payload(
+    recipe: Mapping[str, Any],
+    metadata: Mapping[str, Any],
     *,
     source_url: str,
     sitemap_last_modified: str = "",
@@ -982,7 +1577,12 @@ def normalize_gastronomos_page(
         raise FullSchemaError("Gastronomos source URL is not a strict recipe URL")
     provider_id = match.group("id")
     canonical_url = canonical_recipe_url(GASTRONOMOS, source_url, provider_id)
-    recipe, metadata = parse_gastronomos_page(html_text, source_url=canonical_url)
+    if not isinstance(recipe, Mapping) or not _is_recipe(recipe):
+        raise FullSchemaError("Gastronomos sourcePayload jsonLd is not a Recipe")
+    if not isinstance(metadata, Mapping):
+        raise FullSchemaError("Gastronomos sourcePayload htmlMetadata is not an object")
+    if recipe.get("url") and _canonical_candidate(recipe.get("url"), provider_id) != canonical_url:
+        raise FullSchemaError("Gastronomos JSON-LD Recipe URL does not match the source URL")
     declared_canonical = plain_text(metadata.get("canonicalUrl"))
     if declared_canonical:
         try:
@@ -994,21 +1594,44 @@ def normalize_gastronomos_page(
     title = plain_text(recipe.get("name") or recipe.get("headline"))
     if not title:
         raise FullSchemaError("Gastronomos JSON-LD Recipe has no name")
-    ingredients = _strings(recipe.get("recipeIngredient"))
+    jsonld_ingredients = _strings(recipe.get("recipeIngredient"))
+    legacy_ingredient_sections = metadata.get("legacyIngredientSections")
+    if not isinstance(legacy_ingredient_sections, list):
+        legacy_ingredient_sections = []
+    ingredients = jsonld_ingredients or _ingredient_texts(legacy_ingredient_sections)
     method_sections, instruction_tips = _instruction_sections(recipe.get("recipeInstructions"))
     all_steps = [step for section in method_sections for step in section.get("steps", [])]
+    if not all_steps:
+        raw_legacy_methods = metadata.get("legacyMethodSections")
+        if isinstance(raw_legacy_methods, list):
+            method_sections = [
+                {
+                    "title": plain_text(section.get("title")),
+                    "steps": [
+                        text for step in section.get("steps", [])
+                        if (text := plain_text(step))
+                    ],
+                }
+                for section in raw_legacy_methods
+                if isinstance(section, Mapping)
+                and isinstance(section.get("steps"), list)
+            ]
+            method_sections = [section for section in method_sections if section["steps"]]
+            all_steps = [
+                step for section in method_sections for step in section["steps"]
+            ]
     language = plain_text(metadata.get("documentLanguage"))
     if language and not _is_greek_language(language):
         raise GastronomosLanguageError(provider_id, f"HTML lang={language!r}")
     structured_languages = _strings(recipe.get("inLanguage"))
     if structured_languages and any(not _is_greek_language(value) for value in structured_languages):
         raise GastronomosLanguageError(provider_id, "JSON-LD inLanguage is not Greek")
-    if not _has_substantive_greek([
-        title,
-        plain_text(recipe.get("description")),
-        *ingredients,
-        *all_steps,
-    ]):
+    if not _has_greek_recipe_evidence(
+        title=title,
+        description=plain_text(recipe.get("description")),
+        ingredients=ingredients,
+        steps=all_steps,
+    ):
         raise GastronomosLanguageError(provider_id, "recipe content is not substantively Greek")
     if not ingredients:
         raise FullSchemaError("Gastronomos JSON-LD Recipe has no ingredients")
@@ -1016,7 +1639,13 @@ def normalize_gastronomos_page(
         raise FullSchemaError("Gastronomos JSON-LD Recipe has no instructions")
 
     jsonld_sections = _jsonld_ingredient_sections(recipe)
-    ingredient_sections = _aligned_html_ingredients(metadata.get("ingredientSections"), jsonld_sections)
+    if jsonld_ingredients:
+        rendered_sections = metadata.get("ingredientSections")
+        if not rendered_sections and legacy_ingredient_sections:
+            rendered_sections = legacy_ingredient_sections
+        ingredient_sections = _aligned_html_ingredients(rendered_sections, jsonld_sections)
+    else:
+        ingredient_sections = legacy_ingredient_sections
     category_keys, facet_labels, tags = _taxonomy(metadata, recipe)
     category = canonical_category(category_keys)
     times = _time_values(metadata)
@@ -1127,3 +1756,25 @@ def normalize_gastronomos_page(
     }
     ensure_full_record(record)
     return record
+
+
+def normalize_gastronomos_page(
+    html_text: str,
+    *,
+    source_url: str,
+    sitemap_last_modified: str = "",
+    active: bool = True,
+) -> dict[str, Any]:
+    match = GASTRONOMOS.recipe_path.fullmatch(urlsplit(source_url).path)
+    if not match:
+        raise FullSchemaError("Gastronomos source URL is not a strict recipe URL")
+    provider_id = match.group("id")
+    canonical_url = canonical_recipe_url(GASTRONOMOS, source_url, provider_id)
+    recipe, metadata = parse_gastronomos_page(html_text, source_url=canonical_url)
+    return normalize_gastronomos_payload(
+        recipe,
+        metadata,
+        source_url=canonical_url,
+        sitemap_last_modified=sitemap_last_modified,
+        active=active,
+    )

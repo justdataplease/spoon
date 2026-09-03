@@ -2,6 +2,7 @@ package com.justdataplease.spoon.data.model
 
 import com.google.firebase.firestore.DocumentId
 import com.google.firebase.firestore.IgnoreExtraProperties
+import java.util.UUID
 import kotlinx.serialization.Serializable
 
 /** Immutable snapshot of one explicit "cooked" action. */
@@ -18,6 +19,9 @@ data class CookedMeal(
 /** Stable id for a completion event; unlike the plan id, more than one event may share a date. */
 internal fun cookedMealEventId(date: String, completedAtEpochMillis: Long): String =
     "cooked_${date.replace("-", "")}_$completedAtEpochMillis"
+
+internal fun newCookedMealEventId(): String =
+    "cooked_${UUID.randomUUID().toString().replace("-", "")}"
 
 /**
  * Preserves every stored event and only synthesizes missing legacy events from completed plans.
@@ -43,7 +47,7 @@ internal fun mergeCookedHistory(
 }
 
 internal fun DayMealPlan.toCookedMeal(): CookedMeal = CookedMeal(
-    id = cookedMealEventId(date, updatedAtEpochMillis),
+    id = completionEventId.ifBlank { date },
     date = date,
     recipeId = recipeId,
     recipeTitle = recipeTitle,
@@ -54,7 +58,8 @@ internal fun CookedMeal.matchesActiveCompletion(plan: DayMealPlan): Boolean =
     plan.completed &&
         date == plan.date &&
         recipeId == plan.recipeId &&
-        completedAtEpochMillis == plan.updatedAtEpochMillis
+        completedAtEpochMillis == plan.updatedAtEpochMillis &&
+        (plan.completionEventId.isBlank() || id == plan.completionEventId)
 
 private fun CookedMeal.withStableId(): CookedMeal =
     if (id.isNotBlank()) this else copy(id = cookedMealEventId(date, completedAtEpochMillis))

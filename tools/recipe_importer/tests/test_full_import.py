@@ -134,6 +134,41 @@ def test_commit_replaces_summary_detail_payload_then_publishes_status():
     assert len(status["summaryHash"]) == len(status["detailHash"]) == len(status["sourcePayloadHash"]) == 64
 
 
+def test_preflight_rejects_nested_arrays_before_any_firestore_access():
+    record = validate_record(full_record(), have_permission=True)
+    record["sourcePayload"]["future_api_field"] = {
+        "outer": [["forbidden nested array"]],
+    }
+    client = FakeClient()
+
+    with pytest.raises(
+        CatalogError,
+        match=(
+            r"spoon_recipe_payloads/123\.payload\.future_api_field"
+            r"\.outer\[0\]"
+        ),
+    ):
+        commit_catalog(client, [record], server_timestamp="SERVER")
+
+    assert client.collections == []
+    assert client.commits == []
+
+
+def test_preflight_rejects_firestore_nesting_over_twenty_before_access():
+    record = validate_record(full_record(), have_permission=True)
+    nested = "leaf"
+    for _ in range(20):
+        nested = {"child": nested}
+    record["sourcePayload"]["future_api_field"] = nested
+    client = FakeClient()
+
+    with pytest.raises(CatalogError, match="nesting exceeds 20"):
+        commit_catalog(client, [record], server_timestamp="SERVER")
+
+    assert client.collections == []
+    assert client.commits == []
+
+
 def test_payload_failure_never_publishes_catalog_status():
     record = validate_record(full_record(), have_permission=True)
     client = FakeClient(fail_at=3)

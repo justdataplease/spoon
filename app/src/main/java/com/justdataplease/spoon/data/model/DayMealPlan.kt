@@ -13,5 +13,7 @@ data class DayMealPlan(
     val recipeTitle: String = "",
     val filters: RecipeFilters = RecipeFilters(),
     val completed: Boolean = false,
+    /** Id of the immutable history event representing this exact completion. */
+    val completionEventId: String = "",
     val updatedAtEpochMillis: Long = 0L,
 )

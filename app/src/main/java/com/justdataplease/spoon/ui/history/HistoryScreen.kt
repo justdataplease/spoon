@@ -50,16 +50,22 @@ data class HistoryEntryUi(
     val categoryLabel: String,
     val categoryEmoji: String,
     val imageUrl: String = "",
+    val completedAtEpochMillis: Long = 0L,
 )
 
 @Composable
 fun HistoryScreen(
     entries: List<HistoryEntryUi>,
     onOpenRecipe: (String) -> Unit,
-    onToggleCompleted: (LocalDate) -> Unit,
+    onRemoveEntry: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val ordered = remember(entries) { entries.sortedByDescending(HistoryEntryUi::date) }
+    val ordered = remember(entries) {
+        entries.sortedWith(
+            compareByDescending<HistoryEntryUi> { it.date }
+                .thenByDescending { it.completedAtEpochMillis },
+        )
+    }
     val grouped = remember(ordered) { ordered.groupBy { YearMonth.from(it.date) } }
 
     LazyColumn(
@@ -85,7 +91,7 @@ fun HistoryScreen(
                     HistoryCard(
                         entry = entry,
                         onOpen = { onOpenRecipe(entry.recipeId) },
-                        onUndo = { onToggleCompleted(entry.date) },
+                        onUndo = { onRemoveEntry(entry.id) },
                     )
                 }
             }
@@ -161,7 +167,7 @@ private fun HistoryCard(
                 )
             }
             IconButton(onClick = onUndo) {
-                Icon(Icons.AutoMirrored.Outlined.Undo, contentDescription = "Αναίρεση ολοκλήρωσης")
+                Icon(Icons.AutoMirrored.Outlined.Undo, contentDescription = "Αφαίρεση από το ιστορικό")
             }
         }
     }

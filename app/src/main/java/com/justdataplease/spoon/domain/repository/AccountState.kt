@@ -39,7 +39,7 @@ class AccountOperationException(
 internal fun accountFailureForFirebaseCode(code: String?): AccountFailure = when (code) {
     "ERROR_INVALID_EMAIL",
     "ERROR_MISSING_EMAIL",
-    -> AccountFailure(AccountFailureKind.INVALID_EMAIL, "Το email δεν είναι έγκυρο.")
+    -> AccountFailure(AccountFailureKind.INVALID_EMAIL, "Η ηλεκτρονική διεύθυνση δεν είναι έγκυρη.")
 
     "ERROR_WEAK_PASSWORD" ->
         AccountFailure(
@@ -51,7 +51,7 @@ internal fun accountFailureForFirebaseCode(code: String?): AccountFailure = when
     "ERROR_CREDENTIAL_ALREADY_IN_USE",
     -> AccountFailure(
         AccountFailureKind.EMAIL_IN_USE,
-        "Υπάρχει ήδη λογαριασμός με αυτό το email. Δοκίμασε σύνδεση.",
+        "Υπάρχει ήδη λογαριασμός με αυτή την ηλεκτρονική διεύθυνση. Δοκίμασε σύνδεση.",
     )
 
     "ERROR_INVALID_CREDENTIAL",
@@ -59,7 +59,7 @@ internal fun accountFailureForFirebaseCode(code: String?): AccountFailure = when
     "ERROR_USER_NOT_FOUND",
     -> AccountFailure(
         AccountFailureKind.WRONG_CREDENTIALS,
-        "Το email ή ο κωδικός δεν είναι σωστός.",
+        "Τα στοιχεία σύνδεσης δεν είναι σωστά.",
     )
 
     "ERROR_USER_DISABLED" ->
