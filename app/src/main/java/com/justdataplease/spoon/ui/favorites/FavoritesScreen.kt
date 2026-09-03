@@ -62,7 +62,7 @@ fun FavoritesScreen(
         item {
             Text("Αγαπημένες", style = MaterialTheme.typography.displaySmall)
             Text(
-                "${favorites.size} συνταγές που αξίζει να ξαναφτιάξεις",
+                favoriteRecipeSummary(favorites.size),
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 4.dp, bottom = 10.dp),
@@ -83,3 +83,10 @@ fun FavoritesScreen(
         }
     }
 }
+
+internal fun favoriteRecipeSummary(recipeCount: Int): String =
+    if (recipeCount == 1) {
+        "1 συνταγή που αξίζει να ξαναφτιάξεις"
+    } else {
+        "$recipeCount συνταγές που αξίζει να ξαναφτιάξεις"
+    }

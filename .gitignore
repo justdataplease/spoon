@@ -10,6 +10,7 @@ captures/
 .cxx/
 app/google-services.json
 firebase-admin*.json
+*firebase-adminsdk*.json
 *service-account*.json
 *.jks
 *.keystore

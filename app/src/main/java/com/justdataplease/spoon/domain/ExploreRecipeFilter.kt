@@ -45,6 +45,12 @@ object ExploreRecipeFilter {
         val queryTerms = criteria.query.normalizedSearchText()
             .split(Whitespace)
             .filter(String::isNotBlank)
+        val selectedDiets = criteria.dietLabels.normalizedFacetSelection()
+        val selectedMealTypes = criteria.mealTypeLabels.normalizedFacetSelection()
+        val selectedOccasions = criteria.occasionLabels.normalizedFacetSelection()
+        val selectedMethods = criteria.methodLabels.normalizedFacetSelection()
+        val selectedCuisines = criteria.cuisineLabels.normalizedFacetSelection()
+        val selectedIngredients = criteria.ingredientLabels.normalizedFacetSelection()
 
         return recipes.asSequence()
             .filter(Recipe::isActiveGreekRecipe)
@@ -61,37 +67,40 @@ object ExploreRecipeFilter {
                 criteria.maxPrepMinutes == 0 ||
                     (it.prepMinutes > 0 && it.prepMinutes <= criteria.maxPrepMinutes)
             }
-            .filter { criteria.dietLabels.matchesFacet(it.dietLabels) }
-            .filter { criteria.mealTypeLabels.matchesFacet(it.mealTypeLabels) }
-            .filter { criteria.occasionLabels.matchesFacet(it.occasionLabels) }
-            .filter { criteria.methodLabels.matchesFacet(it.methodLabels) }
-            .filter { criteria.cuisineLabels.matchesFacet(it.cuisineLabels) }
-            .filter { criteria.ingredientLabels.matchesFacet(it.ingredientLabels) }
+            .filter { selectedDiets.matchesFacet(it.dietLabels) }
+            .filter { selectedMealTypes.matchesFacet(it.mealTypeLabels) }
+            .filter { selectedOccasions.matchesFacet(it.occasionLabels) }
+            .filter { selectedMethods.matchesFacet(it.methodLabels) }
+            .filter { selectedCuisines.matchesFacet(it.cuisineLabels) }
+            .filter { selectedIngredients.matchesFacet(it.ingredientLabels) }
             .filter { !criteria.quickOnly || it.quickRecipe }
             .filter { recipe ->
                 queryTerms.isEmpty() || recipe.searchableText().let { searchable ->
                     queryTerms.all(searchable::contains)
                 }
             }
+            .map { recipe -> RankedRecipe(recipe, recipe.title.normalizedSearchText()) }
             .sortedWith(
-                compareByDescending<Recipe>(Recipe::rating)
-                    .thenBy { it.title.normalizedSearchText() }
-                    .thenBy(Recipe::id),
+                compareByDescending<RankedRecipe> { it.recipe.rating }
+                    .thenBy(RankedRecipe::normalizedTitle)
+                    .thenBy { it.recipe.id },
             )
+            .map(RankedRecipe::recipe)
             .toList()
     }
 }
 
 /** Facets are OR-ed within one group; the groups themselves are AND-ed by the filter pipeline. */
+private fun Set<String>.normalizedFacetSelection(): Set<String> = asSequence()
+    .map(String::normalizedSearchText)
+    .filter(String::isNotBlank)
+    .toSet()
+
 private fun Set<String>.matchesFacet(actualValues: List<String>): Boolean {
-    val selected = asSequence()
-        .map(String::normalizedSearchText)
-        .filter(String::isNotBlank)
-        .toSet()
-    if (selected.isEmpty()) return true
+    if (isEmpty()) return true
     return actualValues.asSequence()
         .map(String::normalizedSearchText)
-        .any(selected::contains)
+        .any { normalized -> normalized in this }
 }
 
 private fun Recipe.searchableText(): String = buildList {
@@ -106,7 +115,7 @@ private fun Recipe.searchableText(): String = buildList {
     addAll(methodLabels)
     addAll(cuisineLabels)
     addAll(ingredientLabels)
-}.joinToString(separator = "\u0000") { it.normalizedSearchText() }
+}.joinToString(separator = "\u0000").normalizedSearchText()
 
 internal fun Recipe.isActiveGreekRecipe(): Boolean {
     val normalizedLanguage = language.trim().lowercase(Locale.ROOT)
@@ -120,11 +129,14 @@ private fun String.normalizedKey(): String = trim().lowercase(Locale.ROOT)
 
 private fun String.normalizedSearchText(): String =
     Normalizer.normalize(this, Normalizer.Form.NFD)
-        .asSequence()
         .filterNot { Character.getType(it) == Character.NON_SPACING_MARK.toInt() }
-        .joinToString(separator = "")
         .lowercase(Locale.ROOT)
         .replace('ς', 'σ')
         .trim()
+
+private data class RankedRecipe(
+    val recipe: Recipe,
+    val normalizedTitle: String,
+)
 
 private val Whitespace = Regex("\\s+")

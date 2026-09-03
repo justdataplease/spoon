@@ -27,18 +27,18 @@ object RepositoryModule {
     fun provideSpoonRepository(
         @ApplicationContext context: Context,
     ): SpoonRepository {
-        val local = LocalSpoonRepository(
-            preferences = context.getSharedPreferences(
-                LocalSpoonRepository.PREFERENCES_NAME,
-                Context.MODE_PRIVATE,
-            ),
-            json = Json {
-                ignoreUnknownKeys = true
-                encodeDefaults = true
-            },
-        )
-
-        if (!BuildConfig.HAS_FIREBASE_CONFIG) return local
+        if (!BuildConfig.HAS_FIREBASE_CONFIG) {
+            return LocalSpoonRepository(
+                preferences = context.getSharedPreferences(
+                    LocalSpoonRepository.PREFERENCES_NAME,
+                    Context.MODE_PRIVATE,
+                ),
+                json = Json {
+                    ignoreUnknownKeys = true
+                    encodeDefaults = true
+                },
+            )
+        }
 
         val failure = BackendFailure(
             BackendFailureKind.CONFIGURATION,

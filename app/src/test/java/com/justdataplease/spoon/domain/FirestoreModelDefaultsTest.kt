@@ -5,6 +5,7 @@ import com.justdataplease.spoon.data.model.FavoriteRecipe
 import com.justdataplease.spoon.data.model.Recipe
 import com.justdataplease.spoon.data.model.RecipeFilters
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -29,5 +30,14 @@ class FirestoreModelDefaultsTest {
             val setter = type.getMethod("setId", String::class.java)
             assertNotNull(setter.getAnnotation(com.google.firebase.firestore.DocumentId::class.java))
         }
+    }
+
+    @Test
+    fun `recipe filters match Firestore rule boundaries`() {
+        assertTrue(RecipeFilters().isValid())
+        assertTrue(RecipeFilters(easeLevel = "easy", maxPrepMinutes = 10_080).isValid())
+        assertFalse(RecipeFilters(easeLevel = " ").isValid())
+        assertFalse(RecipeFilters(maxPrepMinutes = -1).isValid())
+        assertFalse(RecipeFilters(maxPrepMinutes = 10_081).isValid())
     }
 }

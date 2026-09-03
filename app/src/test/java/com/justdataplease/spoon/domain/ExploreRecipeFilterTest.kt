@@ -176,6 +176,23 @@ class ExploreRecipeFilterTest {
         )
     }
 
+    @Test
+    fun `full catalog with equal ratings keeps deterministic id ordering`() {
+        val recipes = (5_368 downTo 1).map { index ->
+            recipe(
+                id = index.toString().padStart(4, '0'),
+                title = "Άλφα λεμονάτη σάλτσα",
+                rating = 8.0,
+            )
+        }
+
+        val result = ExploreRecipeFilter.filter(recipes)
+
+        assertEquals(5_368, result.size)
+        assertEquals("0001", result.first().id)
+        assertEquals("5368", result.last().id)
+    }
+
     private fun recipe(
         id: String,
         title: String = id,

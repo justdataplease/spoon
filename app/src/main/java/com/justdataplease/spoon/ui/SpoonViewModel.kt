@@ -31,14 +31,25 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import java.time.LocalDate
 import java.time.YearMonth
 import javax.inject.Inject
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
+private data class CatalogProjection(
+    val recipesById: Map<String, Recipe> = emptyMap(),
+    val activeGreekRecipes: List<Recipe> = emptyList(),
+    val exploreOptions: ExploreFacetOptionsUi = ExploreFacetOptionsUi(),
+)
 
 private data class PlannerSnapshot(
-    val recipes: List<Recipe>,
+    val catalog: CatalogProjection,
     val plans: List<DayMealPlan>,
     val favoriteIds: Set<String>,
     val backendState: BackendState,
@@ -73,6 +84,7 @@ private data class ExploreSelection(
 class SpoonViewModel @Inject constructor(
     private val mealPlanner: MealPlanner,
 ) : ViewModel() {
+    private val computationScope = CoroutineScope(viewModelScope.coroutineContext + Dispatchers.Default)
     private val selectedWeekStart = MutableStateFlow(WeeklyPlanDefaults.weekStart(LocalDate.now()))
     private val selectedMonth = MutableStateFlow(YearMonth.now())
     private val editingDate = MutableStateFlow<LocalDate?>(null)
@@ -86,13 +98,33 @@ class SpoonViewModel @Inject constructor(
     private val working = MutableStateFlow(false)
     private val message = MutableStateFlow<String?>(null)
 
+    private val catalogProjection = mealPlanner.recipes
+        .map { recipes ->
+            val activeGreekRecipes = recipes.filter { recipe ->
+                recipe.active && recipe.language.trim().lowercase().let { language ->
+                    language == "el" || language.startsWith("el-") || language.startsWith("el_")
+                }
+            }
+            CatalogProjection(
+                recipesById = recipes.associateBy(Recipe::id),
+                activeGreekRecipes = activeGreekRecipes,
+                exploreOptions = activeGreekRecipes.toExploreOptionsUi(),
+            )
+        }
+        .flowOn(Dispatchers.Default)
+        .stateIn(
+            scope = computationScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = CatalogProjection(),
+        )
+
     private val plannerSnapshot = combine(
-        mealPlanner.recipes,
+        catalogProjection,
         mealPlanner.mealPlans,
         mealPlanner.favoriteRecipeIds,
         mealPlanner.backendState,
-    ) { recipes, plans, favorites, backendState ->
-        PlannerSnapshot(recipes, plans, favorites, backendState)
+    ) { catalog, plans, favorites, backendState ->
+        PlannerSnapshot(catalog, plans, favorites, backendState)
     }
 
     private val recipeSelection = combine(
@@ -124,13 +156,32 @@ class SpoonViewModel @Inject constructor(
         ExploreSelection(query, filters, replacementDate)
     }
 
+    private val filteredExploreRecipes = combine(
+        catalogProjection,
+        exploreQuery,
+        exploreFilters,
+    ) { catalog, query, filters ->
+        ExploreRecipeFilter.filter(
+            recipes = catalog.activeGreekRecipes,
+            criteria = filters.toDomain(query),
+        )
+    }.flowOn(Dispatchers.Default)
+
+    private val exploredRecipes = combine(
+        filteredExploreRecipes,
+        mealPlanner.favoriteRecipeIds,
+    ) { recipes, favoriteIds ->
+        recipes.map { recipe -> recipe.toExploreRecipeUi(recipe.id in favoriteIds) }
+    }.flowOn(Dispatchers.Default)
+
     val uiState = combine(
         plannerSnapshot,
         dateSelection,
         workStatus,
         exploreSelection,
-    ) { snapshot, dates, status, explore ->
-        val recipesById = snapshot.recipes.associateBy(Recipe::id)
+        exploredRecipes,
+    ) { snapshot, dates, status, explore, exploreRecipeItems ->
+        val recipesById = snapshot.catalog.recipesById
         val plansByDate = snapshot.plans.associateBy(DayMealPlan::date)
         val weekPlans = WeeklyPlanDefaults.dates(dates.weekStart).map { date ->
             val stored = plansByDate[date.toString()]
@@ -172,13 +223,6 @@ class SpoonViewModel @Inject constructor(
                 isCompleted = plan.completed,
             )
         }
-        val activeGreekRecipes = snapshot.recipes.filter { recipe ->
-            recipe.active && recipe.language.trim().lowercase().let { it == "el" || it.startsWith("el-") || it.startsWith("el_") }
-        }
-        val exploredRecipes = ExploreRecipeFilter.filter(
-            recipes = activeGreekRecipes,
-            criteria = explore.filters.toDomain(explore.query),
-        ).map { recipe -> recipe.toExploreRecipeUi(recipe.id in snapshot.favoriteIds) }
         SpoonUiState(
             isLoading = status.loading,
             isWorking = status.working,
@@ -190,10 +234,10 @@ class SpoonViewModel @Inject constructor(
             calendarMeals = calendarMeals,
             editingDate = dates.editingDate,
             exploreQuery = explore.query,
-            exploreRecipes = exploredRecipes,
-            exploreTotalRecipeCount = activeGreekRecipes.size,
+            exploreRecipes = exploreRecipeItems,
+            exploreTotalRecipeCount = snapshot.catalog.activeGreekRecipes.size,
             exploreFilters = explore.filters,
-            exploreOptions = activeGreekRecipes.toExploreOptionsUi(),
+            exploreOptions = snapshot.catalog.exploreOptions,
             favoriteReplacementDate = explore.favoriteReplacementDate,
             isRecipeDetailsLoading = dates.recipeSelection.isLoading,
             selectedRecipe = dates.recipeSelection.recipeId
@@ -205,8 +249,8 @@ class SpoonViewModel @Inject constructor(
                 ?.let { recipe -> recipe.toRecipeDetailUi(recipe.id in snapshot.favoriteIds) },
             message = status.message,
         )
-    }.stateIn(
-        scope = viewModelScope,
+    }.flowOn(Dispatchers.Default).stateIn(
+        scope = computationScope,
         started = SharingStarted.WhileSubscribed(5_000),
         initialValue = SpoonUiState(weekStart = selectedWeekStart.value),
     )
@@ -247,7 +291,9 @@ class SpoonViewModel @Inject constructor(
         selectedRecipeDetails.value = null
         recipeDetailsLoading.value = true
         viewModelScope.launch {
-            runCatching { mealPlanner.getRecipeDetails(recipeId) }
+            runCatching {
+                withContext(Dispatchers.Default) { mealPlanner.getRecipeDetails(recipeId) }
+            }
                 .onSuccess { details ->
                     if (selectedRecipeId.value == recipeId) {
                         selectedRecipeDetails.value = details
@@ -291,7 +337,9 @@ class SpoonViewModel @Inject constructor(
         viewModelScope.launch {
             working.value = true
             try {
-                when (mealPlanner.replaceWithFavorite(date, recipeId)) {
+                when (withContext(Dispatchers.Default) {
+                    mealPlanner.replaceWithFavorite(date, recipeId)
+                }) {
                     is FavoriteReplacementResult.Selected -> {
                         favoriteReplacementDate.value = null
                         message.value = "Η αγαπημένη συνταγή μπήκε στο πρόγραμμα."
@@ -322,9 +370,12 @@ class SpoonViewModel @Inject constructor(
         viewModelScope.launch {
             working.value = true
             try {
-                var misses = 0
-                WeeklyPlanDefaults.dates(selectedWeekStart.value).forEach { date ->
-                    if (mealPlanner.reroll(date) is MealPlanSelection.NoMatch) misses++
+                val misses = withContext(Dispatchers.Default) {
+                    var misses = 0
+                    WeeklyPlanDefaults.dates(selectedWeekStart.value).forEach { date ->
+                        if (mealPlanner.reroll(date) is MealPlanSelection.NoMatch) misses++
+                    }
+                    misses
                 }
                 message.value = when {
                     misses == 0 -> "Έτοιμη η νέα εβδομάδα!"
@@ -372,7 +423,7 @@ class SpoonViewModel @Inject constructor(
     private fun ensureWeek(date: LocalDate) {
         viewModelScope.launch {
             loading.value = true
-            runCatching { mealPlanner.ensureWeek(date) }
+            runCatching { withContext(Dispatchers.Default) { mealPlanner.ensureWeek(date) } }
                 .onFailure { message.value = it.userMessage() }
             loading.value = false
         }
@@ -382,7 +433,7 @@ class SpoonViewModel @Inject constructor(
         viewModelScope.launch {
             working.value = true
             try {
-                when (block()) {
+                when (withContext(Dispatchers.Default) { block() }) {
                     is MealPlanSelection.Selected -> Unit
                     is MealPlanSelection.NoMatch -> {
                         message.value = "Δεν βρέθηκε άλλη συνταγή που να ταιριάζει σε όλα τα φίλτρα."

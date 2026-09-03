@@ -6,9 +6,11 @@ import com.justdataplease.spoon.data.model.RecipeFilters
 import com.justdataplease.spoon.domain.repository.SpoonRepository
 import java.time.LocalDate
 import javax.inject.Inject
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlin.random.Random
 
@@ -64,7 +66,7 @@ class MealPlanner @Inject constructor(
     fun observeFavorites(): Flow<List<Recipe>> =
         combine(recipes, favoriteRecipeIds) { allRecipes, favoriteIds ->
             allRecipes.filter { it.id in favoriteIds }
-        }
+        }.flowOn(Dispatchers.Default)
 
     suspend fun ensureWeek(
         containingDate: LocalDate = LocalDate.now(),

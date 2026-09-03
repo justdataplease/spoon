@@ -9,6 +9,7 @@ import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.FirebaseFirestoreException
 import com.google.firebase.firestore.Query
+import com.google.firebase.firestore.QuerySnapshot
 import com.google.firebase.firestore.Source
 import com.justdataplease.spoon.data.eligibleRemoteRecipes
 import com.justdataplease.spoon.data.eligibleRecipeDetails
@@ -28,13 +29,16 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.collect
@@ -42,6 +46,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.retryWhen
@@ -51,6 +56,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 
 /** Firestore implementation: public recipe metadata plus owner-scoped plans and favorites. */
@@ -178,8 +184,7 @@ class FirestoreSpoonRepository(
     override suspend fun upsertMealPlan(plan: DayMealPlan) {
         require(plan.date.isNotBlank())
         val currentUid = awaitUid()
-        val stored = plan.copy(id = "")
-        mealPlans(currentUid).document(plan.date).set(stored).await()
+        mealPlans(currentUid).document(plan.date).set(plan.toFirestoreDocument()).await()
     }
 
     override suspend fun setMealCompleted(date: String, completed: Boolean) {
@@ -341,6 +346,25 @@ class FirestoreSpoonRepository(
     }
 }
 
+/**
+ * Builds the strict Firestore representation explicitly instead of relying on Java-bean
+ * reflection, which would otherwise expose helper getters such as `RecipeFilters.isValid()`.
+ */
+internal fun DayMealPlan.toFirestoreDocument(): Map<String, Any> = mapOf(
+    "date" to date,
+    "category" to category,
+    "recipeId" to recipeId,
+    "recipeTitle" to recipeTitle,
+    "filters" to mapOf(
+        "category" to filters.category,
+        "easeLevel" to filters.easeLevel,
+        "minRating" to filters.minRating,
+        "maxPrepMinutes" to filters.maxPrepMinutes,
+    ),
+    "completed" to completed,
+    "updatedAtEpochMillis" to updatedAtEpochMillis,
+)
+
 internal sealed interface CloudComponentState {
     data object Pending : CloudComponentState
     data object Ready : CloudComponentState
@@ -405,14 +429,42 @@ private fun authFailure(code: String): BackendFailure = when (code) {
 internal fun retryDelayMillis(attempt: Long): Long =
     (1_000L shl attempt.coerceAtMost(5).toInt()).coerceAtMost(30_000L)
 
-private fun <T : Any> Query.objectsFlow(type: Class<T>): Flow<List<T>> = callbackFlow {
-    val registration = addSnapshotListener { snapshot, error ->
-        when {
-            error != null -> close(error)
-            snapshot != null -> trySend(snapshot.documents.mapNotNull { it.toObjectOrLog(type) })
+private fun <T : Any> Query.objectsFlow(type: Class<T>): Flow<List<T>> =
+    callbackFlow<QuerySnapshot> {
+        val registration = addSnapshotListener { snapshot, error ->
+            when {
+                error != null -> close(error)
+                snapshot != null -> trySend(snapshot)
+            }
+        }
+        awaitClose { registration.remove() }
+    }
+        // State consumers only need the newest pending snapshot. The currently converting snapshot
+        // always completes first, so emitted results remain chronological without building a queue.
+        .buffer(Channel.CONFLATED)
+        .map { snapshot ->
+            convertFirestoreSnapshotOffMain(
+                source = { snapshot.documents },
+                convert = { document -> document.toObjectOrLog(type) },
+            )
+        }
+
+/**
+ * Reads and converts an immutable Firestore snapshot on Default, never on the listener's main
+ * executor. Sequential iteration preserves document order; periodic checks make a 5k+ conversion
+ * promptly cancellable when auth changes or the repository is disposed.
+ */
+internal suspend fun <S, T : Any> convertFirestoreSnapshotOffMain(
+    source: () -> List<S>,
+    convert: (S) -> T?,
+): List<T> = withContext(Dispatchers.Default) {
+    val context = currentCoroutineContext()
+    buildList {
+        source().forEachIndexed { index, item ->
+            if (index % SNAPSHOT_CANCELLATION_CHECK_INTERVAL == 0) context.ensureActive()
+            convert(item)?.let(::add)
         }
     }
-    awaitClose { registration.remove() }
 }
 
 private fun <T : Any> DocumentSnapshot.toObjectOrLog(type: Class<T>): T? = try {
@@ -423,3 +475,4 @@ private fun <T : Any> DocumentSnapshot.toObjectOrLog(type: Class<T>): T? = try {
 }
 
 private const val FIRESTORE_TAG = "SpoonFirestore"
+private const val SNAPSHOT_CANCELLATION_CHECK_INTERVAL = 64

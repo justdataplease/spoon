@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -304,26 +305,34 @@ private fun SelectedDayCard(
                     Text(meal.recipeTitle, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
                     Text(meal.emoji, modifier = Modifier.padding(start = 12.dp))
                 }
-                OutlinedButton(
-                    onClick = { onOpenRecipe(meal.recipeId) },
-                    enabled = meal.recipeId.isNotBlank(),
+                Text(
+                    if (meal.isCompleted) "✓ Το έφτιαξες" else "Προγραμματισμένο",
+                    color = MaterialTheme.colorScheme.secondary,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Row(
                     modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    Text("Προβολή λεπτομερειών")
+                    OutlinedButton(
+                        onClick = { onOpenRecipe(meal.recipeId) },
+                        enabled = meal.recipeId.isNotBlank(),
+                        modifier = Modifier.weight(1f).heightIn(min = 52.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                    ) {
+                        Text("Λεπτομέρειες", maxLines = 1)
+                    }
+                    Button(
+                        onClick = { onToggleCompleted(date) },
+                        modifier = Modifier.weight(1f).heightIn(min = 52.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                    ) {
+                        Text(
+                            if (meal.isCompleted) "Αναίρεση" else "Το έφτιαξα",
+                            maxLines = 1,
+                        )
+                    }
                 }
-                Button(
-                    onClick = { onToggleCompleted(date) },
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text(
-                        if (meal.isCompleted) {
-                            "Αναίρεση ολοκλήρωσης"
-                        } else {
-                            "Το έφτιαξα"
-                        },
-                    )
-                }
-                Text(if (meal.isCompleted) "✓ Το έφτιαξες" else "Προγραμματισμένο", color = MaterialTheme.colorScheme.secondary, fontWeight = FontWeight.SemiBold)
             }
         }
     }
