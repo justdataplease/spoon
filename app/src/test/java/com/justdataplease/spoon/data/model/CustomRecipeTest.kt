@@ -1,6 +1,9 @@
 package com.justdataplease.spoon.data.model
 
 import com.google.firebase.firestore.DocumentId
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertThrows
@@ -53,6 +56,29 @@ class CustomRecipeTest {
     }
 
     @Test
+    fun custom_validation_requires_a_concrete_shared_planner_category() {
+        MealCategory.entries.filterNot { it == MealCategory.ANY }.forEach { category ->
+            assertEquals(category.key, validCustomRecipe(category = category.key).requireValid().category)
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            validCustomRecipe(category = MealCategory.ANY.key).requireValid()
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            validCustomRecipe(category = "unknown").requireValid()
+        }
+    }
+
+    @Test
+    fun local_JSON_roundtrip_retains_custom_category() {
+        val original = validCustomRecipe(category = MealCategory.STREET_FOOD.key)
+
+        val restored = Json.decodeFromString<CustomRecipe>(Json.encodeToString(original))
+
+        assertEquals(MealCategory.STREET_FOOD.key, restored.category)
+        assertEquals(original, restored)
+    }
+
+    @Test
     fun owner_models_retain_Firestore_empty_constructors_and_ids() {
         assertEquals("", ShoppingListItem().name)
         assertEquals("", RecipeNote().text)
@@ -77,10 +103,11 @@ class CustomRecipeTest {
             RecipeMethodSection(title = "Εκτέλεση", steps = listOf("Ψήνουμε.")),
         ),
         photoDataUri: String = "data:image/jpeg;base64,YWJj",
+        category: String = MealCategory.VEGETABLES.key,
     ) = CustomRecipe(
         id = "custom_01234567-89ab-4def-8123-456789abcdef",
         title = "Η πίτα μου",
-        category = "vegetables",
+        category = category,
         ingredientSections = listOf(
             RecipeIngredientSection(
                 title = "Υλικά",

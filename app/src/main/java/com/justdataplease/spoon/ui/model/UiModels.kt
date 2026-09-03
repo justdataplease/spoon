@@ -34,7 +34,7 @@ val AvailableCategories = listOf(
 enum class EaseUi(val key: String, val greekLabel: String, val detail: String) {
     ANY("any", "Όλα", "Χωρίς περιορισμό"),
     UNKNOWN("unknown", "Άγνωστη", "Δεν υπάρχουν αρκετά στοιχεία"),
-    EASY("easy", "Εύκολη", "έως 1 παρασκευή και 1–5 βήματα"),
+    EASY("easy", "Ευκολάκι", "έως 1 παρασκευή και 1–5 βήματα"),
     MEDIUM("medium", "Μέτρια", "2 παρασκευές ή 6–9 βήματα"),
     HARD("hard", "Απαιτητική", "3+ παρασκευές ή 10+ βήματα"),
 }

@@ -36,6 +36,8 @@ private val youtubeHosts = setOf(
 private val directVideoExtensions = setOf("mp4", "m4v", "webm", "m3u8")
 private val youtubeIdPattern = Regex("^[A-Za-z0-9_-]{6,32}$")
 private val vimeoIdPattern = Regex("^[0-9]{5,15}$")
+internal const val InlineVideoOrigin = "https://spoon.justdataplease.com"
+internal const val InlineVideoReferer = "$InlineVideoOrigin/"
 
 internal fun normalizeRecipeLink(rawUrl: String): String? {
     // One publisher record contains a valid YouTube URL followed by an unescaped
@@ -73,7 +75,10 @@ internal fun resolveInlineVideoSource(rawUrl: String): InlineVideoSource? {
         return InlineVideoSource.YouTube(
             originalUrl = url,
             videoId = videoId,
-            embedUrl = "https://www.youtube-nocookie.com/embed/$videoId?autoplay=0&playsinline=1&rel=0&enablejsapi=1",
+            embedUrl = "https://www.youtube-nocookie.com/embed/$videoId" +
+                "?autoplay=0&playsinline=1&rel=0&enablejsapi=1" +
+                "&origin=https%3A%2F%2Fspoon.justdataplease.com" +
+                "&widget_referrer=https%3A%2F%2Fspoon.justdataplease.com%2F",
         )
     }
 
@@ -97,6 +102,9 @@ internal fun resolveInlineVideoSource(rawUrl: String): InlineVideoSource? {
         null
     }
 }
+
+internal fun inlineVideoRequestHeaders(source: InlineVideoSource): Map<String, String> =
+    if (source is InlineVideoSource.YouTube) mapOf("Referer" to InlineVideoReferer) else emptyMap()
 
 private fun String.isLocalNetworkHost(): Boolean {
     val host = removePrefix("[").removeSuffix("]")
@@ -166,7 +174,7 @@ private fun youtubeVideoHtml(source: InlineVideoSource.YouTube): String = """
         <style>${playerCss()}</style>
       </head>
       <body>
-        <iframe id="player" title="YouTube video player" src="${source.embedUrl.htmlAttributeEscape()}" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe>
+        <iframe id="player" title="Πρόγραμμα αναπαραγωγής βίντεο YouTube" src="${source.embedUrl.htmlAttributeEscape()}" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe>
         <script src="https://www.youtube.com/iframe_api"></script>
         <script>
           let spoonReported = false;
@@ -192,7 +200,7 @@ private fun vimeoVideoHtml(source: InlineVideoSource.Vimeo): String = """
         <style>${playerCss()}</style>
       </head>
       <body>
-        <iframe id="player" title="Vimeo video player" src="${source.embedUrl.htmlAttributeEscape()}" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen></iframe>
+        <iframe id="player" title="Πρόγραμμα αναπαραγωγής βίντεο Vimeo" src="${source.embedUrl.htmlAttributeEscape()}" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen></iframe>
         <script src="https://player.vimeo.com/api/player.js"></script>
         <script>
           let spoonReported = false;

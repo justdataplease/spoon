@@ -44,19 +44,19 @@ class FakeCollection:
         return FakeDocument(f"{self.name}/{document_id}")
 
     def select(self, fields):
-        assert fields == ["active"]
+        assert fields == ["active", "source", "sourceKey", "sourceUrl"]
         return self
 
     def stream(self):
-        return [FakeSnapshot(recipe_id, active) for recipe_id, active in self.client.existing.items()]
+        return [FakeSnapshot(recipe_id, data) for recipe_id, data in self.client.existing.items()]
 
 
 class FakeSnapshot:
-    def __init__(self, recipe_id, active):
-        self.id, self.active = recipe_id, active
+    def __init__(self, recipe_id, data):
+        self.id, self.data = recipe_id, data
 
     def to_dict(self):
-        return {"active": self.active}
+        return self.data if isinstance(self.data, dict) else {"active": self.data}
 
 
 class FakeBatch:
@@ -105,6 +105,7 @@ def test_commit_replaces_summary_detail_payload_then_publishes_status():
         DETAIL_COLLECTION_NAME,
         PAYLOAD_COLLECTION_NAME,
         STATUS_COLLECTION_NAME,
+        STATUS_COLLECTION_NAME,
     ]
     _, summary, summary_merge = client.commits[0][0]
     _, detail, detail_merge = client.commits[1][0]
@@ -115,6 +116,7 @@ def test_commit_replaces_summary_detail_payload_then_publishes_status():
     assert "sourcePayload" not in detail
     assert source["payload"] == record["sourcePayload"]
     status = client.commits[3][0][1]
+    assert len(client.commits[3]) == 2
     assert status["complete"] is True
     assert status["recipeCount"] == status["detailRecipeCount"] == status["sourcePayloadCount"] == 1
     assert status["activeRecipeCount"] == status["activeDetailRecipeCount"] == status["activeSourcePayloadCount"] == 1
@@ -142,7 +144,17 @@ def test_manifest_mismatch_is_rejected_before_firestore():
 
 def test_full_commit_retires_existing_active_ids_missing_from_new_active_catalog():
     record = validate_record(full_record(), have_permission=True)
-    client = FakeClient(existing={"123": True, "999": True, "already-inactive": False})
+    client = FakeClient(existing={
+        "123": True,
+        "999": True,
+        "already-inactive": False,
+        "argiro_17265": {
+            "active": True,
+            "sourceKey": "argiro",
+            "source": "argiro.gr",
+            "sourceUrl": "https://argiro.gr/recipe/synthetic/",
+        },
+    })
     _, batches, _ = commit_catalog(client, [record], server_timestamp="SERVER")
     assert batches == 4
     retirement = client.commits[-2]
@@ -157,3 +169,4 @@ def test_full_commit_retires_existing_active_ids_missing_from_new_active_catalog
     assert status["activeRecipeCount"] == 1
     assert status["retiredOnCommitCount"] == 1
     assert status["knownRetiredRecipeCount"] == 1
+    assert all("argiro_17265" not in write[0].name for batch in client.commits for write in batch)

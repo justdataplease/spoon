@@ -27,8 +27,9 @@ _DURATION_RE = re.compile(
 # substring classifier made "Τρουφάκια" match the old "φακ" lentil stem.
 #
 # Precedence is encoded in the returned list: the exact recipe category wins,
-# followed by official main-ingredient facets in this stable order. Generic
-# format categories (sandwich/snack/finger food) are only a final fallback.
+# followed by official main-ingredient facets in this stable order. Only the
+# publisher's explicit sandwich/finger-food formats are a street-food fallback;
+# its broader Snack bucket contains sweet bars, cereal, and breakfast recipes.
 _CATEGORY_KEY_PRECEDENCE = (
     "dessert",
     "fish",
@@ -106,7 +107,6 @@ _TERMINAL_OTHER_SOURCE_CATEGORIES = {
 _SOURCE_FORMAT_FALLBACK_KEYS = {
     "finger-food": "dirty",
     "santuits": "dirty",
-    "snak": "dirty",
 }
 
 # IDs come from the official ingredient facet captured in the manifest.
@@ -129,7 +129,6 @@ _INGREDIENT_FACET_KEYS = {
 
 _MEAL_TYPE_FALLBACK_KEYS = {
     "32": "dirty",  # Σάντουιτς
-    "33": "dirty",  # Σνακ
     "92": "dirty",  # Finger food
 }
 
@@ -250,7 +249,9 @@ def classify_official_category_keys(
     drink, bread, fruit, and condiment categories are terminal other values so
     an ingredient facet cannot turn them into main meals. For a generic source
     category, official main-ingredient IDs are considered next, and an official
-    snack/sandwich/finger-food value is the final street-food fallback.
+    sandwich/finger-food value is the final street-food fallback. The source's
+    generic Snack value is deliberately not enough: it also contains clearly
+    sweet snacks and breakfast recipes, so it fails closed to ``other``.
     """
 
     category = source_category if isinstance(source_category, Mapping) else {}

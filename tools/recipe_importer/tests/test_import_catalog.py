@@ -1,6 +1,7 @@
 import json
 
 import pytest
+from google.api_core.exceptions import DeadlineExceeded, ServiceUnavailable
 
 import tools.recipe_importer.import_catalog as importer
 from tools.recipe_importer.import_catalog import (
@@ -28,6 +29,37 @@ def record(recipe_id: int) -> dict:
         "stepCount": 4,
         "rating10": 8.0,
     }
+
+
+def argiro_record(provider_id: int = 17265) -> dict:
+    return {
+        "title": "Συνθετική ελληνική συνταγή",
+        "sourceKey": "argiro",
+        "providerRecipeId": str(provider_id),
+        "sourceUrl": "https://www.argiro.gr/recipe/synthetiki-syntagi/",
+        "categoryKeys": ["other"],
+        "prepMinutes": 10,
+        "cookMinutes": 20,
+        "preparationCount": 1,
+        "stepCount": 4,
+        "rating10": 8.0,
+    }
+
+
+def test_argiro_metadata_gets_collision_free_identity_and_explicit_provenance():
+    validated = validate_record(argiro_record())
+    assert validated["id"] == "argiro_17265"
+    assert validated["sourceKey"] == "argiro"
+    assert validated["providerRecipeId"] == "17265"
+    assert validated["sourceRecipeId"] == 17265
+    assert validated["source"] == "argiro.gr"
+    assert validated["sourceName"] == "Αργυρώ Μπαρμπαρίγου"
+    assert validated["canonicalUrl"] == "https://www.argiro.gr/recipe/synthetiki-syntagi/"
+
+
+def test_catalog_rejects_mixed_providers_to_keep_retirement_source_scoped():
+    with pytest.raises(CatalogError, match="exactly one provider"):
+        validate_catalog([record(1), argiro_record()])
 
 
 def test_loads_jsonl_and_derives_safe_fields(tmp_path):
@@ -216,17 +248,21 @@ class FakeBatch:
 
     def commit(self):
         self.client.commit_attempts += 1
+        transient_error = self.client.commit_errors.get(self.client.commit_attempts)
+        if transient_error is not None:
+            raise transient_error
         if self.client.fail_commit_number == self.client.commit_attempts:
             raise RuntimeError("synthetic commit failure")
         self.client.commits.append(self.writes)
 
 
 class FakeClient:
-    def __init__(self, fail_commit_number=None):
+    def __init__(self, fail_commit_number=None, commit_errors=None):
         self.commits = []
         self.collection_names = []
         self.commit_attempts = 0
         self.fail_commit_number = fail_commit_number
+        self.commit_errors = commit_errors or {}
 
     def collection(self, name):
         self.collection_names.append(name)
@@ -236,19 +272,75 @@ class FakeClient:
         return FakeBatch(self)
 
 
-def test_firestore_replacements_never_exceed_500_writes_per_batch():
+def test_firestore_replacements_use_conservative_default_batch_size():
     client = FakeClient()
     records = [validate_record(record(i)) for i in range(1, 502)]
     writes, batches = replace_records(client, records, server_timestamp="SERVER_TIME")
 
-    assert (writes, batches) == (501, 2)
-    assert [len(batch) for batch in client.commits] == [500, 1]
+    assert (writes, batches) == (501, 6)
+    assert [len(batch) for batch in client.commits] == [100, 100, 100, 100, 100, 1]
     assert client.collection_names == [COLLECTION_NAME]
     assert client.commits[0][0][2] is False
     reference, payload, _ = client.commits[0][0]
     assert reference.name == "spoon_recipes/1"
     assert "id" not in payload
     assert payload["importedAt"] == "SERVER_TIME"
+
+
+def test_firestore_replacements_allow_explicit_500_write_batches():
+    client = FakeClient()
+    records = [validate_record(record(i)) for i in range(1, 502)]
+
+    writes, batches = replace_records(
+        client,
+        records,
+        batch_size=500,
+        server_timestamp="SERVER_TIME",
+    )
+
+    assert (writes, batches) == (501, 2)
+    assert [len(batch) for batch in client.commits] == [500, 1]
+
+
+@pytest.mark.parametrize("error_type", [DeadlineExceeded, ServiceUnavailable])
+def test_transient_firestore_batch_failure_is_retried(error_type, monkeypatch):
+    client = FakeClient(commit_errors={
+        1: error_type("first transient failure"),
+        2: error_type("second transient failure"),
+    })
+    delays = []
+    monkeypatch.setattr(importer.time, "sleep", delays.append)
+
+    writes, batches = replace_records(
+        client,
+        [validate_record(record(1))],
+        server_timestamp="SERVER_TIME",
+    )
+
+    assert (writes, batches) == (1, 1)
+    assert client.commit_attempts == 3
+    assert len(client.commits) == 1
+    assert delays == [1.0, 2.0]
+
+
+def test_transient_firestore_batch_failure_stops_after_bounded_attempts(monkeypatch):
+    client = FakeClient(commit_errors={
+        attempt: DeadlineExceeded(f"transient failure {attempt}")
+        for attempt in range(1, importer.BATCH_COMMIT_MAX_ATTEMPTS + 1)
+    })
+    delays = []
+    monkeypatch.setattr(importer.time, "sleep", delays.append)
+
+    with pytest.raises(DeadlineExceeded, match="transient failure 3"):
+        replace_records(
+            client,
+            [validate_record(record(1))],
+            server_timestamp="SERVER_TIME",
+        )
+
+    assert client.commit_attempts == importer.BATCH_COMMIT_MAX_ATTEMPTS
+    assert client.commits == []
+    assert delays == [1.0, 2.0]
 
 
 def test_full_replacement_removes_stale_id_and_clears_stale_image_url():
@@ -281,19 +373,64 @@ def test_successful_commit_writes_status_after_all_recipe_batches():
         server_timestamp="SERVER_TIME",
     )
 
-    assert (writes, batches) == (501, 2)
-    assert [len(batch) for batch in client.commits] == [500, 1, 1]
-    assert client.collection_names == [COLLECTION_NAME, STATUS_COLLECTION_NAME]
+    assert (writes, batches) == (501, 6)
+    assert [len(batch) for batch in client.commits] == [
+        100, 100, 100, 100, 100, 1, 2,
+    ]
+    assert client.collection_names == [
+        COLLECTION_NAME,
+        STATUS_COLLECTION_NAME,
+        STATUS_COLLECTION_NAME,
+    ]
     reference, status, merge = client.commits[-1][0]
     assert reference.name == "spoon_catalog/status"
     assert merge is True
-    assert status == {
-        "language": "el",
-        "recipeCount": 501,
-        "catalogVersion": f"sha256:{catalog_hash}",
-        "catalogHash": catalog_hash,
-        "lastImportedAt": "SERVER_TIME",
-    }
+    assert status["language"] == "el"
+    assert status["recipeCount"] == 501
+    assert status["catalogVersion"] == f"sha256:{catalog_hash}"
+    assert status["catalogHash"] == catalog_hash
+    assert status["lastImportedAt"] == "SERVER_TIME"
+    assert status["lastImportedSource"] == "akis"
+    assert client.commits[-1][1][0].name == "spoon_catalog/status_akis"
+
+
+def test_metadata_status_explicitly_revokes_stale_full_catalog_fields():
+    client = FakeClient()
+    importer.write_catalog_status(
+        client,
+        recipe_count=1,
+        catalog_hash='a' * 64,
+        server_timestamp='SERVER_TIME',
+        source_key='argiro',
+    )
+
+    global_status = client.commits[0][0][1]
+    provider_status = client.commits[0][1][1]
+    for status in (global_status, provider_status):
+        assert status['complete'] is False
+        assert all(
+            status[field] is None
+            for field in importer.FULL_STATUS_METADATA_FIELDS
+        )
+    assert global_status['sources']['argiro']['complete'] is False
+
+
+def test_commit_cli_reports_both_atomic_status_writes(tmp_path, monkeypatch, capsys):
+    path = tmp_path / 'catalog.json'
+    path.write_text(json.dumps([record(1)]), encoding='utf-8')
+    client = FakeClient()
+    monkeypatch.setattr(
+        importer,
+        'create_firestore_client',
+        lambda *args, **kwargs: (client, 'SERVER_TIME'),
+    )
+
+    assert importer.main([
+        str(path), '--commit', '--i-have-permission',
+    ]) == 0
+    summary = json.loads(capsys.readouterr().out)
+    assert summary['statusWrites'] == 2
+    assert len(client.commits[-1]) == 2
 
 
 def test_failed_recipe_batch_never_publishes_new_status():
@@ -303,4 +440,5 @@ def test_failed_recipe_batch_never_publishes_new_status():
     with pytest.raises(RuntimeError, match="synthetic commit failure"):
         commit_catalog(client, records, server_timestamp="SERVER_TIME")
     assert client.collection_names == [COLLECTION_NAME]
-    assert [len(batch) for batch in client.commits] == [500]
+    assert [len(batch) for batch in client.commits] == [100]
+    assert client.commit_attempts == 2

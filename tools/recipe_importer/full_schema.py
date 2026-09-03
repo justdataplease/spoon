@@ -20,6 +20,9 @@ try:
         classify_official_category_keys,
         stable_random_key,
     )
+    from .providers import (
+        AKIS, ProviderError, canonical_recipe_url, provider_for, recipe_document_id,
+    )
 except ImportError:  # pragma: no cover - direct script execution
     from helpers import (
         canonical_category,
@@ -27,9 +30,17 @@ except ImportError:  # pragma: no cover - direct script execution
         classify_official_category_keys,
         stable_random_key,
     )
+    from providers import (
+        AKIS, ProviderError, canonical_recipe_url, provider_for, recipe_document_id,
+    )
 
 
 DETAIL_SCHEMA_VERSION = "akis-full-v1"
+ARGIRO_DETAIL_SCHEMA_VERSION = "argiro-jsonld-html-v3"
+SUPPORTED_DETAIL_SCHEMA_VERSIONS = {
+    DETAIL_SCHEMA_VERSION,
+    ARGIRO_DETAIL_SCHEMA_VERSION,
+}
 MAX_FIRESTORE_DOCUMENT_BYTES = 900 * 1024
 MAX_SOURCE_DEPTH = 32
 FACET_KEYS = ("diet", "meal_type", "occasion", "method", "cuisine", "ingredient")
@@ -455,6 +466,8 @@ def normalize_recipe_detail(
         "id": str(source_recipe_id),
         "detailSchemaVersion": DETAIL_SCHEMA_VERSION,
         "sourceRecipeId": source_recipe_id,
+        "sourceKey": AKIS.key,
+        "providerRecipeId": str(source_recipe_id),
         "slug": _string(source_payload.get("slug")),
         "title": title,
         "description": _string(source_payload.get("extra_description")),
@@ -487,6 +500,7 @@ def normalize_recipe_detail(
         "imageUrls": image_urls,
         "source": "akispetretzikis.com",
         "sourceUrl": source_url,
+        "canonicalUrl": source_url,
         "shortUrl": _safe_url(source_payload.get("short_url")),
         "sourceName": "Άκης Πετρετζίκης",
         "tags": tags,
@@ -554,9 +568,14 @@ def firestore_source_payload(record: Mapping[str, Any]) -> dict[str, Any]:
     """Return the complete source envelope for ``spoon_recipe_payloads/{id}``."""
     return {
         "language": "el",
-        "source": "akispetretzikis.com",
+        "source": record.get("source", "akispetretzikis.com"),
+        "sourceKey": record.get("sourceKey", "akis"),
+        "providerRecipeId": record.get(
+            "providerRecipeId", str(record["sourceRecipeId"])
+        ),
         "sourceRecipeId": record["sourceRecipeId"],
-        "detailSchemaVersion": DETAIL_SCHEMA_VERSION,
+        "canonicalUrl": record.get("canonicalUrl", record.get("sourceUrl", "")),
+        "detailSchemaVersion": record.get("detailSchemaVersion", DETAIL_SCHEMA_VERSION),
         "sourceUpdatedAt": record.get("sourceUpdatedAt"),
         "active": bool(record.get("active")),
         "payload": record["sourcePayload"],
@@ -572,7 +591,11 @@ def encoded_size(value: Mapping[str, Any]) -> int:
 def collection_hash(records: Sequence[Mapping[str, Any]], projector) -> str:
     """Hash deterministic document IDs and payloads exactly as sent to Firestore."""
     rows = [{"id": str(record["id"]), "data": projector(record)} for record in records]
-    rows.sort(key=lambda item: int(item["id"]))
+    rows.sort(
+        key=lambda item: (
+            0, int(item["id"])
+        ) if item["id"].isdigit() else (1, item["id"])
+    )
     encoded = json.dumps(
         rows, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False,
     ).encode("utf-8")
@@ -591,40 +614,91 @@ def ensure_full_record(record: Mapping[str, Any]) -> None:
     missing = FULL_REQUIRED_FIELDS - set(record)
     if missing:
         raise FullSchemaError("full recipe is missing fields: " + ", ".join(sorted(missing)))
-    if record.get("detailSchemaVersion") != DETAIL_SCHEMA_VERSION:
-        raise FullSchemaError(f"detailSchemaVersion must be {DETAIL_SCHEMA_VERSION}")
+    schema_version = record.get("detailSchemaVersion")
+    if schema_version not in SUPPORTED_DETAIL_SCHEMA_VERSIONS:
+        raise FullSchemaError(
+            "detailSchemaVersion must be one of "
+            + ", ".join(sorted(SUPPORTED_DETAIL_SCHEMA_VERSIONS))
+        )
     source_id = str(record.get("id") or "")
-    if not source_id.isdigit() or int(source_id) != record.get("sourceRecipeId"):
-        raise FullSchemaError("sourceRecipeId must be numeric and match id")
+    if schema_version == DETAIL_SCHEMA_VERSION:
+        if not source_id.isdigit() or int(source_id) != record.get("sourceRecipeId"):
+            raise FullSchemaError("sourceRecipeId must be numeric and match id")
+    else:
+        try:
+            provider = provider_for(
+                source_key=record.get("sourceKey"),
+                source=record.get("source"),
+                source_url=record.get("sourceUrl"),
+            )
+            expected_document_id = recipe_document_id(
+                provider, record.get("providerRecipeId")
+            )
+        except ProviderError as exc:
+            raise FullSchemaError(str(exc)) from exc
+        if provider.key != "argiro" or source_id != expected_document_id:
+            raise FullSchemaError("Argiro full recipe has inconsistent provider identity")
     payload = record.get("sourcePayload")
     if not isinstance(payload, Mapping):
         raise FullSchemaError("sourcePayload must be an object")
     if sanitize_source_payload(payload) != payload:
         raise FullSchemaError("sourcePayload is not sanitized")
-    if str(payload.get("id") or "") != source_id:
+    if schema_version == DETAIL_SCHEMA_VERSION and str(payload.get("id") or "") != source_id:
         raise FullSchemaError("sourcePayload.id must match id")
     associations = record.get("filterAssociations")
     if _normalize_associations(associations) != associations:
         raise FullSchemaError("filterAssociations must be canonical sorted facet objects")
-    expected_category_keys = classify_official_category_keys(
-        payload.get("category"),
-        associations,
-    )
+    if schema_version == DETAIL_SCHEMA_VERSION:
+        expected_taxonomy = None
+        expected_category_keys = classify_official_category_keys(
+            payload.get("category"), associations
+        )
+    else:
+        # Import lazily to avoid a module cycle: argiro_schema itself uses this
+        # validator after normalization. Never trust normalized category fields
+        # when the preserved provider taxonomy can be re-derived independently.
+        try:
+            if __package__ in (None, ""):
+                from argiro_schema import derive_argiro_taxonomy
+            else:
+                from .argiro_schema import derive_argiro_taxonomy
+            expected_taxonomy = derive_argiro_taxonomy(payload)
+        except (ImportError, FullSchemaError) as exc:
+            raise FullSchemaError(
+                f"cannot derive Argiro source taxonomy: {exc}"
+            ) from exc
+        expected_category_keys = expected_taxonomy["categoryKeys"]
+    if (
+        not isinstance(expected_category_keys, list)
+        or not expected_category_keys
+        or not all(isinstance(item, str) for item in expected_category_keys)
+    ):
+        raise FullSchemaError("categoryKeys must be a non-empty string list")
     if record.get("categoryKeys") != expected_category_keys:
         raise FullSchemaError(
             "categoryKeys do not match the official source taxonomy"
         )
-    expected_category = canonical_category(expected_category_keys)
+    expected_category = (
+        expected_taxonomy["category"]
+        if expected_taxonomy is not None
+        else canonical_category(expected_category_keys)
+    )
     if record.get("category") != expected_category:
         raise FullSchemaError("category does not match the official source taxonomy")
-    expected_category_label = CATEGORY_LABELS.get(expected_category, "Άλλο")
+    expected_category_label = (
+        expected_taxonomy["categoryLabel"]
+        if expected_taxonomy is not None
+        else CATEGORY_LABELS.get(expected_category, "Άλλο")
+    )
     if record.get("categoryLabel") != expected_category_label:
         raise FullSchemaError(
             "categoryLabel does not match the official source taxonomy"
         )
     raw_category = _mapping(payload.get("category"))
-    expected_source_id = _int(
-        raw_category.get("id") or payload.get("recipe_category_id")
+    expected_source_id = (
+        _int(raw_category.get("id") or payload.get("recipe_category_id"))
+        if schema_version == DETAIL_SCHEMA_VERSION
+        else 0
     )
     if record.get("categorySourceId") != expected_source_id:
         raise FullSchemaError("categorySourceId does not match sourcePayload")
@@ -636,6 +710,9 @@ def ensure_full_record(record: Mapping[str, Any]) -> None:
         "sourceName", "nutritionPer", "authorName", "sponsorLogoUrl", "createdAt",
         "publishedAt", "sourceUpdatedAt", "ease", "sitemapLastModified",
     }
+    for field in ("sourceKey", "providerRecipeId", "canonicalUrl"):
+        if field in record:
+            string_fields.add(field)
     if "retiredDetectedAt" in record:
         string_fields.add("retiredDetectedAt")
     for field in string_fields:
@@ -710,4 +787,6 @@ def ensure_full_record(record: Mapping[str, Any]) -> None:
 
 
 def is_full_record(record: Mapping[str, Any]) -> bool:
-    return bool(FULL_REQUIRED_FIELDS & set(record))
+    # sourceRecipeId is also an additive provenance field on lean metadata.
+    # Only detail-specific sentinels distinguish a full-content document.
+    return "detailSchemaVersion" in record or "sourcePayload" in record

@@ -2,8 +2,10 @@ name: Quarterly Greek recipe catalog refresh
 
 'on':
   schedule:
-    # GitHub cron is UTC: 03:00 on the first day of Jan/Apr/Jul/Oct.
+    # Split providers across consecutive UTC days so each import also fits the
+    # Firestore free-tier daily write allowance (three projections per recipe).
     - cron: "0 3 1 1,4,7,10 *"
+    - cron: "0 3 2 1,4,7,10 *"
   workflow_dispatch: {}
 
 concurrency:
@@ -16,8 +18,6 @@ permissions:
 env:
   PYTHONDONTWRITEBYTECODE: "1"
   PIP_DISABLE_PIP_VERSION_CHECK: "1"
-  CATALOG_PATH: tools/recipe_importer/output/akis-greek-full.jsonl
-  MANIFEST_PATH: tools/recipe_importer/output/akis-greek-full.manifest.json
 
 jobs:
   manual_validate:
@@ -47,14 +47,26 @@ jobs:
       - name: Test the catalog pipeline
         run: python -m pytest tools/recipe_importer/tests
 
-      - name: Crawl the complete authorized Greek catalog
+      - name: Crawl the complete authorized Akis catalog
         run: python tools/recipe_importer/crawl_catalog.py --i-have-permission
 
-      - name: Validate catalog and completeness manifest
+      - name: Crawl the complete authorized Argiro catalog
+        run: python tools/recipe_importer/crawl_argiro.py --i-have-argiro-permission
+
+      - name: Validate Akis catalog and completeness manifest
         run: >-
-          python tools/recipe_importer/import_catalog.py "$CATALOG_PATH"
-          --manifest "$MANIFEST_PATH"
+          python tools/recipe_importer/import_catalog.py
+          tools/recipe_importer/output/akis-greek-full.jsonl
+          --manifest tools/recipe_importer/output/akis-greek-full.manifest.json
           --i-have-permission
+
+      - name: Validate Argiro catalog and completeness manifest
+        run: >-
+          python tools/recipe_importer/import_catalog.py
+          tools/recipe_importer/output/argiro-greek-full.jsonl
+          --manifest tools/recipe_importer/output/argiro-greek-full.manifest.json
+          --i-have-permission
+          --i-have-argiro-permission
 
       - name: Upload audit reports only
         if: always()
@@ -107,14 +119,30 @@ jobs:
           test -n "$GCP_WORKLOAD_IDENTITY_PROVIDER" || { echo "Missing GCP_WORKLOAD_IDENTITY_PROVIDER environment variable" >&2; exit 1; }
           test -n "$GCP_SERVICE_ACCOUNT" || { echo "Missing GCP_SERVICE_ACCOUNT environment variable" >&2; exit 1; }
 
-      - name: Crawl the complete authorized Greek catalog
+      - name: Crawl the complete authorized Akis catalog
+        if: github.event.schedule == '0 3 1 1,4,7,10 *'
         run: python tools/recipe_importer/crawl_catalog.py --i-have-permission
 
-      - name: Validate catalog and completeness manifest
+      - name: Crawl the complete authorized Argiro catalog
+        if: github.event.schedule == '0 3 2 1,4,7,10 *'
+        run: python tools/recipe_importer/crawl_argiro.py --i-have-argiro-permission
+
+      - name: Validate Akis catalog and completeness manifest
+        if: github.event.schedule == '0 3 1 1,4,7,10 *'
         run: >-
-          python tools/recipe_importer/import_catalog.py "$CATALOG_PATH"
-          --manifest "$MANIFEST_PATH"
+          python tools/recipe_importer/import_catalog.py
+          tools/recipe_importer/output/akis-greek-full.jsonl
+          --manifest tools/recipe_importer/output/akis-greek-full.manifest.json
           --i-have-permission
+
+      - name: Validate Argiro catalog and completeness manifest
+        if: github.event.schedule == '0 3 2 1,4,7,10 *'
+        run: >-
+          python tools/recipe_importer/import_catalog.py
+          tools/recipe_importer/output/argiro-greek-full.jsonl
+          --manifest tools/recipe_importer/output/argiro-greek-full.manifest.json
+          --i-have-permission
+          --i-have-argiro-permission
 
       - name: Authenticate to Google Cloud with GitHub OIDC
         uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
@@ -125,11 +153,24 @@ jobs:
           create_credentials_file: true
           export_environment_variables: true
 
-      - name: Import the validated catalog
+      - name: Import the validated Akis catalog
+        if: github.event.schedule == '0 3 1 1,4,7,10 *'
         run: >-
-          python tools/recipe_importer/import_catalog.py "$CATALOG_PATH"
-          --manifest "$MANIFEST_PATH"
+          python tools/recipe_importer/import_catalog.py
+          tools/recipe_importer/output/akis-greek-full.jsonl
+          --manifest tools/recipe_importer/output/akis-greek-full.manifest.json
           --i-have-permission
+          --commit
+          --project-id "$FIREBASE_PROJECT_ID"
+
+      - name: Import the validated Argiro catalog
+        if: github.event.schedule == '0 3 2 1,4,7,10 *'
+        run: >-
+          python tools/recipe_importer/import_catalog.py
+          tools/recipe_importer/output/argiro-greek-full.jsonl
+          --manifest tools/recipe_importer/output/argiro-greek-full.manifest.json
+          --i-have-permission
+          --i-have-argiro-permission
           --commit
           --project-id "$FIREBASE_PROJECT_ID"
 

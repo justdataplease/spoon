@@ -225,9 +225,14 @@ class MealPlanner @Inject constructor(
     suspend fun saveCustomRecipe(draft: CustomRecipe): CustomRecipe {
         repository.ensureReady()
         val now = System.currentTimeMillis()
+        val recipeId = draft.id.ifBlank(::newCustomRecipeId)
+        val existing = repository.customRecipes.first().firstOrNull { it.id == recipeId }
         val stored = draft.copy(
-            id = draft.id.ifBlank(::newCustomRecipeId),
-            createdAtEpochMillis = draft.createdAtEpochMillis.takeIf { it > 0L } ?: now,
+            id = recipeId,
+            createdAtEpochMillis = existing?.createdAtEpochMillis
+                ?.takeIf { it > 0L }
+                ?: draft.createdAtEpochMillis.takeIf { it > 0L }
+                ?: now,
             updatedAtEpochMillis = now,
         )
         repository.upsertCustomRecipe(stored)

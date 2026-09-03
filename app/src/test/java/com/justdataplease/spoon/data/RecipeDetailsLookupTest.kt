@@ -49,6 +49,24 @@ class RecipeDetailsLookupTest {
     }
 
     @Test
+    fun `eligible Akis details use the current fail closed street food rule`() {
+        val legacy = Recipe(
+            id = "2009",
+            category = "street_food",
+            categoryLabel = "Βρώμικο",
+            sourceKey = "akis",
+            mealTypeLabels = listOf("Σνακ"),
+            tags = listOf("Βρώμικο", "Σοκολάτα"),
+        )
+
+        val result = eligibleRecipeDetails(legacy, "2009", "2009")
+
+        assertEquals("other", result?.category)
+        assertEquals("Άλλο", result?.categoryLabel)
+        assertEquals(listOf("Σοκολάτα"), result?.tags)
+    }
+
+    @Test
     fun `details collection contract matches importer`() {
         assertEquals(
             "spoon_recipe_details",

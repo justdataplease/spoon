@@ -162,6 +162,46 @@ class ExploreRecipeFilterTest {
     }
 
     @Test
+    fun `source choices match new providers and legacy publisher domains`() {
+        val legacyAkis = recipe(
+            id = "legacy-akis",
+            title = "Legacy Akis",
+            rating = 9.0,
+            source = "www.akispetretzikis.com",
+            sourceName = "Άκης Πετρετζίκης",
+        )
+        val argiro = recipe(
+            id = "argiro-recipe",
+            title = "Argiro",
+            rating = 8.0,
+            sourceKey = "argiro",
+            source = "argiro.gr",
+            sourceName = "Αργυρώ Μπαρμπαρίγου",
+        )
+        val personal = recipe(
+            id = "custom_123",
+            title = "Personal",
+            rating = 7.0,
+            sourceName = "Προσωπική συνταγή",
+        )
+
+        assertEquals(
+            listOf(legacyAkis, argiro),
+            ExploreRecipeFilter.filter(
+                listOf(personal, argiro, legacyAkis),
+                ExploreCriteria(sourceKeys = setOf("akis", "argiro")),
+            ),
+        )
+        assertEquals(
+            listOf(personal),
+            ExploreRecipeFilter.filter(
+                listOf(legacyAkis, argiro, personal),
+                ExploreCriteria(sourceKeys = setOf("personal")),
+            ),
+        )
+    }
+
+    @Test
     fun `invalid criteria cannot accidentally broaden results`() {
         val recipes = listOf(recipe(id = "one"))
 
@@ -211,6 +251,9 @@ class ExploreRecipeFilterTest {
         methodLabels: List<String> = emptyList(),
         cuisineLabels: List<String> = emptyList(),
         ingredientLabels: List<String> = emptyList(),
+        source: String = "",
+        sourceKey: String = "",
+        sourceName: String = "",
         quickRecipe: Boolean = false,
     ) = Recipe(
         id = id,
@@ -230,6 +273,9 @@ class ExploreRecipeFilterTest {
         methodLabels = methodLabels,
         cuisineLabels = cuisineLabels,
         ingredientLabels = ingredientLabels,
+        source = source,
+        sourceKey = sourceKey,
+        sourceName = sourceName,
         quickRecipe = quickRecipe,
     )
 }

@@ -11,6 +11,46 @@ collection, storage, media display, and refresh cadence. The required
 permission by itself. The generated catalog, checkpoints, reports, and credentials
 are ignored by Git.
 
+## Multiple recipe providers
+
+Records now include additive provenance fields: source (legacy publisher
+domain), sourceKey (akis or argiro), string providerRecipeId, legacy numeric
+sourceRecipeId, sourceUrl/canonicalUrl, and Greek sourceName. Existing Akis
+document IDs remain numeric so saved plans, favorites, history, and notes do not
+break. Other providers are namespaced: Argiro WordPress ID 17265 becomes
+argiro_17265, with a deterministic hash fallback only when a native ID is not
+document-safe.
+
+Full imports are deliberately single-provider. Retirement inventory is filtered
+by source (including legacy Akis inference), so an Argiro refresh cannot
+tombstone Akis recipes. spoon_catalog/status remains app-compatible and gains
+per-source metadata; spoon_catalog/status_{sourceKey} stores each provider's own
+counts and freshness.
+
+### Argiro provider and permission requirement
+
+crawl_argiro.py reads all recipe-sitemap XML files declared by the sitemap
+index, accepts only strict Greek recipe URLs on approved HTTPS hosts, honors
+robots.txt, rate-limits globally to at least one request per second, retries
+transient responses, resumes unchanged URL/last-modified pairs in SQLite, and
+extracts JSON-LD Recipe data plus narrowly scoped page metadata. Tests contain
+synthetic content only.
+
+Run or schedule it only while the operator's Argiro/ALTER EGO permission covers
+systematic recipe text, image/video metadata, Firestore storage, personal-app
+display, and the requested refresh cadence. The command's permission switch is
+an explicit operational acknowledgement, not a substitute for that permission.
+
+Run these commands after confirming that authorization:
+
+    python tools/recipe_importer/crawl_argiro.py --i-have-argiro-permission
+    python tools/recipe_importer/import_catalog.py tools/recipe_importer/output/argiro-greek-full.jsonl --manifest tools/recipe_importer/output/argiro-greek-full.manifest.json --i-have-permission --i-have-argiro-permission
+    python tools/recipe_importer/import_catalog.py tools/recipe_importer/output/argiro-greek-full.jsonl --manifest tools/recipe_importer/output/argiro-greek-full.manifest.json --i-have-permission --i-have-argiro-permission --commit --project-id spoontheplanner
+
+Outputs are argiro-greek-full.jsonl, argiro-greek-full.manifest.json,
+argiro-greek-full.failures.json, and the private resumable
+.argiro-greek-full.checkpoint.sqlite3.
+
 ## What the pipeline captures
 
 `crawl_catalog.py` performs a complete, consistency-checked run:
@@ -160,8 +200,8 @@ legacy flag.
 
 ## Firestore projections and publication order
 
-A full import uses the numeric source ID as the document ID and writes three
-projections:
+A full import uses the stable provider-aware document ID described above and
+writes three projections:
 
 ```text
 spoon_recipes/{id}           lean list/planner/search fields and media previews
@@ -170,10 +210,13 @@ spoon_recipe_payloads/{id}   complete sanitized source envelope for backend audi
 spoon_catalog/status         last successfully published catalog checkpoint
 ```
 
-Summary, detail, and source documents are fully replaced in batches of at most
-500. Existing active IDs absent from the new active catalog are merge-tombstoned
-with `active: false` in all three collections; documents are not deleted. This
-also protects scheduled fresh-run imports that do not have a previous JSONL file.
+Summary, detail, and source documents are fully replaced in conservative batches
+of 100 by default (`--batch-size` may be set up to 500). A batch commit that ends
+with Firestore `DeadlineExceeded` or `ServiceUnavailable` is retried at most twice
+with bounded exponential backoff; permanent errors fail immediately. Existing
+active IDs absent from the new active catalog are merge-tombstoned with
+`active: false` in all three collections; documents are not deleted. This also
+protects scheduled fresh-run imports that do not have a previous JSONL file.
 
 `spoon_catalog/status` is intentionally written last and includes deterministic
 catalog/projection hashes, schema version, active/retired counts, maximum document
@@ -190,10 +233,12 @@ Firestore data access needed by this job.
 
 ## Quarterly GitHub Actions refresh
 
-`.github/workflows/quarterly-catalog-refresh.yml` runs at 03:00 UTC on January 1,
-April 1, July 1, and October 1. The scheduled job tests the tooling, performs a
-fresh complete crawl, validates the manifest without cloud credentials, obtains a
-short-lived Google credential through GitHub OIDC, and imports the same files.
+`.github/workflows/quarterly-catalog-refresh.yml` runs at 03:00 UTC on January,
+April, July, and October 1 for Akis and on the following day for Argiro. Splitting
+the providers keeps each three-projection import below Firestore's free daily
+write allowance. Each scheduled run tests the tooling, performs one complete
+crawl, validates its manifest without cloud credentials, obtains a short-lived
+Google credential through GitHub OIDC, and imports that same file.
 
 A manual `workflow_dispatch` is structurally crawl-and-validate only. It runs in
 a separate job with `contents: read` as its only permission and has no production
@@ -234,7 +279,7 @@ datastore.entities.update
 There is deliberately no `datastore.entities.delete` permission. Bind this custom
 role only to `spoon-catalog-importer@spoontheplanner.iam.gserviceaccount.com` with
 a recurring IAM condition that permits requests only on January/April/July/October
-1 from hour 03 through hour 07 UTC (03:00:00–07:59:59 UTC).
+1 and 2 from hour 03 through hour 07 UTC (03:00:00–07:59:59 UTC).
 
 Important scope limitation: Firestore IAM cannot collection-scope this project
 binding. During those quarterly windows, the four permissions therefore apply to
@@ -253,7 +298,7 @@ PROJECT_ID="spoontheplanner"
 PROJECT_NUMBER="$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')"
 SERVICE_ACCOUNT="spoon-catalog-importer@spoontheplanner.iam.gserviceaccount.com"
 ROLE_NAME="projects/$PROJECT_ID/roles/spoonCatalogWriter"
-IAM_CONDITION="request.time.getDate() == 1 && (request.time.getMonth() == 0 || request.time.getMonth() == 3 || request.time.getMonth() == 6 || request.time.getMonth() == 9) && request.time.getHours() >= 3 && request.time.getHours() <= 7"
+IAM_CONDITION="(request.time.getDate() == 1 || request.time.getDate() == 2) && (request.time.getMonth() == 0 || request.time.getMonth() == 3 || request.time.getMonth() == 6 || request.time.getMonth() == 9) && request.time.getHours() >= 3 && request.time.getHours() <= 7"
 
 gcloud services enable iamcredentials.googleapis.com sts.googleapis.com \
   firestore.googleapis.com --project="$PROJECT_ID"

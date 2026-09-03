@@ -53,25 +53,38 @@ fun CustomRecipeScreen(
     onBack: () -> Unit,
     onSave: (CustomRecipeDraftUi) -> Unit,
     modifier: Modifier = Modifier,
+    initialDraft: CustomRecipeDraftUi? = null,
 ) {
     BackHandler(onBack = onBack)
-    var title by rememberSaveable { mutableStateOf("") }
-    var description by rememberSaveable { mutableStateOf("") }
-    var categoryKey by rememberSaveable { mutableStateOf(AvailableCategories.first().key) }
-    var prepMinutes by rememberSaveable { mutableStateOf("") }
-    var cookMinutes by rememberSaveable { mutableStateOf("") }
-    var servings by rememberSaveable { mutableStateOf("") }
+    val draftKey = initialDraft?.recipeId.orEmpty()
+    var title by rememberSaveable(draftKey) { mutableStateOf(initialDraft?.title.orEmpty()) }
+    var description by rememberSaveable(draftKey) { mutableStateOf(initialDraft?.description.orEmpty()) }
+    var categoryKey by rememberSaveable(draftKey) {
+        mutableStateOf(
+            initialDraft?.categoryKey
+                ?.takeIf { key -> AvailableCategories.any { it.key == key } }
+                ?: AvailableCategories.first().key,
+        )
+    }
+    var prepMinutes by rememberSaveable(draftKey) {
+        mutableStateOf(initialDraft?.prepMinutes?.takeIf { it > 0 }?.toString().orEmpty())
+    }
+    var cookMinutes by rememberSaveable(draftKey) {
+        mutableStateOf(initialDraft?.cookMinutes?.takeIf { it > 0 }?.toString().orEmpty())
+    }
+    var servings by rememberSaveable(draftKey) { mutableStateOf(initialDraft?.servings.orEmpty()) }
     // Intentionally not saveable: a photo data URL is too large for Android's saved-state Bundle.
-    var imageDataUrl by remember { mutableStateOf("") }
-    var ingredients by remember { mutableStateOf(emptyList<CustomIngredientDraftUi>()) }
-    var ingredientTitle by rememberSaveable { mutableStateOf("") }
-    var ingredientQuantity by rememberSaveable { mutableStateOf("") }
-    var ingredientUnit by rememberSaveable { mutableStateOf("") }
-    var steps by remember { mutableStateOf(emptyList<String>()) }
-    var stepText by rememberSaveable { mutableStateOf("") }
-    var formMessage by remember { mutableStateOf<String?>(null) }
+    var imageDataUrl by remember(draftKey) { mutableStateOf(initialDraft?.imageDataUrl.orEmpty()) }
+    var ingredients by remember(draftKey) { mutableStateOf(initialDraft?.ingredients.orEmpty()) }
+    var ingredientTitle by rememberSaveable(draftKey) { mutableStateOf("") }
+    var ingredientQuantity by rememberSaveable(draftKey) { mutableStateOf("") }
+    var ingredientUnit by rememberSaveable(draftKey) { mutableStateOf("") }
+    var steps by remember(draftKey) { mutableStateOf(initialDraft?.steps.orEmpty()) }
+    var stepText by rememberSaveable(draftKey) { mutableStateOf("") }
+    var formMessage by remember(draftKey) { mutableStateOf<String?>(null) }
 
     fun draft() = CustomRecipeDraftUi(
+        recipeId = initialDraft?.recipeId.orEmpty(),
         title = title.trim(),
         description = description.trim(),
         categoryKey = categoryKey,
@@ -96,8 +109,18 @@ fun CustomRecipeScreen(
                     Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Πίσω")
                 }
                 Column {
-                    Text("Δική μου συνταγή", style = MaterialTheme.typography.headlineMedium)
-                    Text("Γράψε την όπως ακριβώς τη μαγειρεύεις", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(
+                        if (initialDraft == null) "Δική μου συνταγή" else "Επεξεργασία συνταγής",
+                        style = MaterialTheme.typography.headlineMedium,
+                    )
+                    Text(
+                        if (initialDraft == null) {
+                            "Γράψε την όπως ακριβώς τη μαγειρεύεις"
+                        } else {
+                            "Άλλαξε κατηγορία ή στοιχεία και αποθήκευσέ την ξανά"
+                        },
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }
         }

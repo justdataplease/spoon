@@ -260,6 +260,15 @@ private fun ExploreRecipeCard(
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.primary,
                 )
+                recipe.sourceName.ifBlank { recipe.sourceKey }.takeIf(String::isNotBlank)?.let { source ->
+                    Text(
+                        "Από $source",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
                 Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                     SmallMetric("★ ${"%.1f".format(GreekLocale, recipe.rating10)}/10")
                     SmallMetric(if (recipe.prepMinutes > 0) "${recipe.prepMinutes}′ προετ." else "Χρόνος —")
@@ -336,6 +345,33 @@ private fun ExploreFilterSheet(
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+            }
+            item {
+                FilterTitle("Πηγή συνταγής")
+                Text(
+                    "Επίλεξε μία ή περισσότερες πηγές.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (options.sources.isEmpty()) {
+                    Text("Δεν υπάρχουν ακόμη διαθέσιμες πηγές.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                } else {
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        item {
+                            ChoiceChip("Όλες", draft.sourceKeys.isEmpty()) {
+                                draft = draft.copy(sourceKeys = emptySet())
+                            }
+                        }
+                        items(options.sources, key = ExploreSourceOptionUi::key) { source ->
+                            ChoiceChip(
+                                label = "${source.label} · ${source.recipeCount}",
+                                selected = source.key in draft.sourceKeys,
+                            ) {
+                                draft = draft.copy(sourceKeys = draft.sourceKeys.toggled(source.key))
+                            }
+                        }
+                    }
+                }
             }
             item {
                 FilterTitle("Βασικό υλικό")
@@ -449,3 +485,6 @@ private fun ChoiceChip(label: String, selected: Boolean, onClick: () -> Unit) {
 private fun FilterTitle(text: String) {
     Text(text, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
 }
+
+private fun Set<String>.toggled(value: String): Set<String> =
+    if (value in this) this - value else this + value

@@ -60,6 +60,7 @@ class UiEaseMappingTest {
     @Test
     fun `ease labels explain both workload dimensions`() {
         assertEquals("Άγνωστη", EaseUi.UNKNOWN.greekLabel)
+        assertEquals("Ευκολάκι", EaseUi.EASY.greekLabel)
         assertEquals("έως 1 παρασκευή και 1–5 βήματα", EaseUi.EASY.detail)
         assertEquals("2 παρασκευές ή 6–9 βήματα", EaseUi.MEDIUM.detail)
         assertEquals("3+ παρασκευές ή 10+ βήματα", EaseUi.HARD.detail)

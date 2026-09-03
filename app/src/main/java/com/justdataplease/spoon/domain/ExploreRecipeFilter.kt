@@ -19,6 +19,7 @@ data class ExploreCriteria(
     val methodLabels: Set<String> = emptySet(),
     val cuisineLabels: Set<String> = emptySet(),
     val ingredientLabels: Set<String> = emptySet(),
+    val sourceKeys: Set<String> = emptySet(),
     val quickOnly: Boolean = false,
 ) {
     fun isValid(): Boolean =
@@ -51,6 +52,7 @@ object ExploreRecipeFilter {
         val selectedMethods = criteria.methodLabels.normalizedFacetSelection()
         val selectedCuisines = criteria.cuisineLabels.normalizedFacetSelection()
         val selectedIngredients = criteria.ingredientLabels.normalizedFacetSelection()
+        val selectedSources = criteria.sourceKeys.normalizedFacetSelection()
 
         return recipes.asSequence()
             .filter(Recipe::isActiveGreekRecipe)
@@ -73,6 +75,12 @@ object ExploreRecipeFilter {
             .filter { selectedMethods.matchesFacet(it.methodLabels) }
             .filter { selectedCuisines.matchesFacet(it.cuisineLabels) }
             .filter { selectedIngredients.matchesFacet(it.ingredientLabels) }
+            .filter { recipe ->
+                selectedSources.isEmpty() ||
+                    sequenceOf(recipe.effectiveSourceKey, recipe.source, recipe.sourceName)
+                        .map(String::normalizedSearchText)
+                        .any { it in selectedSources }
+            }
             .filter { !criteria.quickOnly || it.quickRecipe }
             .filter { recipe ->
                 queryTerms.isEmpty() || recipe.searchableText().let { searchable ->
@@ -108,6 +116,9 @@ private fun Recipe.searchableText(): String = buildList {
     add(description)
     add(category)
     add(categoryLabel)
+    add(effectiveSourceKey)
+    add(source)
+    add(sourceName)
     addAll(tags)
     addAll(dietLabels)
     addAll(mealTypeLabels)

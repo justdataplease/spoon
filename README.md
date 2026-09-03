@@ -15,9 +15,9 @@ Android application ID is `com.spoon.app`.
 - Independent random reroll for one day or the whole week.
 - Per-day constraints for category, difficulty, minimum rating on a 0–10 scale,
   and maximum hands-on preparation time.
-- A clear effort index based on preparation sections and method steps: unknown
-  when both are absent, easy for at most one preparation and 1–5 steps, demanding
-  for at least three preparations or ten steps, and moderate otherwise.
+- A clear «Ευκολάκι» effort index based on preparation sections and method steps:
+  unknown when both are absent, easy for at most one preparation and 1–5 steps,
+  demanding for at least three preparations or ten steps, and moderate otherwise.
 - Favorites, cooked/not-cooked tracking, a dedicated cooking history, previous/next
   weeks, and a month calendar.
 - Replacement of an existing day's suggestion with any saved favorite.
@@ -85,7 +85,8 @@ $env:ANDROID_SDK_ROOT=$env:ANDROID_HOME
 ```
 
 The installable debug APK is generated at
-`app/build/outputs/apk/debug/app-debug.apk`. To install it over USB:
+`app/build/outputs/apk/debug/app-debug.apk` and the delivered copy is kept at
+`dist/spoon-debug.apk`. To install it over USB:
 
 ```powershell
 adb devices
@@ -151,10 +152,10 @@ ID and must also be active Greek content.
 
 ## Complete Greek recipe catalog
 
-The repository includes a permission-gated full crawler because the operator has
-confirmed authorization for this personal use. It discovers every current
-canonical Greek recipe, verifies that sitemap and API totals agree, fetches all six
-filter taxonomies and every rich detail payload, and produces three independently
+The repository includes permission-gated full crawlers for Akis Petretzikis and
+Argiro because the operator has confirmed authorization for this personal use.
+Each provider is discovered from its official Greek sitemap/API, normalized into
+the same auditable planner categories, and emitted as three independently
 size-checked Firestore projections. Generated catalog data is private and ignored
 by Git.
 
@@ -173,6 +174,7 @@ Crawl, validate, then import the exact manifest/catalog pair:
 
 ```powershell
 python tools/recipe_importer/crawl_catalog.py --i-have-permission
+python tools/recipe_importer/crawl_argiro.py --i-have-argiro-permission
 
 python tools/recipe_importer/import_catalog.py `
   tools/recipe_importer/output/akis-greek-full.jsonl `
@@ -183,6 +185,17 @@ python tools/recipe_importer/import_catalog.py `
   tools/recipe_importer/output/akis-greek-full.jsonl `
   --manifest tools/recipe_importer/output/akis-greek-full.manifest.json `
   --i-have-permission --commit --project-id spoontheplanner
+
+python tools/recipe_importer/import_catalog.py `
+  tools/recipe_importer/output/argiro-greek-full.jsonl `
+  --manifest tools/recipe_importer/output/argiro-greek-full.manifest.json `
+  --i-have-permission --i-have-argiro-permission
+
+python tools/recipe_importer/import_catalog.py `
+  tools/recipe_importer/output/argiro-greek-full.jsonl `
+  --manifest tools/recipe_importer/output/argiro-greek-full.manifest.json `
+  --i-have-permission --i-have-argiro-permission --commit `
+  --project-id spoontheplanner
 ```
 
 The crawler reads `robots.txt`, restricts itself to same-site HTTPS, waits at
@@ -203,8 +216,10 @@ Two independent mechanisms handle freshness:
   every 90 days. It authenticates and reads only `spoon_catalog/status`; it never
   crawls the publisher or triggers an import.
 - [The quarterly GitHub Actions workflow](.github/workflows/quarterly-catalog-refresh.yml)
-  runs at 03:00 UTC on January 1, April 1, July 1, and October 1. It tests, crawls,
-  validates, authenticates with short-lived Google OIDC, and imports. A manual
+  refreshes Akis at 03:00 UTC on January 1, April 1, July 1, and October 1, then
+  Argiro at the same time on day 2. The split keeps each three-projection import
+  below the Firestore free daily write allowance. Scheduled jobs test, crawl,
+  validate, authenticate with short-lived Google OIDC, and import. A manual
   dispatch always stops after crawl and validation; its separate job has no OIDC
   permission, Firebase variables, authentication step, or import step.
 
@@ -219,7 +234,7 @@ identity checks immutable GitHub repository ID `1355319945` and owner ID
 The dedicated importer service account receives only a custom
 `spoonCatalogWriter` role with Firestore entity create/get/list/update permissions
 and no delete permission. Its recurring IAM condition permits requests only on the
-first day of January, April, July, and October from 03:00 through 07:59 UTC.
+first two days of January, April, July, and October from 03:00 through 07:59 UTC.
 Firestore IAM cannot scope this binding to particular collections, so during that
 window these permissions apply across every Firestore document in the project.
 Outside the window, the binding grants no catalog data access.

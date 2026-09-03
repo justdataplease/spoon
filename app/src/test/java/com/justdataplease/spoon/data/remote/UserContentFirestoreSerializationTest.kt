@@ -82,6 +82,7 @@ class UserContentFirestoreSerializationTest {
             document.keys,
         )
         assertFalse(document.containsKey("id"))
+        assertEquals("vegetables", document["category"])
 
         val ingredientSections = document["ingredientSections"] as List<*>
         val section = ingredientSections.single() as Map<*, *>

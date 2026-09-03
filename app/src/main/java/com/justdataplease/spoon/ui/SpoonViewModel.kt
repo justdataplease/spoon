@@ -5,15 +5,11 @@ import androidx.lifecycle.viewModelScope
 import com.google.firebase.FirebaseException
 import com.justdataplease.spoon.data.model.DayMealPlan
 import com.justdataplease.spoon.data.model.CookedMeal
-import com.justdataplease.spoon.data.model.CustomRecipe
 import com.justdataplease.spoon.data.model.EaseLevel
 import com.justdataplease.spoon.data.model.MAX_SHOPPING_ITEMS_PER_WRITE
 import com.justdataplease.spoon.data.model.MealCategory
 import com.justdataplease.spoon.data.model.Recipe
 import com.justdataplease.spoon.data.model.RecipeFilters
-import com.justdataplease.spoon.data.model.RecipeIngredient
-import com.justdataplease.spoon.data.model.RecipeIngredientSection
-import com.justdataplease.spoon.data.model.RecipeMethodSection
 import com.justdataplease.spoon.data.model.RecipeNote
 import com.justdataplease.spoon.data.model.ShoppingListItem
 import com.justdataplease.spoon.domain.MealPlanSelection
@@ -38,13 +34,17 @@ import com.justdataplease.spoon.ui.model.SpoonUiState
 import com.justdataplease.spoon.ui.explore.ExploreFacetOptionsUi
 import com.justdataplease.spoon.ui.explore.ExploreFiltersUi
 import com.justdataplease.spoon.ui.explore.ExploreRecipeUi
+import com.justdataplease.spoon.ui.explore.toExploreSourceOptionsUi
 import com.justdataplease.spoon.ui.custom.CustomRecipeDraftUi
+import com.justdataplease.spoon.ui.custom.toDomainCustomRecipe
 import com.justdataplease.spoon.ui.history.HistoryEntryUi
 import com.justdataplease.spoon.ui.shopping.ShoppingIngredientDraftUi
 import com.justdataplease.spoon.ui.shopping.ShoppingListItemUi
 import dagger.hilt.android.lifecycle.HiltViewModel
+import java.text.Normalizer
 import java.time.LocalDate
 import java.time.YearMonth
+import java.util.Locale
 import java.util.UUID
 import javax.inject.Inject
 import kotlinx.coroutines.CoroutineScope
@@ -588,7 +588,10 @@ class SpoonViewModel @Inject constructor(
         }
     }
 
-    fun saveCustomRecipe(draft: CustomRecipeDraftUi) {
+    fun saveCustomRecipe(
+        draft: CustomRecipeDraftUi,
+        onSaved: () -> Unit = {},
+    ) {
         if (savingCustomRecipe.value) return
         viewModelScope.launch {
             savingCustomRecipe.value = true
@@ -598,6 +601,7 @@ class SpoonViewModel @Inject constructor(
                 }
                 message.value = "Η δική σου συνταγή αποθηκεύτηκε."
                 showRecipeDetails(saved.id)
+                onSaved()
             } catch (error: Exception) {
                 message.value = error.userMessage()
             } finally {
@@ -753,40 +757,6 @@ internal fun completionStateForDate(
             ?: false
         )
 
-private fun CustomRecipeDraftUi.toDomainCustomRecipe(): CustomRecipe {
-    val domainCategory = categoryKey.toDomainCategoryKey()
-        .takeIf { MealCategory.fromKey(it) != null }
-        ?: MealCategory.ANY.key
-    val cleanIngredients = ingredients.asSequence()
-        .filter { it.title.isNotBlank() }
-        .take(200)
-        .map { ingredient ->
-            RecipeIngredient(
-                title = ingredient.title.trim().take(200),
-                quantity = ingredient.quantity.trim().take(100),
-                unit = ingredient.unit.trim().take(100),
-            )
-        }
-        .toList()
-    val cleanSteps = steps.asSequence()
-        .map(String::trim)
-        .filter(String::isNotBlank)
-        .take(100)
-        .map { it.take(5_000) }
-        .toList()
-    return CustomRecipe(
-        title = title.trim().take(300),
-        description = description.trim().take(10_000),
-        category = domainCategory,
-        prepMinutes = prepMinutes.coerceIn(0, 10_080),
-        cookMinutes = cookMinutes.coerceIn(0, 10_080),
-        servings = servings.trim().take(100),
-        ingredientSections = listOf(RecipeIngredientSection(ingredients = cleanIngredients)),
-        methodSections = listOf(RecipeMethodSection(steps = cleanSteps)),
-        photoDataUri = imageDataUrl,
-    )
-}
-
 private fun List<ShoppingIngredientDraftUi>.toShoppingItems(): List<ShoppingListItem> {
     val now = System.currentTimeMillis()
     return asSequence()
@@ -913,11 +883,14 @@ private fun Recipe.toExploreRecipeUi(isFavorite: Boolean): ExploreRecipeUi {
         preparationCount = preparationCount,
         stepCount = stepCount,
         imageUrl = imageUrl,
+        sourceKey = effectiveSourceKey,
+        sourceName = sourceName,
         isFavorite = isFavorite,
     )
 }
 
 private fun List<Recipe>.toExploreOptionsUi() = ExploreFacetOptionsUi(
+    sources = toExploreSourceOptionsUi(),
     diets = flatMap(Recipe::dietLabels).cleanFacetOptions(),
     mealTypes = flatMap(Recipe::mealTypeLabels).cleanFacetOptions(),
     occasions = flatMap(Recipe::occasionLabels).cleanFacetOptions(),
@@ -926,12 +899,34 @@ private fun List<Recipe>.toExploreOptionsUi() = ExploreFacetOptionsUi(
     ingredients = flatMap(Recipe::ingredientLabels).cleanFacetOptions(),
 )
 
-private fun List<String>.cleanFacetOptions(): List<String> = asSequence()
-    .map(String::trim)
+internal fun List<String>.cleanFacetOptions(): List<String> = asSequence()
+    .map { it.trim().replace(FacetWhitespace, " ") }
     .filter(String::isNotBlank)
-    .distinct()
-    .sortedBy { it.lowercase() }
-    .toList()
+    .groupBy(String::normalizedFacetOptionKey)
+    .values
+    .map { variants ->
+        variants.reduce { best, candidate ->
+            if (candidate.facetDisplayQuality() > best.facetDisplayQuality()) candidate else best
+        }
+    }
+    .sortedBy(String::normalizedFacetOptionKey)
+
+private fun String.normalizedFacetOptionKey(): String =
+    Normalizer.normalize(this, Normalizer.Form.NFD)
+        .filterNot { Character.getType(it) == Character.NON_SPACING_MARK.toInt() }
+        .lowercase(Locale.ROOT)
+        .replace('ς', 'σ')
+        .replace(FacetWhitespace, " ")
+        .trim()
+
+private fun String.facetDisplayQuality(): Int =
+    (if (any(Char::isLowerCase)) 2 else 0) +
+        if (
+            Normalizer.normalize(this, Normalizer.Form.NFD)
+                .any { Character.getType(it) == Character.NON_SPACING_MARK.toInt() }
+        ) 1 else 0
+
+private val FacetWhitespace = Regex("\\s+")
 
 private fun ExploreFiltersUi.toDomain(query: String) = ExploreCriteria(
     query = query,
@@ -950,6 +945,7 @@ private fun ExploreFiltersUi.toDomain(query: String) = ExploreCriteria(
     methodLabels = method.asSelectedSet(),
     cuisineLabels = cuisine.asSelectedSet(),
     ingredientLabels = ingredient.asSelectedSet(),
+    sourceKeys = sourceKeys.filter(String::isNotBlank).toSet(),
     quickOnly = quickOnly,
 )
 

@@ -93,7 +93,7 @@ internal fun CatalogDetailsSection(
         add("Κατάσταση πηγής" to if (recipe.published) "Δημοσιευμένη" else "Μη δημοσιευμένη")
         if (recipe.createdAt.isNotBlank()) add("Δημιουργία" to recipe.createdAt)
         if (recipe.sourceUpdatedAt.isNotBlank()) add("Τελευταία ενημέρωση πηγής" to recipe.sourceUpdatedAt)
-        if (recipe.shares > 0) add("Μερίδες" to recipe.shares.toString())
+        if (recipe.shares > 0) add("Κοινοποιήσεις" to recipe.shares.toString())
     }
     val showSeoTitle = recipe.seoTitle.isNotBlank() && recipe.seoTitle != recipe.title
     val showSeoDescription = recipe.seoDescription.isNotBlank() && recipe.seoDescription != recipe.description

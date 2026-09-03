@@ -20,9 +20,9 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -60,6 +60,38 @@ import androidx.compose.ui.viewinterop.AndroidView
 import kotlinx.coroutines.delay
 
 private const val InlinePlayerTimeoutMillis = 12_000L
+private const val YouTubeProbeDelayMillis = 350L
+private const val YouTubeProbeAttempts = 24
+
+internal enum class YouTubePlayerProbeResult { LOADING, READY, ERROR }
+
+internal fun parseYouTubePlayerProbeResult(rawResult: String?): YouTubePlayerProbeResult = when (
+    rawResult?.trim()?.trim('"')?.lowercase()
+) {
+    "ready" -> YouTubePlayerProbeResult.READY
+    "error" -> YouTubePlayerProbeResult.ERROR
+    else -> YouTubePlayerProbeResult.LOADING
+}
+
+internal val YouTubePlayerProbeScript =
+    "(function(){try{" +
+        "var error=document.querySelector('.ytp-error-content-wrap,.ytp-error');" +
+        "if(error&&error.offsetWidth>0&&error.offsetHeight>0&&error.textContent.trim().length>0)return 'error';" +
+        "var player=document.getElementById('movie_player');" +
+        "var video=document.querySelector('video.html5-main-video');" +
+        "var controls=document.querySelector('.ytp-chrome-bottom,.ytp-large-play-button');" +
+        "var bounds=player?player.getBoundingClientRect():null;" +
+        "return player&&bounds&&bounds.width>0&&bounds.height>0&&(video||controls)?'ready':'loading';" +
+        "}catch(ignored){return 'loading';}})()"
+
+internal val YouTubeViewportFixScript =
+    "(function(){" +
+        "var h=(window.innerHeight||document.documentElement.clientHeight||200)+'px';" +
+        "document.documentElement.style.setProperty('height',h,'important');" +
+        "document.body.style.setProperty('height',h,'important');" +
+        "var root=document.getElementById('player');if(root)root.style.setProperty('height',h,'important');" +
+        "var player=document.getElementById('movie_player');if(player)player.style.setProperty('height',h,'important');" +
+        "window.dispatchEvent(new Event('resize'));return h;})()"
 
 @Composable
 internal fun RecipeVideoSection(
@@ -105,13 +137,13 @@ private fun VideoCard(
                 SecureInlineVideo(
                     source = source,
                     onOpenExternal = onOpenExternal,
-                    modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f),
+                    modifier = Modifier.fillMaxWidth().height(210.dp),
                 )
             } else {
                 VideoPlaceholder(
                     canPlayInline = source != null,
                     onPlay = { requestedPlayback = true },
-                    modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f),
+                    modifier = Modifier.fillMaxWidth().height(210.dp),
                 )
             }
 
@@ -128,7 +160,7 @@ private fun VideoCard(
                     onClick = { safeExternalUrl?.let(onOpenExternal) },
                     enabled = safeExternalUrl != null,
                 ) {
-                    Text("Άνοιγμα")
+                    Text("Άνοιγμα εκτός εφαρμογής")
                     Icon(
                         Icons.AutoMirrored.Outlined.OpenInNew,
                         contentDescription = null,
@@ -208,6 +240,7 @@ private fun SecureInlineVideo(
         onDispose {
             runCatching {
                 webView.stopLoading()
+                webView.onPause()
                 webView.webChromeClient = null
                 webView.webViewClient = WebViewClient()
                 webView.loadUrl("about:blank")
@@ -221,6 +254,7 @@ private fun SecureInlineVideo(
     Box(modifier = modifier.background(Color(0xFF17130F))) {
         AndroidView(
             factory = { webView },
+            update = { it.onResume() },
             modifier = Modifier.fillMaxSize(),
         )
 
@@ -302,6 +336,8 @@ private object WebViewHolder {
             safeBrowsingEnabled = true
             builtInZoomControls = false
             displayZoomControls = false
+            loadWithOverviewMode = true
+            useWideViewPort = true
         }
         CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
         webChromeClient = object : WebChromeClient() {
@@ -321,6 +357,8 @@ private object WebViewHolder {
             }
         }
         webViewClient = object : WebViewClient() {
+            private var youtubeProbeGeneration = 0
+
             override fun onReceivedError(
                 view: WebView?,
                 request: WebResourceRequest?,
@@ -347,8 +385,21 @@ private object WebViewHolder {
             }
 
             override fun onRenderProcessGone(view: WebView?, detail: RenderProcessGoneDetail?): Boolean {
-                onError("Ο player σταμάτησε απρόσμενα.")
+                onError("Η αναπαραγωγή βίντεο σταμάτησε απρόσμενα.")
                 return true
+            }
+
+            override fun onPageFinished(view: WebView?, url: String?) {
+                super.onPageFinished(view, url)
+                val youtubeSource = source as? InlineVideoSource.YouTube ?: return
+                val playerView = view ?: return
+                if (url == null || !isAllowedVideoNavigation(url, youtubeSource)) return
+                val generation = ++youtubeProbeGeneration
+                playerView.evaluateJavascript(YouTubeViewportFixScript) {
+                    if (generation == youtubeProbeGeneration) {
+                        probeYouTubePlayer(playerView, generation, YouTubeProbeAttempts)
+                    }
+                }
             }
 
             override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
@@ -357,23 +408,40 @@ private object WebViewHolder {
                 return handleNavigation(target)
             }
 
-            @Deprecated("Compatibility callback")
-            override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean =
-                url?.let(::handleNavigation) ?: true
-
             private fun handleNavigation(target: String): Boolean {
                 if (isAllowedVideoNavigation(target, source)) return false
                 if (target.startsWith("https://", ignoreCase = true)) onExternalNavigation(target)
                 return true
             }
+
+            private fun probeYouTubePlayer(view: WebView, generation: Int, attemptsRemaining: Int) {
+                view.evaluateJavascript(YouTubePlayerProbeScript) { rawResult ->
+                    if (generation != youtubeProbeGeneration) return@evaluateJavascript
+                    when (parseYouTubePlayerProbeResult(rawResult)) {
+                        YouTubePlayerProbeResult.READY -> onReady()
+                        YouTubePlayerProbeResult.ERROR ->
+                            onError("Το YouTube δεν μπόρεσε να αναπαράγει αυτό το βίντεο μέσα στην εφαρμογή.")
+                        YouTubePlayerProbeResult.LOADING -> if (attemptsRemaining > 0) {
+                            view.postDelayed(
+                                { probeYouTubePlayer(view, generation, attemptsRemaining - 1) },
+                                YouTubeProbeDelayMillis,
+                            )
+                        }
+                    }
+                }
+            }
         }
 
-        loadDataWithBaseURL(
-            "https://akispetretzikis.com/",
-            inlineVideoHtml(source),
-            "text/html",
-            "UTF-8",
-            null,
-        )
+        when (source) {
+            is InlineVideoSource.YouTube ->
+                loadUrl(source.embedUrl, inlineVideoRequestHeaders(source).toMutableMap())
+            else -> loadDataWithBaseURL(
+                InlineVideoReferer,
+                inlineVideoHtml(source),
+                "text/html",
+                "UTF-8",
+                null,
+            )
+        }
     }
 }

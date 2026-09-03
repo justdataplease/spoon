@@ -32,9 +32,12 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import com.justdataplease.spoon.data.model.isCustomRecipeId
 import com.justdataplease.spoon.ui.account.AccountScreen
 import com.justdataplease.spoon.ui.calendar.CalendarScreen
 import com.justdataplease.spoon.ui.custom.CustomRecipeScreen
+import com.justdataplease.spoon.ui.custom.CustomRecipeDraftUi
+import com.justdataplease.spoon.ui.custom.toCustomRecipeDraftUi
 import com.justdataplease.spoon.ui.details.RecipeDetailsScreen
 import com.justdataplease.spoon.ui.explore.ExploreScreen
 import com.justdataplease.spoon.ui.favorites.FavoriteReplacementSheet
@@ -73,16 +76,20 @@ fun SpoonApp(
     var selectedDestination by rememberSaveable { mutableIntStateOf(0) }
     var morePage by rememberSaveable { mutableStateOf(MorePage.HUB) }
     var isCreatingRecipe by rememberSaveable { mutableStateOf(false) }
+    var editingCustomRecipeDraft by remember { mutableStateOf<CustomRecipeDraftUi?>(null) }
     val snackbarHostState = remember { SnackbarHostState() }
     val selectedRecipe = state.selectedRecipe
+    val activeEditDraft = editingCustomRecipeDraft
 
     BackHandler(
         enabled = selectedRecipe != null ||
             state.favoriteReplacementDate != null ||
+            editingCustomRecipeDraft != null ||
             isCreatingRecipe ||
             (Destinations[selectedDestination].key == PrimaryDestination.MORE && morePage != MorePage.HUB),
     ) {
         when {
+            editingCustomRecipeDraft != null -> editingCustomRecipeDraft = null
             selectedRecipe != null -> viewModel.dismissRecipeDetails()
             state.favoriteReplacementDate != null -> viewModel.dismissFavoriteReplacement()
             isCreatingRecipe -> isCreatingRecipe = false
@@ -107,7 +114,7 @@ fun SpoonApp(
         containerColor = MaterialTheme.colorScheme.background,
         snackbarHost = { SnackbarHost(snackbarHostState) },
         bottomBar = {
-            if (selectedRecipe == null && !isCreatingRecipe) {
+            if (selectedRecipe == null && !isCreatingRecipe && editingCustomRecipeDraft == null) {
                 NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
                     Destinations.forEachIndexed { index, destination ->
                         val selected = selectedDestination == index
@@ -134,6 +141,16 @@ fun SpoonApp(
         },
     ) { padding ->
         when {
+            activeEditDraft != null -> CustomRecipeScreen(
+                isSaving = state.isSavingCustomRecipe,
+                onBack = { editingCustomRecipeDraft = null },
+                onSave = { draft ->
+                    viewModel.saveCustomRecipe(draft) { editingCustomRecipeDraft = null }
+                },
+                initialDraft = activeEditDraft,
+                modifier = Modifier.padding(padding),
+            )
+
             selectedRecipe != null -> RecipeDetailsScreen(
                 recipe = selectedRecipe,
                 onBack = viewModel::dismissRecipeDetails,
@@ -142,6 +159,11 @@ fun SpoonApp(
                 recipeNote = state.selectedRecipeNote,
                 onSaveNote = viewModel::saveRecipeNote,
                 onAddIngredients = viewModel::addIngredientsToShopping,
+                onEdit = if (selectedRecipe.recipeId.isCustomRecipeId()) {
+                    { editingCustomRecipeDraft = selectedRecipe.toCustomRecipeDraftUi() }
+                } else {
+                    null
+                },
                 isLoadingDetails = state.isRecipeDetailsLoading,
                 modifier = Modifier.padding(padding),
             )
@@ -149,7 +171,9 @@ fun SpoonApp(
             isCreatingRecipe -> CustomRecipeScreen(
                 isSaving = state.isSavingCustomRecipe,
                 onBack = { isCreatingRecipe = false },
-                onSave = viewModel::saveCustomRecipe,
+                onSave = { draft ->
+                    viewModel.saveCustomRecipe(draft) { isCreatingRecipe = false }
+                },
                 modifier = Modifier.padding(padding),
             )
 

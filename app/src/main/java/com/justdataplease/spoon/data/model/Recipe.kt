@@ -4,6 +4,7 @@ import com.google.firebase.firestore.DocumentId
 import com.google.firebase.firestore.Exclude
 import com.google.firebase.firestore.IgnoreExtraProperties
 import kotlinx.serialization.Serializable
+import java.util.Locale
 
 /** Full normalized recipe document used by both Firestore and the local demo catalog. */
 @Serializable
@@ -22,6 +23,14 @@ data class Recipe(
     val imageUrl: String = "",
     val sourceUrl: String = "",
     val sourceName: String = "",
+    /** Legacy publisher domain, retained for already-published Firestore documents. */
+    val source: String = "",
+    /** Stable machine key such as akis or argiro. */
+    val sourceKey: String = "",
+    /** Provider-native identity as text; unlike sourceRecipeId it may be non-numeric. */
+    val providerRecipeId: String = "",
+    /** Canonical publisher page; sourceUrl remains as a backwards-compatible alias. */
+    val canonicalUrl: String = "",
     val tags: List<String> = emptyList(),
     val updatedAtEpochMillis: Long = 0L,
     val active: Boolean = true,
@@ -68,6 +77,25 @@ data class Recipe(
     val sponsorLogoUrl: String = "",
     val notes: List<String> = emptyList(),
 ) {
+    /** Canonical key for new and pre-provenance Firestore documents. */
+    @get:Exclude
+    val effectiveSourceKey: String
+        get() {
+            sourceKey.trim().takeIf(String::isNotEmpty)?.let {
+                return it.lowercase(Locale.ROOT)
+            }
+            val legacy = source.trim().lowercase(Locale.ROOT).removePrefix("www.")
+            return when {
+                legacy == "akispetretzikis.com" -> "akis"
+                legacy == "argiro.gr" -> "argiro"
+                legacy == "personal" || id.startsWith("custom_") -> "personal"
+                sourceName == "Προσωπική συνταγή" -> "personal"
+                sourceName == "Δείγμα εφαρμογής" -> "demo"
+                legacy.isNotBlank() -> legacy
+                else -> ""
+            }
+        }
+
     @get:Exclude
     val easeLevel: EaseLevel
         get() = EaseLevel.fromWorkload(preparationCount, stepCount)

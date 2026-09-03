@@ -107,7 +107,22 @@ def test_unknown_taxonomy_fails_closed_and_format_is_only_a_fallback():
     assert classify_official_category_keys(
         {"id": 33, "slug": "snak"},
         {},
+    ) == ["other"]
+    assert classify_official_category_keys(
+        {"id": 33, "slug": "snak"},
+        {"meal_type": [{"id": "32", "title": "Σάντουιτς"}]},
     ) == ["dirty"]
+    assert classify_official_category_keys(
+        {"id": 33, "slug": "snak"},
+        {"meal_type": [{"id": "92", "title": "Finger food"}]},
+    ) == ["dirty"]
+    assert classify_official_category_keys(
+        {"id": 33, "slug": "snak"},
+        {
+            "ingredient": [{"id": "154", "title": "Σοκολάτα"}],
+            "meal_type": [{"id": "33", "title": "Σνακ"}],
+        },
+    ) == ["other"]
     assert classify_official_category_keys(
         {"id": 47, "slug": "smoothies"},
         {"ingredient": [{"id": "139", "title": "Φακές"}]},

@@ -25,6 +25,7 @@ import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Equalizer
+import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.outlined.FormatListNumbered
 import androidx.compose.material.icons.outlined.Groups
@@ -33,6 +34,7 @@ import androidx.compose.material.icons.outlined.PhotoLibrary
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.Star
 import androidx.compose.material.icons.outlined.Timer
+import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -57,11 +59,14 @@ import com.justdataplease.spoon.ui.model.RecipeDetailUi
 import com.justdataplease.spoon.ui.shopping.ShoppingIngredientDraftUi
 import java.util.Locale
 
+internal const val RecipeDetailsBackLabel = "Πίσω στις συνταγές"
+
 @Composable
 internal fun RichRecipeDetailsContent(
     recipe: RecipeDetailUi,
     onBack: () -> Unit,
     onToggleFavorite: () -> Unit,
+    onEdit: (() -> Unit)?,
     onOpenSource: () -> Unit,
     recipeNote: String,
     onSaveNote: (String) -> Unit,
@@ -79,18 +84,19 @@ internal fun RichRecipeDetailsContent(
         }
     }
 
-    LazyColumn(
-        modifier = modifier.fillMaxSize().navigationBarsPadding(),
-        contentPadding = PaddingValues(bottom = 36.dp),
-    ) {
-        item {
-            RichRecipeHero(recipe, onBack, onToggleFavorite)
-        }
-        item {
-            Column(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 22.dp),
-                verticalArrangement = Arrangement.spacedBy(18.dp),
-            ) {
+    Box(modifier = modifier.fillMaxSize()) {
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(bottom = 112.dp),
+        ) {
+            item {
+                RichRecipeHero(recipe, onBack, onToggleFavorite, onEdit)
+            }
+            item {
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 22.dp),
+                    verticalArrangement = Arrangement.spacedBy(18.dp),
+                ) {
                 RecipeHeading(recipe)
                 if (isLoadingDetails) {
                     Surface(
@@ -136,6 +142,26 @@ internal fun RichRecipeDetailsContent(
                         color = MaterialTheme.colorScheme.tertiary,
                     )
                 }
+                }
+            }
+        }
+        Surface(
+            modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().navigationBarsPadding(),
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 2.dp,
+            shadowElevation = 10.dp,
+        ) {
+            Button(
+                onClick = onBack,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 10.dp).height(54.dp),
+                shape = RoundedCornerShape(18.dp),
+            ) {
+                Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = null)
+                Text(
+                    RecipeDetailsBackLabel,
+                    modifier = Modifier.padding(start = 8.dp),
+                    fontWeight = FontWeight.Bold,
+                )
             }
         }
     }
@@ -148,6 +174,7 @@ fun RecipeDetailsScreen(
     onToggleFavorite: () -> Unit,
     onOpenSource: () -> Unit,
     modifier: Modifier = Modifier,
+    onEdit: (() -> Unit)? = null,
     recipeNote: String = "",
     onSaveNote: (String) -> Unit = {},
     onAddIngredients: (List<ShoppingIngredientDraftUi>) -> Unit = {},
@@ -156,6 +183,7 @@ fun RecipeDetailsScreen(
     recipe = recipe,
     onBack = onBack,
     onToggleFavorite = onToggleFavorite,
+    onEdit = onEdit,
     onOpenSource = onOpenSource,
     recipeNote = recipeNote,
     onSaveNote = onSaveNote,
@@ -169,6 +197,7 @@ private fun RichRecipeHero(
     recipe: RecipeDetailUi,
     onBack: () -> Unit,
     onToggleFavorite: () -> Unit,
+    onEdit: (() -> Unit)?,
 ) {
     Box(modifier = Modifier.fillMaxWidth().height(350.dp)) {
         RecipeArtwork(
@@ -192,12 +221,17 @@ private fun RichRecipeHero(
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
             HeroCircleButton(Icons.AutoMirrored.Outlined.ArrowBack, "Πίσω", onBack)
-            HeroCircleButton(
-                icon = if (recipe.isFavorite) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
-                description = if (recipe.isFavorite) "Αφαίρεση από τα αγαπημένα" else "Προσθήκη στα αγαπημένα",
-                onClick = onToggleFavorite,
-                tint = if (recipe.isFavorite) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                onEdit?.let { edit ->
+                    HeroCircleButton(Icons.Outlined.Edit, "Επεξεργασία συνταγής", edit)
+                }
+                HeroCircleButton(
+                    icon = if (recipe.isFavorite) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
+                    description = if (recipe.isFavorite) "Αφαίρεση από τα αγαπημένα" else "Προσθήκη στα αγαπημένα",
+                    onClick = onToggleFavorite,
+                    tint = if (recipe.isFavorite) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                )
+            }
         }
         Surface(
             modifier = Modifier.align(Alignment.BottomStart).padding(20.dp),

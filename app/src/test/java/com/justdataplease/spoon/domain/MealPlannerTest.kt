@@ -1,11 +1,15 @@
 package com.justdataplease.spoon.domain
 
 import com.justdataplease.spoon.data.DemoRecipeCatalog
+import com.justdataplease.spoon.data.model.CustomRecipe
 import com.justdataplease.spoon.data.model.DayMealPlan
 import com.justdataplease.spoon.data.model.EaseLevel
 import com.justdataplease.spoon.data.model.MealCategory
 import com.justdataplease.spoon.data.model.Recipe
 import com.justdataplease.spoon.data.model.RecipeFilters
+import com.justdataplease.spoon.data.model.RecipeIngredient
+import com.justdataplease.spoon.data.model.RecipeIngredientSection
+import com.justdataplease.spoon.data.model.RecipeMethodSection
 import com.justdataplease.spoon.domain.repository.SpoonRepository
 import com.justdataplease.spoon.domain.repository.BackendState
 import java.time.LocalDate
@@ -387,10 +391,41 @@ class MealPlannerTest {
         assertEquals(plan.category, plan.filters.category)
     }
 
+    @Test
+    fun `editing custom category preserves id and original creation time`() = runBlocking {
+        val existing = CustomRecipe(
+            id = "custom_01234567-89ab-4def-8123-456789abcdef",
+            title = "Η συνταγή μου",
+            category = MealCategory.POULTRY.key,
+            ingredientSections = listOf(
+                RecipeIngredientSection(ingredients = listOf(RecipeIngredient(title = "Υλικό"))),
+            ),
+            methodSections = listOf(RecipeMethodSection(steps = listOf("Βήμα"))),
+            createdAtEpochMillis = 1_000,
+            updatedAtEpochMillis = 2_000,
+        )
+        val repository = FakeRepository(initialCustomRecipes = listOf(existing))
+
+        val stored = MealPlanner(repository, RecipeSelector()).saveCustomRecipe(
+            existing.copy(
+                category = MealCategory.STREET_FOOD.key,
+                createdAtEpochMillis = 0,
+                updatedAtEpochMillis = 0,
+            ),
+        )
+
+        assertEquals(existing.id, stored.id)
+        assertEquals(existing.createdAtEpochMillis, stored.createdAtEpochMillis)
+        assertEquals(MealCategory.STREET_FOOD.key, stored.category)
+        assertTrue(stored.updatedAtEpochMillis >= existing.updatedAtEpochMillis)
+        assertEquals(stored, repository.custom.value.single())
+    }
+
     private class FakeRepository(
         initialPlans: List<DayMealPlan> = emptyList(),
         initialRecipes: List<Recipe> = DemoRecipeCatalog.recipes,
         initialFavorites: Set<String> = emptySet(),
+        initialCustomRecipes: List<CustomRecipe> = emptyList(),
     ) : SpoonRepository {
         override val backendState = MutableStateFlow<BackendState>(BackendState.Local)
         override val recipes: Flow<List<Recipe>> = MutableStateFlow(initialRecipes)
@@ -398,6 +433,8 @@ class MealPlannerTest {
         override val mealPlans: Flow<List<DayMealPlan>> = plans
         private val favorites = MutableStateFlow(initialFavorites)
         override val favoriteRecipeIds: Flow<Set<String>> = favorites
+        val custom = MutableStateFlow(initialCustomRecipes)
+        override val customRecipes: Flow<List<CustomRecipe>> = custom
         var ensureReadyCount = 0
         var upsertCount = 0
 
@@ -427,6 +464,10 @@ class MealPlannerTest {
             }
             favorites.value = changed
             return added
+        }
+
+        override suspend fun upsertCustomRecipe(recipe: CustomRecipe) {
+            custom.value = custom.value.filterNot { it.id == recipe.id } + recipe
         }
     }
 }

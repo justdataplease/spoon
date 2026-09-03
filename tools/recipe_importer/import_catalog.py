@@ -8,6 +8,7 @@ import json
 import math
 import re
 import sys
+import time
 from collections.abc import Iterable, Iterator, Mapping
 from pathlib import Path
 from typing import Any
@@ -35,6 +36,17 @@ if __package__ in (None, ""):
         firestore_source_payload,
         is_full_record,
     )
+    from providers import (  # type: ignore[import-not-found]
+        DOCUMENT_ID_RE,
+        ProviderError,
+        canonical_image_url,
+        canonical_recipe_url,
+        normalize_provider_recipe_id,
+        provider_for,
+        recipe_document_id,
+        record_source_key,
+        stable_recipe_random_key,
+    )
 else:
     from .helpers import (
         classify_category_keys,
@@ -56,6 +68,17 @@ else:
         firestore_source_payload,
         is_full_record,
     )
+    from .providers import (
+        DOCUMENT_ID_RE,
+        ProviderError,
+        canonical_image_url,
+        canonical_recipe_url,
+        normalize_provider_recipe_id,
+        provider_for,
+        recipe_document_id,
+        record_source_key,
+        stable_recipe_random_key,
+    )
 
 
 COLLECTION_NAME = "spoon_recipes"
@@ -64,12 +87,37 @@ PAYLOAD_COLLECTION_NAME = "spoon_recipe_payloads"
 STATUS_COLLECTION_NAME = "spoon_catalog"
 STATUS_DOCUMENT_ID = "status"
 MAX_BATCH_SIZE = 500
+DEFAULT_BATCH_SIZE = 100
+BATCH_COMMIT_MAX_ATTEMPTS = 3
+BATCH_COMMIT_INITIAL_BACKOFF_SECONDS = 1.0
+FULL_STATUS_METADATA_FIELDS = {
+    'detailSchemaVersion',
+    'activeRecipeCount',
+    'retiredRecipeCount',
+    'retiredOnCommitCount',
+    'knownRetiredRecipeCount',
+    'detailRecipeCount',
+    'activeDetailRecipeCount',
+    'sourcePayloadCount',
+    'activeSourcePayloadCount',
+    'summaryHash',
+    'detailHash',
+    'sourcePayloadHash',
+    'maximumSummaryDocumentBytes',
+    'maximumDetailDocumentBytes',
+    'maximumSourcePayloadDocumentBytes',
+    'oversizedDocumentCount',
+}
 ALLOWED_FIELDS = {
     "id",
     "title",
     "language",
     "source",
+    "sourceKey",
+    "providerRecipeId",
+    "sourceRecipeId",
     "sourceUrl",
+    "canonicalUrl",
     "categoryKeys",
     "prepMinutes",
     "cookMinutes",
@@ -83,14 +131,36 @@ ALLOWED_FIELDS = {
 }
 FULL_DERIVED_FIELDS = {"category", "rating", "tags", "sourceName", "randomKey"}
 ALLOWED_FIELDS |= FULL_REQUIRED_FIELDS | FULL_OPTIONAL_FIELDS | FULL_DERIVED_FIELDS
-DOCUMENT_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 VALID_EASE = {"unknown", "easy", "moderate", "involved"}
-ALLOWED_HOSTS = {"akispetretzikis.com", "www.akispetretzikis.com"}
 LICENSED_IMAGE_FIELD = "imageUrl"
 
 
 class CatalogError(ValueError):
     """Raised for an unsafe or invalid catalog before any writes occur."""
+
+
+def _is_transient_firestore_error(error: Exception) -> bool:
+    """Recognize only retry-safe transport failures without requiring Firebase for dry runs."""
+
+    try:
+        from google.api_core.exceptions import DeadlineExceeded, ServiceUnavailable
+    except ImportError:
+        return False
+    return isinstance(error, (DeadlineExceeded, ServiceUnavailable))
+
+
+def _commit_batch_with_retry(batch: Any) -> Any:
+    """Retry idempotent Firestore set batches after bounded transient failures."""
+
+    for attempt in range(BATCH_COMMIT_MAX_ATTEMPTS):
+        try:
+            return batch.commit()
+        except Exception as exc:
+            final_attempt = attempt + 1 >= BATCH_COMMIT_MAX_ATTEMPTS
+            if final_attempt or not _is_transient_firestore_error(exc):
+                raise
+            time.sleep(BATCH_COMMIT_INITIAL_BACKOFF_SECONDS * (2**attempt))
+    raise AssertionError("unreachable")
 
 
 def _json_records(value: object) -> Iterator[Mapping[str, Any]]:
@@ -142,25 +212,14 @@ def _optional_int(record: Mapping[str, Any], name: str, *, maximum: int = 100_00
     return value
 
 
-def _validate_source_url(value: object, source_id: str) -> str:
-    if not isinstance(value, str) or not value.strip():
-        raise CatalogError("sourceUrl is required")
-    parts = urlsplit(value.strip())
-    host = (parts.hostname or "").casefold().rstrip(".")
-    if parts.scheme.casefold() != "https" or host not in ALLOWED_HOSTS:
-        raise CatalogError("sourceUrl must be an HTTPS akispetretzikis.com URL")
-    match = re.fullmatch(r"/(?:el/)?recipe/(\d+)(?:/[^/?#]+)?/?", parts.path)
-    if not match or match.group(1) != source_id:
-        raise CatalogError(
-            "sourceUrl must be a Greek numeric recipe URL whose ID matches id; English URLs are rejected"
-        )
-    if parts.username or parts.password or parts.port not in (None, 443):
-        raise CatalogError("sourceUrl must not contain credentials or a non-standard port")
-    path = parts.path[3:] if parts.path.startswith("/el/recipe/") else parts.path
-    return urlunsplit(("https", "akispetretzikis.com", path, "", ""))
+def _validate_source_url(value: object, provider_recipe_id: str, provider) -> str:
+    try:
+        return canonical_recipe_url(provider, value, provider_recipe_id)
+    except ProviderError as exc:
+        raise CatalogError(str(exc)) from exc
 
 
-def _validate_image_url(value: object) -> str:
+def _validate_legacy_akis_image_url(value: object) -> str:
     if not isinstance(value, str) or not value.strip():
         raise CatalogError("imageUrl must be a non-empty HTTPS URL")
     parts = urlsplit(value.strip())
@@ -183,11 +242,19 @@ def _validate_image_url(value: object) -> str:
     return urlunsplit(("https", "akispetretzikis.com", parts.path, "", ""))
 
 
+def _validate_image_url(value: object, provider) -> str:
+    try:
+        return canonical_image_url(provider, value)
+    except ProviderError as exc:
+        raise CatalogError(str(exc)) from exc
+
+
 def validate_record(
     raw: Mapping[str, Any],
     *,
     allow_licensed_images: bool = False,
     have_permission: bool = False,
+    have_argiro_permission: bool = False,
 ) -> dict[str, Any]:
     full_content = is_full_record(raw)
     if full_content and not have_permission:
@@ -208,9 +275,33 @@ def validate_record(
         except FullSchemaError as exc:
             raise CatalogError(str(exc)) from exc
 
-    source_id = str(raw.get("id") or "").strip()
+    try:
+        provider = provider_for(
+            source_key=raw.get("sourceKey"),
+            source=raw.get("source"),
+            source_url=raw.get("sourceUrl"),
+        )
+        raw_provider_recipe_id = raw.get("providerRecipeId")
+        if raw_provider_recipe_id is None:
+            raw_provider_recipe_id = raw.get("sourceRecipeId")
+        if raw_provider_recipe_id is None and provider.legacy_numeric_document_ids:
+            raw_provider_recipe_id = raw.get("id")
+        provider_recipe_id = normalize_provider_recipe_id(raw_provider_recipe_id)
+        expected_document_id = recipe_document_id(provider, provider_recipe_id)
+    except ProviderError as exc:
+        raise CatalogError(str(exc)) from exc
+    if full_content and provider.key == "argiro" and not have_argiro_permission:
+        raise CatalogError(
+            "Argiro full content requires explicit --i-have-argiro-permission"
+        )
+
+    source_id = str(raw.get("id") or expected_document_id).strip()
     if not DOCUMENT_ID_RE.fullmatch(source_id):
         raise CatalogError("id must contain only letters, digits, '_' or '-' (maximum 128)")
+    if source_id != expected_document_id:
+        raise CatalogError(
+            f"id must be the canonical provider-scoped document ID {expected_document_id!r}"
+        )
     title = raw.get("title")
     if not isinstance(title, str) or not title.strip() or len(title.strip()) > 300:
         raise CatalogError("title is required and must be at most 300 characters")
@@ -253,9 +344,23 @@ def validate_record(
     if supplied_ease != computed_ease:
         raise CatalogError("ease does not match the derived preparation/step/time band")
 
-    source = raw.get("source", "akispetretzikis.com")
-    if source != "akispetretzikis.com":
-        raise CatalogError("source must be akispetretzikis.com")
+    source_url = _validate_source_url(raw.get("sourceUrl"), provider_recipe_id, provider)
+    supplied_canonical_url = raw.get("canonicalUrl")
+    if supplied_canonical_url not in (None, source_url):
+        raise CatalogError("canonicalUrl must equal the normalized sourceUrl")
+
+    legacy_source_recipe_id = (
+        int(provider_recipe_id)
+        if provider_recipe_id.isdigit() and int(provider_recipe_id) <= 2_147_483_647
+        else 0
+    )
+    supplied_legacy_id = raw.get("sourceRecipeId")
+    if supplied_legacy_id is not None and (
+        isinstance(supplied_legacy_id, bool)
+        or not isinstance(supplied_legacy_id, int)
+        or supplied_legacy_id != legacy_source_recipe_id
+    ):
+        raise CatalogError("sourceRecipeId must be the numeric provider ID or 0")
 
     active = raw.get("active", True)
     if not isinstance(active, bool):
@@ -268,8 +373,12 @@ def validate_record(
         "id": source_id,
         "title": title.strip(),
         "language": "el",
-        "source": source,
-        "sourceUrl": _validate_source_url(raw.get("sourceUrl"), source_id),
+        "source": provider.source,
+        "sourceKey": provider.key,
+        "providerRecipeId": provider_recipe_id,
+        "sourceRecipeId": legacy_source_recipe_id,
+        "sourceUrl": source_url,
+        "canonicalUrl": source_url,
         "categoryKeys": category_keys,
         "category": canonical_category(category_keys),
         "tags": category_keys,
@@ -281,8 +390,8 @@ def validate_record(
         "rating10": rating,
         "rating": rating if rating is not None else 0.0,
         "ease": computed_ease,
-        "randomKey": stable_random_key(source_id),
-        "sourceName": "Άκης Πετρετζίκης",
+        "randomKey": stable_recipe_random_key(provider, provider_recipe_id),
+        "sourceName": provider.display_name,
         "sourceUpdatedAt": source_updated_at,
         "active": active,
         # This field is always present so a replacement without an approved
@@ -290,7 +399,7 @@ def validate_record(
         "imageUrl": "",
     }
     if raw.get(LICENSED_IMAGE_FIELD):
-        validated[LICENSED_IMAGE_FIELD] = _validate_image_url(raw[LICENSED_IMAGE_FIELD])
+        validated[LICENSED_IMAGE_FIELD] = _validate_image_url(raw[LICENSED_IMAGE_FIELD], provider)
     if full_content:
         for field in ("category", "rating", "sourceName", "randomKey"):
             if raw.get(field) != validated.get(field):
@@ -311,6 +420,7 @@ def validate_catalog(
     *,
     allow_licensed_images: bool = False,
     have_permission: bool = False,
+    have_argiro_permission: bool = False,
 ) -> list[dict[str, Any]]:
     validated: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -320,6 +430,7 @@ def validate_catalog(
                 raw,
                 allow_licensed_images=allow_licensed_images,
                 have_permission=have_permission,
+                have_argiro_permission=have_argiro_permission,
             )
         except CatalogError as exc:
             raise CatalogError(f"record {index}: {exc}") from exc
@@ -332,6 +443,11 @@ def validate_catalog(
     full_flags = {is_full_record(record) for record in validated}
     if len(full_flags) > 1:
         raise CatalogError("a catalog cannot mix metadata-only and full recipe records")
+    source_keys = {record["sourceKey"] for record in validated}
+    if len(source_keys) > 1:
+        raise CatalogError(
+            "a catalog must contain exactly one provider so completeness and retirement stay source-scoped"
+        )
     return validated
 
 
@@ -368,7 +484,7 @@ def _replace_collection(
             if server_timestamp is not None:
                 payload["importedAt"] = server_timestamp
             batch.set(collection.document(record["id"]), payload, merge=False)
-        batch.commit()
+        _commit_batch_with_retry(batch)
         batch_count += 1
     return len(records), batch_count
 
@@ -377,7 +493,7 @@ def replace_records(
     client: Any,
     records: list[dict[str, Any]],
     *,
-    batch_size: int = MAX_BATCH_SIZE,
+    batch_size: int = DEFAULT_BATCH_SIZE,
     server_timestamp: object = None,
 ) -> tuple[int, int]:
     full = bool(records and is_full_record(records[0]))
@@ -388,30 +504,37 @@ def replace_records(
     )
 
 
-def replace_detail_records(client: Any, records: list[dict[str, Any]], *, batch_size: int = MAX_BATCH_SIZE, server_timestamp: object = None) -> tuple[int, int]:
+def replace_detail_records(client: Any, records: list[dict[str, Any]], *, batch_size: int = DEFAULT_BATCH_SIZE, server_timestamp: object = None) -> tuple[int, int]:
     return _replace_collection(
         client, records, collection_name=DETAIL_COLLECTION_NAME, projector=firestore_detail_payload,
         batch_size=batch_size, server_timestamp=server_timestamp,
     )
 
 
-def replace_source_payloads(client: Any, records: list[dict[str, Any]], *, batch_size: int = MAX_BATCH_SIZE, server_timestamp: object = None) -> tuple[int, int]:
+def replace_source_payloads(client: Any, records: list[dict[str, Any]], *, batch_size: int = DEFAULT_BATCH_SIZE, server_timestamp: object = None) -> tuple[int, int]:
     return _replace_collection(
         client, records, collection_name=PAYLOAD_COLLECTION_NAME, projector=firestore_source_payload,
         batch_size=batch_size, server_timestamp=server_timestamp,
     )
 
 
-def existing_active_recipe_ids(client: Any) -> set[str]:
-    """Inventory current active summaries before a full commit mutates them."""
-    query = client.collection(COLLECTION_NAME).select(["active"])
+def existing_active_recipe_ids(client: Any, source_key: str) -> set[str]:
+    """Inventory active summaries for one provider, including legacy Akis docs."""
+    query = client.collection(COLLECTION_NAME).select(
+        ["active", "source", "sourceKey", "sourceUrl"]
+    )
     result: set[str] = set()
     for snapshot in query.stream():
         recipe_id = str(snapshot.id)
         if not DOCUMENT_ID_RE.fullmatch(recipe_id):
             raise CatalogError(f"existing Firestore recipe has unsafe document id {recipe_id!r}")
         data = snapshot.to_dict() or {}
-        if data.get("active", True) is not False:
+        try:
+            belongs_to_source = record_source_key(data) == source_key
+        except ProviderError:
+            # Unknown/future providers must never be retired by this importer.
+            belongs_to_source = False
+        if belongs_to_source and data.get("active", True) is not False:
             result.add(recipe_id)
     return result
 
@@ -420,7 +543,7 @@ def retire_recipe_ids(
     client: Any,
     recipe_ids: Iterable[str],
     *,
-    batch_size: int = MAX_BATCH_SIZE,
+    batch_size: int = DEFAULT_BATCH_SIZE,
     server_timestamp: object,
 ) -> tuple[int, int]:
     """Merge inactive tombstones across all three collections; never delete content."""
@@ -439,7 +562,7 @@ def retire_recipe_ids(
         batch = client.batch()
         for reference, payload in writes[offset : offset + batch_size]:
             batch.set(reference, payload, merge=True)
-        batch.commit()
+        _commit_batch_with_retry(batch)
         batch_count += 1
     return len(ids), batch_count
 
@@ -450,6 +573,7 @@ def write_catalog_status(
     recipe_count: int,
     catalog_hash: str,
     server_timestamp: object,
+    source_key: str = "akis",
     full_metadata: Mapping[str, Any] | None = None,
 ) -> None:
     """Publish the catalog checkpoint after every recipe batch has succeeded."""
@@ -460,20 +584,41 @@ def write_catalog_status(
         "catalogVersion": f"sha256:{catalog_hash}",
         "catalogHash": catalog_hash,
         "lastImportedAt": server_timestamp,
+        "lastImportedSource": source_key,
     }
+    # Metadata-only commits must explicitly revoke a previously published
+    # full-catalog checkpoint. Nulls overwrite stale values under merge=True.
+    status.update({field: None for field in FULL_STATUS_METADATA_FIELDS})
+    status['complete'] = False
     if full_metadata:
         status.update(full_metadata)
+    source_summary = {
+        "recipeCount": recipe_count,
+        "catalogHash": catalog_hash,
+        "catalogVersion": f"sha256:{catalog_hash}",
+        "lastImportedAt": server_timestamp,
+        "complete": bool(full_metadata and full_metadata.get("complete")),
+    }
+    # Firestore merge semantics merge nested map leaves, preserving status for
+    # providers imported on earlier runs while the legacy top-level timestamp
+    # remains usable by existing app versions.
+    global_status = dict(status)
+    global_status["sources"] = {source_key: source_summary}
     batch = client.batch()
     reference = client.collection(STATUS_COLLECTION_NAME).document(STATUS_DOCUMENT_ID)
-    batch.set(reference, status, merge=True)
-    batch.commit()
+    batch.set(reference, global_status, merge=True)
+    provider_reference = client.collection(STATUS_COLLECTION_NAME).document(
+        f"status_{source_key}"
+    )
+    batch.set(provider_reference, status, merge=True)
+    _commit_batch_with_retry(batch)
 
 
 def commit_catalog(
     client: Any,
     records: list[dict[str, Any]],
     *,
-    batch_size: int = MAX_BATCH_SIZE,
+    batch_size: int = DEFAULT_BATCH_SIZE,
     server_timestamp: object,
 ) -> tuple[int, int, str]:
     """Replace recipe documents, then publish a status checkpoint separately."""
@@ -481,7 +626,10 @@ def commit_catalog(
     if server_timestamp is None:
         raise CatalogError("a Firestore server timestamp is required for commit")
     full = bool(records and is_full_record(records[0]))
-    existing_active_ids = existing_active_recipe_ids(client) if full else set()
+    source_key = records[0]["sourceKey"]
+    existing_active_ids = (
+        existing_active_recipe_ids(client, source_key) if full else set()
+    )
     catalog_hash = compute_catalog_hash(records)
     writes, recipe_batches = replace_records(
         client,
@@ -513,7 +661,7 @@ def commit_catalog(
         sizes = [document_sizes(record) for record in records]
         full_metadata = {
             "complete": True,
-            "detailSchemaVersion": DETAIL_SCHEMA_VERSION,
+            "detailSchemaVersion": records[0]["detailSchemaVersion"],
             "activeRecipeCount": active_count,
             "retiredRecipeCount": len(records) - active_count,
             "retiredOnCommitCount": retired_on_commit_count,
@@ -537,6 +685,7 @@ def commit_catalog(
         recipe_count=writes,
         catalog_hash=catalog_hash,
         server_timestamp=server_timestamp,
+        source_key=source_key,
         full_metadata=full_metadata,
     )
     return writes, total_batches, catalog_hash
@@ -578,16 +727,28 @@ def load_manifest(path: Path) -> Mapping[str, Any]:
     return value
 
 
+def _manifest_value_hash(value: object) -> str:
+    return hashlib.sha256(json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")).hexdigest()
+
+
 def validate_manifest(records: list[dict[str, Any]], manifest: Mapping[str, Any]) -> None:
     if not manifest.get("complete") or manifest.get("failedRecipeCount") != 0:
         raise CatalogError("manifest does not certify a complete zero-failure crawl")
     active = [record["id"] for record in records if record["active"]]
     active_ids_hash = hashlib.sha256(json.dumps(
-        sorted(active, key=int), ensure_ascii=False, sort_keys=True,
+        sorted(active, key=lambda value: (0, int(value)) if value.isdigit() else (1, value)),
+        ensure_ascii=False, sort_keys=True,
         separators=(",", ":"), allow_nan=False,
     ).encode("utf-8")).hexdigest()
     expected = {
-        "detailSchemaVersion": DETAIL_SCHEMA_VERSION,
+        "sourceKey": records[0]["sourceKey"],
+        "detailSchemaVersion": records[0]["detailSchemaVersion"],
         "outputRecipeCount": len(records),
         "activeRecipeCount": len(active),
         "detailRecipeCount": len(records),
@@ -602,8 +763,126 @@ def validate_manifest(records: list[dict[str, Any]], manifest: Mapping[str, Any]
     mismatches = [key for key, value in expected.items() if manifest.get(key) != value]
     if manifest.get("discoveredActiveRecipeCount") != len(active):
         mismatches.append("discoveredActiveRecipeCount")
-    if manifest.get("apiReportedActiveRecipeCount") != len(active):
+    if records[0]["sourceKey"] == "akis" and manifest.get("apiReportedActiveRecipeCount") != len(active):
         mismatches.append("apiReportedActiveRecipeCount")
+    if records[0]["sourceKey"] == "argiro":
+        # Lazy import avoids the crawler/importer module cycle while binding a
+        # commit to the exact parser code and audited omission contracts that
+        # produced its manifest.
+        try:
+            if __package__ in (None, ""):
+                from crawl_argiro import (
+                    AUDITED_CANONICAL_ALIASES,
+                    AUDITED_EXTERNAL_REDIRECTS,
+                    AUDITED_NON_GREEK_STUBS,
+                    checkpoint_run_key,
+                    parser_contract_hash,
+                )
+            else:
+                from .crawl_argiro import (
+                    AUDITED_CANONICAL_ALIASES,
+                    AUDITED_EXTERNAL_REDIRECTS,
+                    AUDITED_NON_GREEK_STUBS,
+                    checkpoint_run_key,
+                    parser_contract_hash,
+                )
+        except ImportError as exc:
+            raise CatalogError(f"cannot load Argiro manifest contract: {exc}") from exc
+
+        list_fields = (
+            "canonicalAliases",
+            "externalRedirectExclusions",
+            "nonGreekStubExclusions",
+            "excludedRecipeUrls",
+        )
+        lists: dict[str, list[Any]] = {}
+        for field in list_fields:
+            value = manifest.get(field)
+            if not isinstance(value, list) or any(
+                not isinstance(item, Mapping) for item in value
+            ):
+                mismatches.append(field)
+                lists[field] = []
+            else:
+                lists[field] = value
+
+        expected_aliases = sorted([
+            {"sourceUrl": source_url, **details}
+            for source_url, details in AUDITED_CANONICAL_ALIASES.items()
+        ], key=lambda item: item["sourceUrl"])
+        expected_external = sorted([
+            {
+                "sourceUrl": source_url,
+                **details,
+                "reason": "redirected outside /recipe/{slug}/",
+            }
+            for source_url, details in AUDITED_EXTERNAL_REDIRECTS.items()
+        ], key=lambda item: item["sourceUrl"])
+        expected_stubs = sorted([
+            {
+                "sourceUrl": source_url,
+                "providerRecipeId": provider_recipe_id,
+                "finalStatus": 200,
+                "reason": "recipe content contains no Greek letters",
+            }
+            for source_url, provider_recipe_id in AUDITED_NON_GREEK_STUBS.items()
+        ], key=lambda item: item["sourceUrl"])
+        expected_exclusions = sorted(
+            [{"kind": "externalRedirect", **item} for item in expected_external]
+            + [{"kind": "nonGreekStub", **item} for item in expected_stubs],
+            key=lambda item: item["sourceUrl"],
+        )
+        expected_argiro_values = {
+            "canonicalGreekRecipeCount": len(records),
+            "canonicalAliasCount": len(expected_aliases),
+            "canonicalAliases": expected_aliases,
+            "canonicalAliasesHash": _manifest_value_hash(expected_aliases),
+            "externalRedirectExclusionCount": len(expected_external),
+            "externalRedirectExclusions": expected_external,
+            "externalRedirectExclusionsHash": _manifest_value_hash(expected_external),
+            "nonGreekStubExclusionCount": len(expected_stubs),
+            "nonGreekStubExclusions": expected_stubs,
+            "nonGreekStubExclusionsHash": _manifest_value_hash(expected_stubs),
+            "excludedRecipeUrlCount": len(expected_exclusions),
+            "excludedRecipeUrls": expected_exclusions,
+            "excludedRecipeUrlsHash": _manifest_value_hash(expected_exclusions),
+            "parserContractHash": parser_contract_hash(),
+            "checkpointRunKey": checkpoint_run_key(),
+        }
+        mismatches.extend(
+            key for key, value in expected_argiro_values.items()
+            if manifest.get(key) != value
+        )
+        discovered = manifest.get("discoveredRecipeUrlCount")
+        duplicates = manifest.get("duplicateRecipeEntryCount")
+        declared = manifest.get("declaredRecipeEntryCount")
+        if (
+            not isinstance(discovered, int)
+            or discovered
+            != len(records) + len(expected_aliases) + len(expected_exclusions)
+        ):
+            mismatches.append("discoveredRecipeUrlCount")
+        if (
+            not isinstance(duplicates, int)
+            or duplicates < 0
+            or not isinstance(declared, int)
+            or declared != discovered + duplicates
+        ):
+            mismatches.append("declaredRecipeEntryCount")
+        if len(active) != len(records):
+            mismatches.append("canonicalGreekRecipeCount")
+        records_by_url = {record["canonicalUrl"]: record for record in records}
+        if len(records_by_url) != len(records):
+            mismatches.append("canonicalAliases")
+        for alias in expected_aliases:
+            target = records_by_url.get(alias["canonicalUrl"])
+            if (
+                target is None
+                or target.get("providerRecipeId") != alias["providerRecipeId"]
+                or target.get("id") != f"argiro_{alias['providerRecipeId']}"
+            ):
+                mismatches.append("canonicalAliases")
+                break
     if mismatches:
         raise CatalogError("manifest/catalog mismatch: " + ", ".join(sorted(set(mismatches))))
 
@@ -629,7 +908,15 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Acknowledge publisher permission; required for full content and every commit.",
     )
-    parser.add_argument("--batch-size", type=_batch_size, default=MAX_BATCH_SIZE)
+    parser.add_argument(
+        "--i-have-argiro-permission",
+        action="store_true",
+        help=(
+            "Separately acknowledge written Argiro permission; required for "
+            "Argiro full-content validation/import."
+        ),
+    )
+    parser.add_argument("--batch-size", type=_batch_size, default=DEFAULT_BATCH_SIZE)
     parser.add_argument(
         "--allow-licensed-images",
         action="store_true",
@@ -648,6 +935,7 @@ def main(argv: list[str] | None = None) -> int:
             load_catalog(args.catalog),
             allow_licensed_images=args.allow_licensed_images,
             have_permission=args.i_have_permission,
+            have_argiro_permission=args.i_have_argiro_permission,
         )
         full = is_full_record(records[0])
         if args.commit and not args.i_have_permission:
@@ -698,7 +986,7 @@ def main(argv: list[str] | None = None) -> int:
                     "detailWrites": writes if full else 0,
                     "sourcePayloadWrites": writes if full else 0,
                     "batches": batches,
-                    "statusWrites": 1,
+                    "statusWrites": 2,
                     "catalogVersion": f"sha256:{catalog_hash}",
                     "catalogHash": catalog_hash,
                 },

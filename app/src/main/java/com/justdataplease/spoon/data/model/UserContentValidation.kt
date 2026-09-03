@@ -31,7 +31,9 @@ internal fun CustomRecipe.requireValid(): CustomRecipe {
     require(id.isCustomRecipeId()) { "A custom recipe needs a generated custom_ UUID" }
     require(title.isNotBlank() && title.length <= 300)
     require(description.length <= 10_000)
-    require(MealCategory.fromKey(category) != null)
+    require(MealCategory.fromKey(category)?.let { it != MealCategory.ANY } == true) {
+        "A custom recipe needs a concrete planner category"
+    }
     require(prepMinutes in 0..10_080 && cookMinutes in 0..10_080)
     require(servings.length <= 100)
     require(ingredientSections.isNotEmpty() && ingredientSections.size <= 20)

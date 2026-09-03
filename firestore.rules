@@ -137,6 +137,7 @@ service cloud.firestore {
         validText(data.description, 0, 10000) &&
         data.category is string &&
         validCategory(data.category) &&
+        data.category != 'any' &&
         data.prepMinutes is int &&
         data.prepMinutes >= 0 &&
         data.prepMinutes <= 10080 &&

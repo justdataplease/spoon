@@ -60,6 +60,8 @@ object DemoRecipeCatalog {
             else -> 3
         },
         sourceName = "Δείγμα εφαρμογής",
+        source = "demo",
+        sourceKey = "demo",
         tags = listOf("demo", category.key),
     )
 }

@@ -12,10 +12,15 @@ class RecipeVideoUrlTest {
         val source = resolveInlineVideoSource("https://youtu.be/dQw4w9WgXcQ?t=30") as InlineVideoSource.YouTube
         assertEquals("dQw4w9WgXcQ", source.videoId)
         assertEquals(
-            "https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ?autoplay=0&playsinline=1&rel=0&enablejsapi=1",
+            "https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ" +
+                "?autoplay=0&playsinline=1&rel=0&enablejsapi=1" +
+                "&origin=https%3A%2F%2Fspoon.justdataplease.com" +
+                "&widget_referrer=https%3A%2F%2Fspoon.justdataplease.com%2F",
             source.embedUrl,
         )
         assertFalse(source.embedUrl.contains("autoplay=1"))
+        assertEquals(mapOf("Referer" to InlineVideoReferer), inlineVideoRequestHeaders(source))
+        assertEquals("https://spoon.justdataplease.com/", InlineVideoReferer)
     }
 
     @Test
@@ -129,6 +134,34 @@ class RecipeVideoUrlTest {
         assertTrue(vimeoHtml.contains(vimeo.embedUrl.replace("&", "&amp;")))
         assertTrue(vimeoHtml.contains("player.ready()"))
         assertTrue(vimeoHtml.contains("SPOON_VIDEO_ERROR:vimeo"))
+    }
+
+    @Test
+    fun `youtube DOM probe distinguishes loading ready and visible player error`() {
+        assertEquals(YouTubePlayerProbeResult.READY, parseYouTubePlayerProbeResult("ready"))
+        assertEquals(YouTubePlayerProbeResult.ERROR, parseYouTubePlayerProbeResult("error"))
+        assertEquals(YouTubePlayerProbeResult.LOADING, parseYouTubePlayerProbeResult("loading"))
+        assertEquals(YouTubePlayerProbeResult.LOADING, parseYouTubePlayerProbeResult(null))
+        assertTrue(YouTubePlayerProbeScript.contains("movie_player"))
+        assertTrue(YouTubePlayerProbeScript.contains("ytp-error"))
+        assertTrue(YouTubePlayerProbeScript.contains("getBoundingClientRect"))
+        assertTrue(YouTubeViewportFixScript.contains("window.innerHeight"))
+        assertTrue(YouTubeViewportFixScript.contains("setProperty('height'"))
+        assertTrue(YouTubeViewportFixScript.contains("new Event('resize')"))
+    }
+
+    @Test
+    fun `non youtube sources receive no identity request headers`() {
+        assertTrue(inlineVideoRequestHeaders(InlineVideoSource.Direct("https://cdn.example.test/a.mp4")).isEmpty())
+        assertTrue(
+            inlineVideoRequestHeaders(
+                InlineVideoSource.Vimeo(
+                    originalUrl = "https://vimeo.com/123456789",
+                    videoId = "123456789",
+                    embedUrl = "https://player.vimeo.com/video/123456789",
+                ),
+            ).isEmpty(),
+        )
     }
 
     @Test

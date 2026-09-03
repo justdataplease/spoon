@@ -680,6 +680,7 @@ def run_catalog_crawl(
     payload_hash = collection_hash(records, firestore_source_payload)
     manifest = {
         "complete": True,
+        "sourceKey": "akis",
         "detailSchemaVersion": DETAIL_SCHEMA_VERSION,
         "language": "el",
         "source": "akispetretzikis.com",

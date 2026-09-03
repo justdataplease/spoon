@@ -31,5 +31,5 @@ internal fun eligibleRecipeDetails(
     val normalized = if (recipe.id == documentId) recipe else recipe.copy(id = documentId)
     return normalized.takeIf {
         normalized.active && normalized.language == "el" && normalized.id == requestedId
-    }
+    }?.withCurrentAkisPlannerCategory()
 }
