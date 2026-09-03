@@ -76,7 +76,7 @@ class MealPlannerTest {
     }
 
     @Test
-    fun `ensure week repairs a partial plan and preserves completion`() = runBlocking {
+    fun `ensure week repairs a partial plan and resets completion`() = runBlocking {
         val date = LocalDate.of(2026, 9, 4)
         val partial = DayMealPlan(
             id = date.toString(),
@@ -92,11 +92,11 @@ class MealPlannerTest {
 
         assertEquals(MealCategory.FISH.key, repaired.category)
         assertTrue(repaired.recipeId.isNotBlank())
-        assertTrue(repaired.completed)
+        assertEquals(false, repaired.completed)
     }
 
     @Test
-    fun `ensure week replaces a stored inactive recipe with an active candidate`() = runBlocking {
+    fun `ensure week replaces an inactive unfinished recipe`() = runBlocking {
         val date = LocalDate.of(2026, 9, 4)
         val stale = DayMealPlan(
             id = date.toString(),
@@ -105,7 +105,7 @@ class MealPlannerTest {
             recipeId = "retired-fish",
             recipeTitle = "Παλιά πρόταση",
             filters = RecipeFilters(category = MealCategory.FISH.key),
-            completed = true,
+            completed = false,
         )
         val repository = FakeRepository(
             initialPlans = listOf(stale),
@@ -130,7 +130,7 @@ class MealPlannerTest {
 
         assertEquals("current-fish", repaired.recipeId)
         assertEquals("Νέα πρόταση", repaired.recipeTitle)
-        assertTrue(repaired.completed)
+        assertEquals(false, repaired.completed)
         assertEquals(repaired, repository.plans.value.single())
     }
 
@@ -222,6 +222,155 @@ class MealPlannerTest {
         assertEquals(false, plan.completed)
         assertEquals(listOf(plan), repository.plans.value)
         assertEquals(1, repository.upsertCount)
+    }
+
+    @Test
+    fun stale_unfinished_category_is_rerolled_against_current_catalog_truth() = runBlocking {
+        val date = LocalDate.of(2026, 9, 4)
+        val stale = DayMealPlan(
+            id = date.toString(),
+            date = date.toString(),
+            category = MealCategory.LEGUMES.key,
+            recipeId = "3485",
+            recipeTitle = "Γλυκό",
+            filters = RecipeFilters(category = MealCategory.LEGUMES.key),
+            completed = false,
+        )
+        val repository = FakeRepository(
+            initialPlans = listOf(stale),
+            initialRecipes = listOf(
+                Recipe(
+                    id = "3485",
+                    title = "Γλυκό",
+                    category = MealCategory.DESSERT.key,
+                    rating = 9.0,
+                ),
+                Recipe(
+                    id = "current-legumes",
+                    title = "Φακές",
+                    category = MealCategory.LEGUMES.key,
+                    rating = 9.0,
+                ),
+            ),
+        )
+
+        val repaired = MealPlanner(repository, RecipeSelector())
+            .ensureWeek(date, kotlin.random.Random(9))
+            .first { it.date == date.toString() }
+
+        assertEquals("current-legumes", repaired.recipeId)
+        assertEquals(MealCategory.LEGUMES.key, repaired.category)
+        assertEquals(false, repaired.completed)
+        assertEquals(repaired, repository.plans.value.first { it.date == date.toString() })
+    }
+
+    @Test
+    fun unfinished_plan_is_repaired_for_rating_time_and_ease_drift() = runBlocking {
+        val date = LocalDate.of(2026, 9, 4)
+        val replacement = Recipe(
+            id = "matching-fish",
+            title = "Νέο ψάρι",
+            category = MealCategory.FISH.key,
+            rating = 9.5,
+            prepMinutes = 20,
+            stepCount = 7,
+            preparationCount = 2,
+        )
+        val cases = listOf(
+            RecipeFilters(category = MealCategory.FISH.key, minRating = 8.0) to
+                Recipe(
+                    id = "low-rating",
+                    title = "Παλιό",
+                    category = MealCategory.FISH.key,
+                    rating = 7.0,
+                    prepMinutes = 20,
+                    stepCount = 7,
+                    preparationCount = 2,
+                ),
+            RecipeFilters(category = MealCategory.FISH.key, maxPrepMinutes = 30) to
+                Recipe(
+                    id = "too-slow",
+                    title = "Παλιό",
+                    category = MealCategory.FISH.key,
+                    rating = 9.0,
+                    prepMinutes = 60,
+                    stepCount = 7,
+                    preparationCount = 2,
+                ),
+            RecipeFilters(
+                category = MealCategory.FISH.key,
+                easeLevel = EaseLevel.MODERATE.key,
+            ) to Recipe(
+                id = "wrong-ease",
+                title = "Παλιό",
+                category = MealCategory.FISH.key,
+                rating = 9.0,
+                prepMinutes = 20,
+                stepCount = 4,
+                preparationCount = 1,
+            ),
+        )
+
+        cases.forEachIndexed { index, (filters, staleRecipe) ->
+            val plan = DayMealPlan(
+                id = date.toString(),
+                date = date.toString(),
+                category = MealCategory.FISH.key,
+                recipeId = staleRecipe.id,
+                recipeTitle = staleRecipe.title,
+                filters = filters,
+                completed = false,
+            )
+            val repository = FakeRepository(
+                initialPlans = listOf(plan),
+                initialRecipes = listOf(staleRecipe, replacement),
+            )
+
+            val repaired = MealPlanner(repository, RecipeSelector())
+                .ensureWeek(date, kotlin.random.Random(index))
+                .first { it.date == date.toString() }
+
+            assertEquals("case $index", replacement.id, repaired.recipeId)
+            assertEquals("case $index", false, repaired.completed)
+        }
+    }
+
+    @Test
+    fun completed_plan_survives_taxonomy_filter_and_availability_drift() = runBlocking {
+        val date = LocalDate.of(2026, 9, 4)
+        val completed = DayMealPlan(
+            id = date.toString(),
+            date = date.toString(),
+            category = MealCategory.LEGUMES.key,
+            recipeId = "retired-dessert",
+            recipeTitle = "Γλυκό που φτιάχτηκε",
+            filters = RecipeFilters(
+                category = MealCategory.LEGUMES.key,
+                easeLevel = EaseLevel.EASY.key,
+                minRating = 10.0,
+                maxPrepMinutes = 5,
+            ),
+            completed = true,
+            updatedAtEpochMillis = 3_000,
+        )
+        val repository = FakeRepository(
+            initialPlans = listOf(completed),
+            initialRecipes = listOf(
+                Recipe(
+                    id = "retired-dessert",
+                    title = "Γλυκό που φτιάχτηκε",
+                    category = MealCategory.DESSERT.key,
+                    active = false,
+                ),
+            ),
+        )
+
+        val preserved = MealPlanner(repository, RecipeSelector())
+            .ensureWeek(date)
+            .first { it.date == date.toString() }
+
+        assertEquals(completed, preserved)
+        assertEquals(completed, repository.plans.value.first { it.date == date.toString() })
     }
 
     @Test

@@ -12,10 +12,25 @@ class RecipeVideoUrlTest {
         val source = resolveInlineVideoSource("https://youtu.be/dQw4w9WgXcQ?t=30") as InlineVideoSource.YouTube
         assertEquals("dQw4w9WgXcQ", source.videoId)
         assertEquals(
-            "https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ?autoplay=0&playsinline=1&rel=0",
+            "https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ?autoplay=0&playsinline=1&rel=0&enablejsapi=1",
             source.embedUrl,
         )
         assertFalse(source.embedUrl.contains("autoplay=1"))
+    }
+
+    @Test
+    fun `vimeo page and player formats resolve to inline embed`() {
+        listOf(
+            "https://vimeo.com/123456789",
+            "https://www.vimeo.com/123456789?share=copy",
+            "https://player.vimeo.com/video/123456789",
+        ).forEach { url ->
+            val source = resolveInlineVideoSource(url) as InlineVideoSource.Vimeo
+            assertEquals("123456789", source.videoId)
+            assertEquals("https://player.vimeo.com/video/123456789?autoplay=0&playsinline=1", source.embedUrl)
+        }
+        assertNull(resolveInlineVideoSource("https://vimeo.example.test/123456789"))
+        assertNull(resolveInlineVideoSource("https://vimeo.com/not-a-number"))
     }
 
     @Test
@@ -96,6 +111,32 @@ class RecipeVideoUrlTest {
         assertFalse(html.contains("autoplay"))
         assertTrue(html.contains("x=1&amp;label=&quot;test&quot;"))
         assertTrue(html.contains("default-src 'none'"))
+        assertTrue(html.contains("SPOON_VIDEO_READY"))
+        assertTrue(html.contains("SPOON_VIDEO_ERROR:direct"))
+    }
+
+    @Test
+    fun `provider markup reports actual player readiness and retains safe embed`() {
+        val youtube = resolveInlineVideoSource("https://youtu.be/dQw4w9WgXcQ") as InlineVideoSource.YouTube
+        val youtubeHtml = inlineVideoHtml(youtube)
+        assertTrue(youtubeHtml.contains(youtube.embedUrl.replace("&", "&amp;")))
+        assertTrue(youtubeHtml.contains("onYouTubeIframeAPIReady"))
+        assertTrue(youtubeHtml.contains("SPOON_VIDEO_READY"))
+        assertFalse(youtubeHtml.contains("autoplay=1"))
+
+        val vimeo = resolveInlineVideoSource("https://vimeo.com/123456789") as InlineVideoSource.Vimeo
+        val vimeoHtml = inlineVideoHtml(vimeo)
+        assertTrue(vimeoHtml.contains(vimeo.embedUrl.replace("&", "&amp;")))
+        assertTrue(vimeoHtml.contains("player.ready()"))
+        assertTrue(vimeoHtml.contains("SPOON_VIDEO_ERROR:vimeo"))
+    }
+
+    @Test
+    fun `vimeo navigation allows only exact player embed`() {
+        val source = resolveInlineVideoSource("https://vimeo.com/123456789") as InlineVideoSource.Vimeo
+        assertTrue(isAllowedVideoNavigation(source.embedUrl, source))
+        assertFalse(isAllowedVideoNavigation("https://vimeo.com/123456789", source))
+        assertFalse(isAllowedVideoNavigation("https://player.vimeo.com/video/987654321", source))
     }
 
     @Test
@@ -103,6 +144,10 @@ class RecipeVideoUrlTest {
         assertEquals("https://akispetretzikis.com/recipe/1/test", normalizeRecipeLink("/recipe/1/test"))
         assertEquals("https://cdn.example.test/image.jpg", normalizeRecipeLink("//cdn.example.test/image.jpg"))
         assertEquals("https://example.test/path", normalizeRecipeLink(" https://example.test/path "))
+        assertEquals(
+            "https://youtu.be/VWaCrszdgt4",
+            normalizeRecipeLink("https://youtu.be/VWaCrszdgt4 Heinz"),
+        )
         assertEquals("https://8.8.8.8/image.jpg", normalizeRecipeLink("https://8.8.8.8/image.jpg"))
         assertNull(normalizeRecipeLink("http://example.test/path"))
         assertNull(normalizeRecipeLink("https:///missing-host.jpg"))

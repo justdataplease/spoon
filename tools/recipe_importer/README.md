@@ -35,6 +35,10 @@ are ignored by Git.
    hashes, and a conservative 900 KiB limit independently for every Firestore
    projection.
 
+Planner categories are derived only from exact publisher category ancestry and
+official facet IDs. Recipe-title and free-text substring guessing is deliberately
+excluded, so words such as `Τρουφάκια` cannot be misclassified as lentils.
+
 The HTTP client enforces a global delay of at least one second, honors
 `Retry-After`, retries only transient statuses, limits response size, rejects
 cross-site redirects, and can resume from a transactional SQLite checkpoint.
@@ -132,6 +136,20 @@ environment, but a short-lived identity (developer ADC locally or Workload
 Identity Federation in CI) is preferred. Service-account JSON, Firebase admin
 keys, `.env` files, the generated catalog, and checkpoints must never be added to
 Git.
+
+For an already-published catalog created by an older category classifier,
+`migrate_categories.py` audits the immutable catalog/manifest pair and merges only
+`categoryKeys`, `category`, `categoryLabel`, and `tags` into summary/detail docs.
+It never writes the raw source payload collection. Run it without `--commit`
+first, review the counts and hashes, then repeat with the explicit project and
+credential options:
+
+```powershell
+python tools/recipe_importer/migrate_categories.py `
+  tools/recipe_importer/output/akis-greek-full.jsonl `
+  --manifest tools/recipe_importer/output/akis-greek-full.manifest.json `
+  --i-have-permission
+```
 
 `inspect_recipe.py` remains available for a metadata-only inspection of one
 explicit Greek numeric recipe URL. Legacy, separately supplied metadata catalogs

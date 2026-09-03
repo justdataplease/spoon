@@ -4,10 +4,13 @@ import com.justdataplease.spoon.data.model.Recipe
 
 private val SAFE_RECIPE_DOCUMENT_ID = Regex("^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$")
 
+internal fun isSafeRecipeDocumentId(recipeId: String): Boolean =
+    SAFE_RECIPE_DOCUMENT_ID.matches(recipeId)
+
 /** Rejects path-like or otherwise unexpected values before they reach Firestore.document(). */
 internal fun requireSafeRecipeDocumentId(recipeId: String): String {
     require(recipeId.isNotBlank()) { "A recipe details request needs a recipe id" }
-    require(SAFE_RECIPE_DOCUMENT_ID.matches(recipeId)) {
+    require(isSafeRecipeDocumentId(recipeId)) {
         "Recipe id contains unsupported characters or is too long"
     }
     return recipeId

@@ -3,6 +3,7 @@ import pytest
 from tools.recipe_importer.helpers import (
     classify_category_keys,
     classify_ease,
+    classify_official_category_keys,
     canonical_category,
     count_preparation_sections,
     count_recipe_steps,
@@ -32,16 +33,94 @@ def test_parse_duration_rejects_non_duration():
         parse_duration_minutes("45 minutes")
 
 
-def test_classifier_handles_accented_greek_and_street_food():
-    assert classify_category_keys("Φακές με λαχανικά") == ["legumes", "vegetables"]
-    assert classify_category_keys("Quick chicken burger") == ["poultry", "dirty"]
+def test_metadata_classifier_uses_exact_metadata_but_never_the_title():
+    assert classify_category_keys(
+        "Τρουφάκια με αβοκάντο και καρύδα"
+    ) == ["other"]
+    assert classify_category_keys(
+        "ignored title",
+        ["Fish"],
+        "street food, salmon",
+    ) == ["fish", "dirty"]
+    assert classify_category_keys(
+        "ignored",
+        ["Τρουφάκια"],
+        "beanbag, chickenpox",
+    ) == ["other"]
+
+
+def test_official_dessert_ancestry_is_terminal_over_ingredients():
+    associations = {
+        "ingredient": [{"id": "139", "title": "Φακές"}],
+        "meal_type": [],
+    }
+    assert classify_official_category_keys(
+        {"id": 34, "slug": "glika", "parent_id": 1},
+        associations,
+    ) == ["dessert"]
+    assert classify_official_category_keys(
+        {"id": 35, "slug": "ta-aghapimena-mas", "parent_id": 34},
+        associations,
+    ) == ["dessert"]
+    assert classify_official_category_keys(
+        {"id": 999, "slug": "future-sweet", "parent_id": 34},
+        associations,
+    ) == ["dessert"]
+    assert classify_official_category_keys(
+        {"id": 999, "slug": "generic", "parent_id": 1},
+        {"ingredient": associations["ingredient"], "meal_type": [{"id": "34"}]},
+    ) == ["dessert"]
+
+
+def test_official_recipe_category_wins_then_facets_have_stable_precedence():
+    associations = {
+        "ingredient": [
+            {"id": "135", "title": "Κοτόπουλο"},
+            {"id": "145", "title": "Γαρίδες"},
+            {"id": "139", "title": "Φακές"},
+        ],
+        "meal_type": [],
+    }
+    assert classify_official_category_keys(
+        {"id": 19, "slug": "zimarika"},
+        associations,
+    ) == ["pasta", "seafood", "legumes", "poultry"]
+    assert classify_official_category_keys(
+        {"id": 53, "slug": "salates"},
+        associations,
+    ) == ["seafood", "legumes", "poultry"]
+    assert classify_official_category_keys(
+        {"id": 53, "slug": "salates"},
+        {**associations, "ingredient": list(reversed(associations["ingredient"]))},
+    ) == ["seafood", "legumes", "poultry"]
+
+
+def test_unknown_taxonomy_fails_closed_and_format_is_only_a_fallback():
+    assert classify_official_category_keys(
+        {"id": 999, "slug": "unknown"},
+        {"ingredient": [{"id": "999", "title": "Looks like beans"}]},
+    ) == ["other"]
+    assert classify_official_category_keys(
+        {"id": 33, "slug": "snak"},
+        {"ingredient": [{"id": "129", "title": "Μοσχάρι"}]},
+    ) == ["meat"]
+    assert classify_official_category_keys(
+        {"id": 33, "slug": "snak"},
+        {},
+    ) == ["dirty"]
+    assert classify_official_category_keys(
+        {"id": 47, "slug": "smoothies"},
+        {"ingredient": [{"id": "139", "title": "Φακές"}]},
+    ) == ["other"]
 
 
 def test_canonical_category_uses_first_supported_alias():
-    assert canonical_category(["other", "dirty", "poultry"]) == "street_food"
+    assert canonical_category(["other", "dirty", "poultry"]) == "other"
+    assert canonical_category(["dessert"]) == "dessert"
     assert canonical_category(["seafood"]) == "fish"
     assert canonical_category(["pasta", "rice"]) == "pasta_rice"
-    assert canonical_category(["other"]) == ""
+    assert canonical_category(["other"]) == "other"
+    assert canonical_category(["future-value"]) == "other"
 
 
 def test_step_and_preparation_counts_are_structural_only():

@@ -3,10 +3,15 @@ package com.justdataplease.spoon.ui.details
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Color as AndroidColor
+import android.net.http.SslError
+import android.webkit.ConsoleMessage
 import android.webkit.CookieManager
+import android.webkit.RenderProcessGoneDetail
+import android.webkit.SslErrorHandler
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -26,6 +31,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.OpenInNew
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.outlined.Movie
+import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -37,7 +43,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -49,6 +57,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import kotlinx.coroutines.delay
+
+private const val InlinePlayerTimeoutMillis = 12_000L
 
 @Composable
 internal fun RecipeVideoSection(
@@ -83,6 +94,7 @@ private fun VideoCard(
     onOpenExternal: (String) -> Unit,
 ) {
     var requestedPlayback by rememberSaveable(originalUrl) { mutableStateOf(false) }
+    val safeExternalUrl = source?.originalUrl ?: normalizeRecipeLink(originalUrl)
 
     Card(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
@@ -112,7 +124,10 @@ private fun VideoCard(
                     text = "Βίντεο $number",
                     style = MaterialTheme.typography.titleSmall,
                 )
-                TextButton(onClick = { onOpenExternal(originalUrl) }) {
+                TextButton(
+                    onClick = { safeExternalUrl?.let(onOpenExternal) },
+                    enabled = safeExternalUrl != null,
+                ) {
                     Text("Άνοιγμα")
                     Icon(
                         Icons.AutoMirrored.Outlined.OpenInNew,
@@ -166,29 +181,40 @@ private fun SecureInlineVideo(
     onOpenExternal: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var isLoading by remember(source) { mutableStateOf(true) }
-    var hasError by remember(source) { mutableStateOf(false) }
+    var attempt by rememberSaveable(source.originalUrl) { mutableIntStateOf(0) }
+    var playerState by remember(source, attempt) { mutableStateOf<InlinePlayerState>(InlinePlayerState.Loading) }
     val context = LocalContext.current
 
-    val webView = remember(source, context) {
+    val webView = remember(source, context, attempt) {
         WebViewHolder.create(
             context = context,
             source = source,
-            onLoadingChanged = { loading -> isLoading = loading },
-            onError = { hasError = true },
+            onReady = { playerState = InlinePlayerState.Ready },
+            onError = { message -> playerState = InlinePlayerState.Error(message) },
             onExternalNavigation = onOpenExternal,
         )
     }
 
+    LaunchedEffect(source, attempt, playerState) {
+        if (playerState is InlinePlayerState.Loading) {
+            delay(InlinePlayerTimeoutMillis)
+            if (playerState is InlinePlayerState.Loading) {
+                playerState = InlinePlayerState.Error("Το βίντεο αργεί να φορτώσει.")
+            }
+        }
+    }
+
     DisposableEffect(webView) {
         onDispose {
-            webView.stopLoading()
-            webView.webChromeClient = null
-            webView.webViewClient = WebViewClient()
-            webView.loadUrl("about:blank")
-            webView.clearHistory()
-            webView.removeAllViews()
-            webView.destroy()
+            runCatching {
+                webView.stopLoading()
+                webView.webChromeClient = null
+                webView.webViewClient = WebViewClient()
+                webView.loadUrl("about:blank")
+                webView.clearHistory()
+                webView.removeAllViews()
+                webView.destroy()
+            }
         }
     }
 
@@ -198,32 +224,55 @@ private fun SecureInlineVideo(
             modifier = Modifier.fillMaxSize(),
         )
 
-        if (isLoading && !hasError) {
-            CircularProgressIndicator(
-                modifier = Modifier.align(Alignment.Center),
-                color = Color.White,
-            )
-        }
-        if (hasError) {
-            Surface(
-                modifier = Modifier.align(Alignment.Center).padding(20.dp),
-                color = Color.Black.copy(alpha = 0.78f),
+        when (val state = playerState) {
+            InlinePlayerState.Loading -> Surface(
+                modifier = Modifier.fillMaxSize(),
+                color = Color(0xE617130F),
                 contentColor = Color.White,
-                shape = RoundedCornerShape(16.dp),
             ) {
                 Column(
-                    modifier = Modifier.padding(16.dp),
+                    modifier = Modifier.fillMaxSize().padding(20.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
+                ) {
+                    CircularProgressIndicator(color = Color.White)
+                    Text("Φόρτωση βίντεο…", modifier = Modifier.padding(top = 12.dp))
+                    TextButton(onClick = { onOpenExternal(source.originalUrl) }) {
+                        Text("Άνοιγμα εκτός εφαρμογής")
+                    }
+                }
+            }
+            InlinePlayerState.Ready -> Unit
+            is InlinePlayerState.Error -> Surface(
+                modifier = Modifier.fillMaxSize(),
+                color = Color(0xF217130F),
+                contentColor = Color.White,
+            ) {
+                Column(
+                    modifier = Modifier.fillMaxSize().padding(18.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Text("Δεν ήταν δυνατή η αναπαραγωγή μέσα στην εφαρμογή.")
+                    Icon(Icons.Outlined.Movie, contentDescription = null, modifier = Modifier.size(32.dp))
+                    Text(state.message)
+                    TextButton(onClick = { attempt++ }) {
+                        Icon(Icons.Outlined.Refresh, contentDescription = null)
+                        Text("Νέα προσπάθεια", modifier = Modifier.padding(start = 6.dp))
+                    }
                     TextButton(onClick = { onOpenExternal(source.originalUrl) }) {
-                        Text("Άνοιγμα βίντεο")
+                        Icon(Icons.AutoMirrored.Outlined.OpenInNew, contentDescription = null)
+                        Text("Άνοιγμα εκτός εφαρμογής", modifier = Modifier.padding(start = 6.dp))
                     }
                 }
             }
         }
     }
+}
+
+private sealed interface InlinePlayerState {
+    data object Loading : InlinePlayerState
+    data object Ready : InlinePlayerState
+    data class Error(val message: String) : InlinePlayerState
 }
 
 private object WebViewHolder {
@@ -232,14 +281,15 @@ private object WebViewHolder {
     fun create(
         context: Context,
         source: InlineVideoSource,
-        onLoadingChanged: (Boolean) -> Unit,
-        onError: () -> Unit,
+        onReady: () -> Unit,
+        onError: (String) -> Unit,
         onExternalNavigation: (String) -> Unit,
     ): WebView = WebView(context).apply {
         setBackgroundColor(AndroidColor.rgb(23, 19, 15))
+        setLayerType(WebView.LAYER_TYPE_HARDWARE, null)
         settings.apply {
-            javaScriptEnabled = source is InlineVideoSource.YouTube
-            domStorageEnabled = source is InlineVideoSource.YouTube
+            javaScriptEnabled = true
+            domStorageEnabled = true
             databaseEnabled = false
             allowFileAccess = false
             allowContentAccess = false
@@ -253,26 +303,52 @@ private object WebViewHolder {
             builtInZoomControls = false
             displayZoomControls = false
         }
-        CookieManager.getInstance().setAcceptThirdPartyCookies(this, false)
-        webChromeClient = WebChromeClient()
+        CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
+        webChromeClient = object : WebChromeClient() {
+            override fun onConsoleMessage(consoleMessage: ConsoleMessage?): Boolean {
+                val message = consoleMessage?.message().orEmpty()
+                return when {
+                    message == "SPOON_VIDEO_READY" -> {
+                        onReady()
+                        true
+                    }
+                    message.startsWith("SPOON_VIDEO_ERROR:") -> {
+                        onError("Δεν ήταν δυνατή η αναπαραγωγή μέσα στην εφαρμογή.")
+                        true
+                    }
+                    else -> super.onConsoleMessage(consoleMessage)
+                }
+            }
+        }
         webViewClient = object : WebViewClient() {
-            override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
-                onLoadingChanged(true)
-            }
-
-            override fun onPageFinished(view: WebView?, url: String?) {
-                onLoadingChanged(false)
-            }
-
             override fun onReceivedError(
                 view: WebView?,
                 request: WebResourceRequest?,
                 error: WebResourceError?,
             ) {
                 if (request?.isForMainFrame != false) {
-                    onLoadingChanged(false)
-                    onError()
+                    onError("Η σύνδεση για το βίντεο απέτυχε.")
                 }
+            }
+
+            override fun onReceivedHttpError(
+                view: WebView?,
+                request: WebResourceRequest?,
+                errorResponse: WebResourceResponse?,
+            ) {
+                if (request?.isForMainFrame != false && (errorResponse?.statusCode ?: 0) >= 400) {
+                    onError("Ο πάροχος του βίντεο επέστρεψε σφάλμα.")
+                }
+            }
+
+            override fun onReceivedSslError(view: WebView?, handler: SslErrorHandler?, error: SslError?) {
+                handler?.cancel()
+                onError("Δεν ήταν ασφαλής η σύνδεση του βίντεο.")
+            }
+
+            override fun onRenderProcessGone(view: WebView?, detail: RenderProcessGoneDetail?): Boolean {
+                onError("Ο player σταμάτησε απρόσμενα.")
+                return true
             }
 
             override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
@@ -292,18 +368,12 @@ private object WebViewHolder {
             }
         }
 
-        when (source) {
-            is InlineVideoSource.YouTube -> loadUrl(
-                source.embedUrl,
-                mapOf("Referer" to "https://akispetretzikis.com/"),
-            )
-            is InlineVideoSource.Direct -> loadDataWithBaseURL(
-                "https://akispetretzikis.com/",
-                directVideoHtml(source),
-                "text/html",
-                "UTF-8",
-                null,
-            )
-        }
+        loadDataWithBaseURL(
+            "https://akispetretzikis.com/",
+            inlineVideoHtml(source),
+            "text/html",
+            "UTF-8",
+            null,
+        )
     }
 }

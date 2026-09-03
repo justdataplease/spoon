@@ -2,6 +2,7 @@ package com.justdataplease.spoon.ui
 
 import com.justdataplease.spoon.ui.model.CalendarMealUi
 import com.justdataplease.spoon.ui.model.DayPlanUi
+import com.justdataplease.spoon.ui.history.HistoryEntryUi
 import java.time.LocalDate
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -52,6 +53,27 @@ class SpoonViewModelCalendarTest {
                     recipeTitle = "Ψάρι λεμονάτο",
                     categoryKey = "fish",
                     isCompleted = true,
+                ),
+            ),
+        )
+
+        assertTrue(completed)
+    }
+
+    @Test
+    fun `history marks a date completed outside the visible calendar and week`() {
+        val completed = completionStateForDate(
+            date = date,
+            calendarMeals = emptyList(),
+            weekPlans = emptyList(),
+            historyEntries = listOf(
+                HistoryEntryUi(
+                    id = date.toString(),
+                    date = date,
+                    recipeId = "fish-lemon",
+                    title = "Recipe",
+                    categoryLabel = "Fish",
+                    categoryEmoji = "",
                 ),
             ),
         )

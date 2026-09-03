@@ -18,8 +18,14 @@ Android application ID is `com.spoon.app`.
 - A clear effort index based on preparation sections and method steps: unknown
   when both are absent, easy for at most one preparation and 1–5 steps, demanding
   for at least three preparations or ten steps, and moderate otherwise.
-- Favorites, cooked/not-cooked tracking, previous/next weeks, and a month calendar.
+- Favorites, cooked/not-cooked tracking, a dedicated cooking history, previous/next
+  weeks, and a month calendar.
 - Replacement of an existing day's suggestion with any saved favorite.
+- A persistent shopping list. Add every ingredient from a recipe in one tap, add
+  manual items, tick them off, remove them, or clear everything completed.
+- A private note on every recipe and a Greek custom-recipe editor with ingredients,
+  ordered steps, category, timings, servings, and a compressed photo from the gallery
+  or camera.
 - An Explore screen with accent-insensitive Greek search and combined filters for
   category, effort, rating, preparation time, quick recipes, special diet, meal
   type, occasion, cooking method, country/cuisine, and main ingredient.
@@ -27,13 +33,14 @@ Android application ID is `com.spoon.app`.
   difficulty, servings, rating distribution, grouped ingredients and conversions,
   numbered method steps, tips, nutrition, equipment, publication metadata, and the
   canonical source link.
-- User-initiated inline video. YouTube uses the privacy-enhanced
-  `youtube-nocookie.com` player; direct HTTPS video files use an inline HTML5
-  player. Nothing autoplays, unsafe URLs/navigation are blocked, and an external
-  fallback remains available.
+- User-initiated inline video for YouTube, Vimeo, and direct HTTPS video files.
+  Nothing autoplays, unsafe URLs/navigation are blocked, loading failures are shown
+  instead of a blank player, and an external fallback remains available.
 - A persistent local Greek demo catalog when no Firebase configuration is present.
-- Anonymous Firebase Authentication and offline-capable Firestore sync when the
-  matching configuration is present.
+- Anonymous Firebase Authentication plus optional email/password account linking,
+  sign-in, sign-out, and password reset. Linking upgrades the same UID so the
+  owner's plans, favorites, history, notes, shopping list, and custom recipes remain
+  attached to the account and sync across phones.
 
 Strict filters are never silently relaxed. If no recipe matches, the current plan
 is preserved and the app explains that no alternative was found.
@@ -50,7 +57,8 @@ app/src/main/java/com/justdataplease/spoon/
   domain/     weekly defaults, filtering, random selection, planner operations
   di/         runtime repository selection
   sync/       unique 90-day catalog-status check
-  ui/         week, Explore, favorites, calendar, details, video, theme
+  ui/         week, Explore, favorites, shopping, history, account, custom recipes,
+              calendar, details, video, theme
 
 tools/recipe_importer/
   crawl_catalog.py    complete permission-gated Greek catalog crawler
@@ -101,7 +109,7 @@ the package and Firebase app registration must match. Keep the downloaded file a
 
 Firebase setup requires:
 
-1. Anonymous sign-in enabled in Firebase Authentication.
+1. Anonymous and Email/Password sign-in enabled in Firebase Authentication.
 2. A Firestore database in the selected European location.
 3. The checked-in rules and indexes deployed:
 
@@ -125,12 +133,16 @@ spoon_recipe_payloads/{recipeId}         source audit envelope; backend only
 spoon_catalog/status                     last complete backend import checkpoint
 spoon/{uid}/mealPlans/{yyyy-MM-dd}       owner-only daily plan/filter/completion
 spoon/{uid}/favorites/{recipeId}         owner-only favorite marker
+spoon/{uid}/shoppingItems/{itemId}       owner-only shopping-list item
+spoon/{uid}/recipeNotes/{recipeId}       owner-only private recipe note
+spoon/{uid}/customRecipes/{recipeId}     owner-only manually authored recipe
+spoon/{uid}/cookedHistory/{yyyy-MM-dd}   owner-only cooked-meal history
 ```
 
 Catalog writes are denied to mobile clients. Raw source payload reads are also
-denied; only trusted Admin SDK tooling can access them. User plans and favorites
-are isolated by the anonymous Firebase UID and validated by field/type/range
-allowlists in `firestore.rules`.
+denied; only trusted Admin SDK tooling can access them. All user data is isolated
+by the Firebase UID and validated by field/type/range allowlists in
+`firestore.rules`.
 
 Every Firestore model has safe defaults. The repository queries only
 `active == true` and `language == "el"` summaries and validates those values
@@ -215,7 +227,7 @@ Outside the window, the binding grants no catalog data access.
 ## Privacy and operating notes
 
 - The app contains no advertising profile. Anonymous Firebase IDs exist only to
-  isolate each user's plans and favorites.
+  isolate each user's data before an optional email account is linked.
 - Firestore provides offline caching in cloud mode; local mode persists its state
   in app-private storage.
 - Unknown ratings do not pass a positive rating filter. Unknown preparation time

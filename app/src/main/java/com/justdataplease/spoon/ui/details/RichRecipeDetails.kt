@@ -54,6 +54,7 @@ import com.justdataplease.spoon.ui.components.CategoryPill
 import com.justdataplease.spoon.ui.components.RecipeArtwork
 import com.justdataplease.spoon.ui.model.EaseUi
 import com.justdataplease.spoon.ui.model.RecipeDetailUi
+import com.justdataplease.spoon.ui.shopping.ShoppingIngredientDraftUi
 import java.util.Locale
 
 @Composable
@@ -62,6 +63,9 @@ internal fun RichRecipeDetailsContent(
     onBack: () -> Unit,
     onToggleFavorite: () -> Unit,
     onOpenSource: () -> Unit,
+    recipeNote: String,
+    onSaveNote: (String) -> Unit,
+    onAddIngredients: (List<ShoppingIngredientDraftUi>) -> Unit,
     modifier: Modifier = Modifier,
     isLoadingDetails: Boolean = false,
 ) {
@@ -116,9 +120,10 @@ internal fun RichRecipeDetailsContent(
                 RatingDistribution(recipe)
                 RecipeGallery(recipe)
                 RecipeVideoSection(recipe.videoUrls, openExternal)
-                IngredientsSection(recipe, openExternal)
+                IngredientsSection(recipe, onAddIngredients)
                 MethodSection(recipe)
                 AdviceSections(recipe)
+                PersonalRecipeNoteSection(recipe.recipeId, recipeNote, onSaveNote)
                 NutritionSection(recipe)
                 EquipmentSection(recipe)
                 TaxonomySection(recipe)
@@ -143,12 +148,18 @@ fun RecipeDetailsScreen(
     onToggleFavorite: () -> Unit,
     onOpenSource: () -> Unit,
     modifier: Modifier = Modifier,
+    recipeNote: String = "",
+    onSaveNote: (String) -> Unit = {},
+    onAddIngredients: (List<ShoppingIngredientDraftUi>) -> Unit = {},
     isLoadingDetails: Boolean = false,
 ) = RichRecipeDetailsContent(
     recipe = recipe,
     onBack = onBack,
     onToggleFavorite = onToggleFavorite,
     onOpenSource = onOpenSource,
+    recipeNote = recipeNote,
+    onSaveNote = onSaveNote,
+    onAddIngredients = onAddIngredients,
     isLoadingDetails = isLoadingDetails,
     modifier = modifier,
 )

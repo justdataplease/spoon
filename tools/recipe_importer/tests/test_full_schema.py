@@ -72,6 +72,18 @@ def test_normalizes_every_android_detail_and_retains_unknown_source_fields():
     assert record["sourcePayload"]["future_api_field"] == {"nested": "retained&safe"}
 
 
+def test_normalizes_publisher_label_after_video_url():
+    source = payload()
+    source["video_url"] = "https://youtu.be/VWaCrszdgt4 Heinz"
+    record = normalize_recipe_detail(
+        source,
+        source_url="https://akispetretzikis.com/recipe/6162/stromboli",
+        sitemap_last_modified="2026-09-03",
+        associations={},
+    )
+    assert record["videoUrls"] == ["https://youtu.be/VWaCrszdgt4"]
+
+
 def test_projects_lean_list_complete_detail_and_complete_raw_source_docs():
     record = full_record()
     summary = firestore_recipe_payload(record)

@@ -1,0 +1,317 @@
+package com.justdataplease.spoon.ui.account
+
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.automirrored.outlined.Logout
+import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.Email
+import androidx.compose.material.icons.outlined.Lock
+import androidx.compose.material.icons.outlined.Person
+import androidx.compose.material.icons.outlined.PersonAdd
+import androidx.compose.material.icons.outlined.RestartAlt
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.unit.dp
+
+@Composable
+fun AccountScreen(
+    state: AccountUiState,
+    onBack: () -> Unit,
+    onCreateOrLinkAccount: (email: String, password: String) -> Unit,
+    onSignIn: (email: String, password: String) -> Unit,
+    onResetPassword: (email: String) -> Unit,
+    onSignOut: () -> Unit,
+    onClearError: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    BackHandler(onBack = onBack)
+    var mode by rememberSaveable { mutableStateOf(AccountFormMode.CREATE) }
+    var email by rememberSaveable(state.email) { mutableStateOf(state.email) }
+    // Passwords deliberately stay out of Android's persisted saved-state Bundle.
+    var password by remember { mutableStateOf("") }
+    var confirmation by remember { mutableStateOf("") }
+    var localError by remember { mutableStateOf<String?>(null) }
+
+    fun switchMode(value: AccountFormMode) {
+        mode = value
+        password = ""
+        confirmation = ""
+        localError = null
+        onClearError()
+    }
+
+    LazyColumn(
+        modifier = modifier.fillMaxSize(),
+        contentPadding = PaddingValues(start = 18.dp, end = 18.dp, top = 14.dp, bottom = 42.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        item {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                IconButton(onClick = onBack) {
+                    Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Πίσω")
+                }
+                Column {
+                    Text("Λογαριασμός", style = MaterialTheme.typography.headlineMedium)
+                    Text("Τα προσωπικά σου δεδομένα στο Spoon", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
+
+        if (state.isSignedIn && !state.isAnonymous) {
+            item {
+                SignedInAccountCard(state = state, onSignOut = onSignOut)
+            }
+        } else {
+            item {
+                AnonymousStatusCard(isAnonymous = state.isAnonymous)
+            }
+            item {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(
+                        selected = mode == AccountFormMode.CREATE,
+                        onClick = { switchMode(AccountFormMode.CREATE) },
+                        label = { Text(if (state.isAnonymous) "Κατοχύρωση" else "Εγγραφή") },
+                        leadingIcon = { Icon(Icons.Outlined.PersonAdd, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                        modifier = Modifier.weight(1f),
+                    )
+                    FilterChip(
+                        selected = mode == AccountFormMode.SIGN_IN,
+                        onClick = { switchMode(AccountFormMode.SIGN_IN) },
+                        label = { Text("Σύνδεση") },
+                        leadingIcon = { Icon(Icons.Outlined.Person, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+            item {
+                AccountFormCard(
+                    mode = mode,
+                    isAnonymous = state.isAnonymous,
+                    email = email,
+                    password = password,
+                    confirmation = confirmation,
+                    isBusy = state.isBusy,
+                    onEmailChange = {
+                        email = it
+                        localError = null
+                        onClearError()
+                    },
+                    onPasswordChange = {
+                        password = it
+                        localError = null
+                        onClearError()
+                    },
+                    onConfirmationChange = {
+                        confirmation = it
+                        localError = null
+                        onClearError()
+                    },
+                    onSubmit = {
+                        val error = validateAccountInput(mode, email, password, confirmation)
+                        if (error != null) {
+                            localError = error
+                        } else when (mode) {
+                            AccountFormMode.CREATE -> onCreateOrLinkAccount(email.trim(), password)
+                            AccountFormMode.SIGN_IN -> onSignIn(email.trim(), password)
+                            AccountFormMode.RESET -> onResetPassword(email.trim())
+                        }
+                    },
+                    onForgotPassword = { switchMode(AccountFormMode.RESET) },
+                    onCancelReset = { switchMode(AccountFormMode.SIGN_IN) },
+                )
+            }
+            val error = localError ?: state.errorMessage
+            if (!error.isNullOrBlank()) {
+                item {
+                    Surface(
+                        color = MaterialTheme.colorScheme.errorContainer,
+                        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                        shape = RoundedCornerShape(16.dp),
+                    ) {
+                        Text(error, modifier = Modifier.fillMaxWidth().padding(14.dp))
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AnonymousStatusCard(isAnonymous: Boolean) {
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer), shape = RoundedCornerShape(24.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(18.dp),
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Surface(shape = CircleShape, color = MaterialTheme.colorScheme.surface) {
+                Icon(Icons.Outlined.Person, contentDescription = null, modifier = Modifier.padding(12.dp).size(26.dp))
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    if (isAnonymous) "Προσωρινός λογαριασμός" else "Δεν είσαι συνδεδεμένος/η",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                )
+                Text(
+                    if (isAnonymous) {
+                        "Κατοχύρωσέ τον με email για να μη χάσεις αγαπημένα, σημειώσεις και λίστες."
+                    } else {
+                        "Συνδέσου ή δημιούργησε λογαριασμό για συγχρονισμό."
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SignedInAccountCard(state: AccountUiState, onSignOut: () -> Unit) {
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), shape = RoundedCornerShape(24.dp)) {
+        Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Surface(shape = CircleShape, color = MaterialTheme.colorScheme.secondaryContainer, modifier = Modifier.align(Alignment.CenterHorizontally)) {
+                Icon(Icons.Outlined.Person, contentDescription = null, modifier = Modifier.padding(18.dp).size(38.dp))
+            }
+            Text(state.email, style = MaterialTheme.typography.titleLarge, modifier = Modifier.align(Alignment.CenterHorizontally))
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.align(Alignment.CenterHorizontally)) {
+                Icon(Icons.Outlined.CheckCircle, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                Text(
+                    when (state.isEmailVerified) {
+                        true -> "Επιβεβαιωμένο email"
+                        false -> "Email σε αναμονή επιβεβαίωσης"
+                        null -> "Συνδεδεμένος λογαριασμός"
+                    },
+                    modifier = Modifier.padding(start = 7.dp),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            OutlinedButton(onClick = onSignOut, enabled = !state.isBusy, modifier = Modifier.fillMaxWidth()) {
+                Icon(Icons.AutoMirrored.Outlined.Logout, contentDescription = null)
+                Text("Αποσύνδεση", modifier = Modifier.padding(start = 8.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun AccountFormCard(
+    mode: AccountFormMode,
+    isAnonymous: Boolean,
+    email: String,
+    password: String,
+    confirmation: String,
+    isBusy: Boolean,
+    onEmailChange: (String) -> Unit,
+    onPasswordChange: (String) -> Unit,
+    onConfirmationChange: (String) -> Unit,
+    onSubmit: () -> Unit,
+    onForgotPassword: () -> Unit,
+    onCancelReset: () -> Unit,
+) {
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), shape = RoundedCornerShape(24.dp)) {
+        Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(
+                when (mode) {
+                    AccountFormMode.CREATE -> if (isAnonymous) "Κατοχύρωση λογαριασμού" else "Νέος λογαριασμός"
+                    AccountFormMode.SIGN_IN -> "Σύνδεση σε υπάρχοντα λογαριασμό"
+                    AccountFormMode.RESET -> "Επαναφορά κωδικού"
+                },
+                style = MaterialTheme.typography.titleLarge,
+            )
+            OutlinedTextField(
+                value = email,
+                onValueChange = onEmailChange,
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                label = { Text("Email") },
+                leadingIcon = { Icon(Icons.Outlined.Email, contentDescription = null) },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
+            )
+            if (mode != AccountFormMode.RESET) {
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = onPasswordChange,
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    label = { Text("Κωδικός") },
+                    leadingIcon = { Icon(Icons.Outlined.Lock, contentDescription = null) },
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                )
+            }
+            if (mode == AccountFormMode.CREATE) {
+                OutlinedTextField(
+                    value = confirmation,
+                    onValueChange = onConfirmationChange,
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    label = { Text("Επανάληψη κωδικού") },
+                    leadingIcon = { Icon(Icons.Outlined.Lock, contentDescription = null) },
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                )
+            }
+            Button(onClick = onSubmit, enabled = !isBusy, modifier = Modifier.fillMaxWidth()) {
+                Icon(
+                    if (mode == AccountFormMode.RESET) Icons.Outlined.RestartAlt else Icons.Outlined.Person,
+                    contentDescription = null,
+                )
+                Text(
+                    when {
+                        isBusy -> "Παρακαλώ περίμενε…"
+                        mode == AccountFormMode.CREATE && isAnonymous -> "Κατοχύρωση"
+                        mode == AccountFormMode.CREATE -> "Δημιουργία"
+                        mode == AccountFormMode.SIGN_IN -> "Σύνδεση"
+                        else -> "Αποστολή email επαναφοράς"
+                    },
+                    modifier = Modifier.padding(start = 8.dp),
+                )
+            }
+            if (mode == AccountFormMode.SIGN_IN) {
+                TextButton(onClick = onForgotPassword, modifier = Modifier.align(Alignment.End)) {
+                    Text("Ξέχασα τον κωδικό")
+                }
+            } else if (mode == AccountFormMode.RESET) {
+                TextButton(onClick = onCancelReset, modifier = Modifier.align(Alignment.End)) {
+                    Text("Πίσω στη σύνδεση")
+                }
+            }
+        }
+    }
+}

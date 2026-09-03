@@ -20,6 +20,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.NoteAdd
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.outlined.Close
@@ -78,6 +79,7 @@ fun ExploreScreen(
     onApplyFilters: (ExploreFiltersUi) -> Unit,
     onOpenRecipe: (String) -> Unit,
     onToggleFavorite: (String) -> Unit,
+    onCreateRecipe: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     var showFilters by remember { mutableStateOf(false) }
@@ -88,7 +90,7 @@ fun ExploreScreen(
         verticalArrangement = Arrangement.spacedBy(13.dp),
     ) {
         item {
-            ExploreHero(resultCount = recipes.size, totalCount = totalRecipeCount)
+            ExploreHero(resultCount = recipes.size, totalCount = totalRecipeCount, onCreateRecipe = onCreateRecipe)
         }
         item {
             Row(
@@ -180,7 +182,7 @@ fun ExploreScreen(
 }
 
 @Composable
-private fun ExploreHero(resultCount: Int, totalCount: Int) {
+private fun ExploreHero(resultCount: Int, totalCount: Int, onCreateRecipe: () -> Unit) {
     Card(colors = CardDefaults.cardColors(containerColor = Color.Transparent), shape = RoundedCornerShape(30.dp)) {
         Column(
             modifier = Modifier
@@ -209,6 +211,10 @@ private fun ExploreHero(resultCount: Int, totalCount: Int) {
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.primary,
             )
+            OutlinedButton(onClick = onCreateRecipe, modifier = Modifier.fillMaxWidth()) {
+                Icon(Icons.AutoMirrored.Outlined.NoteAdd, contentDescription = null)
+                Text("Νέα δική μου συνταγή", modifier = Modifier.padding(start = 8.dp))
+            }
         }
     }
 }

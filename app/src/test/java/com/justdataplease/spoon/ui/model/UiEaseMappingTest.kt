@@ -152,6 +152,26 @@ class UiEaseMappingTest {
         )
     }
 
+    @Test
+    fun `authoritative dessert and other categories are selectable in Greek`() {
+        assertEquals(
+            CategoryUi("dessert", "Γλυκά", "🍰"),
+            AvailableCategories.single { it.key == "dessert" },
+        )
+        assertEquals(
+            CategoryUi("other", "Άλλο", "🍽️"),
+            AvailableCategories.single { it.key == "other" },
+        )
+        assertEquals("Γλυκά", DayPlanUi(
+            date = LocalDate.of(2026, 9, 3),
+            categoryKey = "dessert",
+        ).category.label)
+        assertEquals("Άλλο", DayPlanUi(
+            date = LocalDate.of(2026, 9, 3),
+            categoryKey = "other",
+        ).category.label)
+    }
+
     private data class Workload(
         val preparations: Int,
         val steps: Int,

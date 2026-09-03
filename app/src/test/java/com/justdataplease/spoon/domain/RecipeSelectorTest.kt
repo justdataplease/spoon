@@ -125,4 +125,28 @@ class RecipeSelectorTest {
 
         assertEquals(emptyList<Recipe>(), candidates)
     }
+
+    @Test
+    fun exact_match_uses_the_same_combined_filter_pipeline() {
+        val recipe = Recipe(
+            id = "fish",
+            category = MealCategory.FISH.key,
+            rating = 8.5,
+            prepMinutes = 25,
+            stepCount = 7,
+            preparationCount = 2,
+        )
+        val matching = RecipeFilters(
+            category = MealCategory.FISH.key,
+            easeLevel = EaseLevel.MODERATE.key,
+            minRating = 8.0,
+            maxPrepMinutes = 30,
+        )
+
+        assertEquals(true, selector.matches(recipe, matching))
+        assertEquals(false, selector.matches(recipe, matching.copy(category = MealCategory.MEAT.key)))
+        assertEquals(false, selector.matches(recipe, matching.copy(minRating = 9.0)))
+        assertEquals(false, selector.matches(recipe, matching.copy(maxPrepMinutes = 20)))
+        assertEquals(false, selector.matches(recipe, matching.copy(easeLevel = EaseLevel.EASY.key)))
+    }
 }

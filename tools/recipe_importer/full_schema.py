@@ -14,9 +14,19 @@ from typing import Any
 from urllib.parse import urljoin, urlsplit, urlunsplit
 
 try:
-    from .helpers import canonical_category, classify_category_keys, classify_ease, stable_random_key
+    from .helpers import (
+        canonical_category,
+        classify_ease,
+        classify_official_category_keys,
+        stable_random_key,
+    )
 except ImportError:  # pragma: no cover - direct script execution
-    from helpers import canonical_category, classify_category_keys, classify_ease, stable_random_key
+    from helpers import (
+        canonical_category,
+        classify_ease,
+        classify_official_category_keys,
+        stable_random_key,
+    )
 
 
 DETAIL_SCHEMA_VERSION = "akis-full-v1"
@@ -42,6 +52,8 @@ DIET_LABELS = {
     "ls": "Χαμηλή σε ζάχαρη",
 }
 CATEGORY_LABELS = {
+    "dessert": "Γλυκά",
+    "other": "Άλλο",
     "legumes": "Όσπρια",
     "fish": "Ψάρι",
     "meat": "Κρέας",
@@ -206,6 +218,13 @@ def _safe_url(value: object, *, base_url: str = "") -> str:
     ):
         return ""
     return urlunsplit(("https", parts.netloc, parts.path, parts.query, parts.fragment))
+
+
+def _safe_video_url(value: object) -> str:
+    """Normalize a video URL, removing a publisher's trailing plain-text label."""
+    text = _clean(str(value or "")).strip()
+    url_token = text.split(maxsplit=1)[0] if text else ""
+    return _safe_url(url_token)
 
 
 def parse_wait_minutes(value: object) -> int:
@@ -381,11 +400,9 @@ def normalize_recipe_detail(
         label_fields[target] = _unique(labels)
 
     raw_category = _mapping(source_payload.get("category"))
-    category_slug = _string(raw_category.get("slug"))
-    category_keys = classify_category_keys(
-        title,
-        [category_slug, *label_fields["ingredientLabels"]],
-        [*label_fields["mealTypeLabels"], *label_fields["occasionLabels"], *label_fields["cuisineLabels"]],
+    category_keys = classify_official_category_keys(
+        raw_category,
+        normalized_associations,
     )
     category = canonical_category(category_keys)
     category_label = CATEGORY_LABELS.get(category, "Άλλο")
@@ -410,7 +427,7 @@ def normalize_recipe_detail(
         for candidate in raw_value if isinstance(raw_value, list) else [raw_value]:
             if isinstance(candidate, Mapping):
                 candidate = candidate.get("url")
-            video_urls.append(_safe_url(candidate))
+            video_urls.append(_safe_video_url(candidate))
     video_urls = _unique(video_urls)
     sponsor = source_payload.get("sponsor_logo")
     if isinstance(sponsor, Mapping):
@@ -589,6 +606,28 @@ def ensure_full_record(record: Mapping[str, Any]) -> None:
     associations = record.get("filterAssociations")
     if _normalize_associations(associations) != associations:
         raise FullSchemaError("filterAssociations must be canonical sorted facet objects")
+    expected_category_keys = classify_official_category_keys(
+        payload.get("category"),
+        associations,
+    )
+    if record.get("categoryKeys") != expected_category_keys:
+        raise FullSchemaError(
+            "categoryKeys do not match the official source taxonomy"
+        )
+    expected_category = canonical_category(expected_category_keys)
+    if record.get("category") != expected_category:
+        raise FullSchemaError("category does not match the official source taxonomy")
+    expected_category_label = CATEGORY_LABELS.get(expected_category, "Άλλο")
+    if record.get("categoryLabel") != expected_category_label:
+        raise FullSchemaError(
+            "categoryLabel does not match the official source taxonomy"
+        )
+    raw_category = _mapping(payload.get("category"))
+    expected_source_id = _int(
+        raw_category.get("id") or payload.get("recipe_category_id")
+    )
+    if record.get("categorySourceId") != expected_source_id:
+        raise FullSchemaError("categorySourceId does not match sourcePayload")
 
     string_fields = {
         "detailSchemaVersion", "slug", "title", "description", "seoTitle",

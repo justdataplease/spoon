@@ -15,6 +15,8 @@ enum class MealCategory(
     FISH("fish", "Ψάρι"),
     STREET_FOOD("street_food", "Βρώμικο"),
     PASTA_RICE("pasta_rice", "Ζυμαρικά & ρύζι"),
+    DESSERT("dessert", "Γλυκά"),
+    OTHER("other", "Άλλο"),
     ANY("any", "Όλα"),
     ;
 
@@ -22,4 +24,3 @@ enum class MealCategory(
         fun fromKey(key: String): MealCategory? = entries.firstOrNull { it.key == key }
     }
 }
-

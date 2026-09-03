@@ -24,7 +24,7 @@ def test_extracts_only_allowlisted_metadata_from_json_ld():
         "title": "Synthetic salmon street-food bowl",
         "language": "el",
         "sourceUrl": "https://akispetretzikis.com/recipe/123/synthetic",
-        "categoryKeys": ["fish", "dirty"],
+        "categoryKeys": ["fish"],
         "prepMinutes": 65,
         "cookMinutes": 45,
         "totalMinutes": 110,

@@ -9,6 +9,10 @@ import kotlin.random.Random
 
 /** Applies every requested constraint before making a random choice. */
 class RecipeSelector @Inject constructor() {
+    /** True only when this exact recipe passes the same pipeline used for random selection. */
+    fun matches(recipe: Recipe, filters: RecipeFilters): Boolean =
+        candidates(listOf(recipe), filters).singleOrNull()?.id == recipe.id
+
     fun candidates(
         recipes: List<Recipe>,
         filters: RecipeFilters,

@@ -3,14 +3,16 @@ package com.justdataplease.spoon.ui
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.RestaurantMenu
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.outlined.CalendarMonth
+import androidx.compose.material.icons.filled.ShoppingBasket
 import androidx.compose.material.icons.outlined.FavoriteBorder
+import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.material.icons.outlined.RestaurantMenu
 import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.ShoppingBasket
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -24,30 +26,41 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import com.justdataplease.spoon.ui.account.AccountScreen
 import com.justdataplease.spoon.ui.calendar.CalendarScreen
+import com.justdataplease.spoon.ui.custom.CustomRecipeScreen
 import com.justdataplease.spoon.ui.details.RecipeDetailsScreen
 import com.justdataplease.spoon.ui.explore.ExploreScreen
 import com.justdataplease.spoon.ui.favorites.FavoriteReplacementSheet
 import com.justdataplease.spoon.ui.favorites.FavoritesScreen
+import com.justdataplease.spoon.ui.history.HistoryScreen
 import com.justdataplease.spoon.ui.model.SpoonUiState
+import com.justdataplease.spoon.ui.more.MoreScreen
+import com.justdataplease.spoon.ui.shopping.ShoppingScreen
 import com.justdataplease.spoon.ui.week.WeekScreen
 
+private enum class PrimaryDestination { WEEK, EXPLORE, FAVORITES, SHOPPING, MORE }
+private enum class MorePage { HUB, CALENDAR, HISTORY, ACCOUNT }
+
 private data class Destination(
+    val key: PrimaryDestination,
     val label: String,
     val selectedIcon: ImageVector,
     val unselectedIcon: ImageVector,
 )
 
 private val Destinations = listOf(
-    Destination("Εβδομάδα", Icons.Filled.RestaurantMenu, Icons.Outlined.RestaurantMenu),
-    Destination("Εξερεύνηση", Icons.Filled.Search, Icons.Outlined.Search),
-    Destination("Αγαπημένα", Icons.Filled.Favorite, Icons.Outlined.FavoriteBorder),
-    Destination("Ημερολόγιο", Icons.Filled.CalendarMonth, Icons.Outlined.CalendarMonth),
+    Destination(PrimaryDestination.WEEK, "Πλάνο", Icons.Filled.RestaurantMenu, Icons.Outlined.RestaurantMenu),
+    Destination(PrimaryDestination.EXPLORE, "Βρες", Icons.Filled.Search, Icons.Outlined.Search),
+    Destination(PrimaryDestination.FAVORITES, "Αγαπημένα", Icons.Filled.Favorite, Icons.Outlined.FavoriteBorder),
+    Destination(PrimaryDestination.SHOPPING, "Αγορές", Icons.Filled.ShoppingBasket, Icons.Outlined.ShoppingBasket),
+    Destination(PrimaryDestination.MORE, "Μενού", Icons.Filled.MoreHoriz, Icons.Outlined.Menu),
 )
 
 @Composable
@@ -58,14 +71,22 @@ fun SpoonApp(
     modifier: Modifier = Modifier,
 ) {
     var selectedDestination by rememberSaveable { mutableIntStateOf(0) }
+    var morePage by rememberSaveable { mutableStateOf(MorePage.HUB) }
+    var isCreatingRecipe by rememberSaveable { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
     val selectedRecipe = state.selectedRecipe
 
-    BackHandler(enabled = selectedRecipe != null || state.favoriteReplacementDate != null) {
-        if (selectedRecipe != null) {
-            viewModel.dismissRecipeDetails()
-        } else {
-            viewModel.dismissFavoriteReplacement()
+    BackHandler(
+        enabled = selectedRecipe != null ||
+            state.favoriteReplacementDate != null ||
+            isCreatingRecipe ||
+            (Destinations[selectedDestination].key == PrimaryDestination.MORE && morePage != MorePage.HUB),
+    ) {
+        when {
+            selectedRecipe != null -> viewModel.dismissRecipeDetails()
+            state.favoriteReplacementDate != null -> viewModel.dismissFavoriteReplacement()
+            isCreatingRecipe -> isCreatingRecipe = false
+            else -> morePage = MorePage.HUB
         }
     }
 
@@ -75,19 +96,27 @@ fun SpoonApp(
             viewModel.clearMessage()
         }
     }
+    LaunchedEffect(selectedRecipe?.recipeId) {
+        if (isCreatingRecipe && selectedRecipe?.recipeId?.startsWith("custom_") == true) {
+            isCreatingRecipe = false
+        }
+    }
 
     Scaffold(
         modifier = modifier,
         containerColor = MaterialTheme.colorScheme.background,
         snackbarHost = { SnackbarHost(snackbarHostState) },
         bottomBar = {
-            if (selectedRecipe == null) {
+            if (selectedRecipe == null && !isCreatingRecipe) {
                 NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
                     Destinations.forEachIndexed { index, destination ->
                         val selected = selectedDestination == index
                         NavigationBarItem(
                             selected = selected,
-                            onClick = { selectedDestination = index },
+                            onClick = {
+                                selectedDestination = index
+                                if (destination.key == PrimaryDestination.MORE) morePage = MorePage.HUB
+                            },
                             icon = {
                                 Icon(
                                     if (selected) destination.selectedIcon else destination.unselectedIcon,
@@ -104,60 +133,113 @@ fun SpoonApp(
             }
         },
     ) { padding ->
-        if (selectedRecipe != null) {
-            RecipeDetailsScreen(
+        when {
+            selectedRecipe != null -> RecipeDetailsScreen(
                 recipe = selectedRecipe,
                 onBack = viewModel::dismissRecipeDetails,
                 onToggleFavorite = { viewModel.toggleFavorite(selectedRecipe.recipeId) },
                 onOpenSource = { onOpenRecipe(selectedRecipe.sourceUrl) },
+                recipeNote = state.selectedRecipeNote,
+                onSaveNote = viewModel::saveRecipeNote,
+                onAddIngredients = viewModel::addIngredientsToShopping,
                 isLoadingDetails = state.isRecipeDetailsLoading,
                 modifier = Modifier.padding(padding),
             )
-        } else when (selectedDestination) {
-            0 -> WeekScreen(
-                state = state,
-                onPreviousWeek = viewModel::previousWeek,
-                onNextWeek = viewModel::nextWeek,
-                onCurrentWeek = viewModel::currentWeek,
-                onReroll = viewModel::reroll,
-                onEdit = viewModel::editFilters,
-                onToggleFavorite = viewModel::toggleFavorite,
-                onToggleCompleted = viewModel::toggleCompleted,
-                onOpenRecipe = viewModel::showRecipeDetails,
-                onShuffleWeek = viewModel::shuffleWeek,
-                onSaveFilters = viewModel::saveFilters,
-                onDismissEditor = viewModel::dismissFilters,
-                onChooseFavorite = viewModel::showFavoriteReplacement,
+
+            isCreatingRecipe -> CustomRecipeScreen(
+                isSaving = state.isSavingCustomRecipe,
+                onBack = { isCreatingRecipe = false },
+                onSave = viewModel::saveCustomRecipe,
                 modifier = Modifier.padding(padding),
             )
-            1 -> ExploreScreen(
-                query = state.exploreQuery,
-                recipes = state.exploreRecipes,
-                totalRecipeCount = state.exploreTotalRecipeCount,
-                filters = state.exploreFilters,
-                options = state.exploreOptions,
-                onQueryChange = viewModel::updateExploreQuery,
-                onApplyFilters = viewModel::applyExploreFilters,
-                onOpenRecipe = viewModel::showRecipeDetails,
-                onToggleFavorite = viewModel::toggleFavorite,
-                modifier = Modifier.padding(padding),
-            )
-            2 -> FavoritesScreen(
-                favorites = state.favorites,
-                onOpenRecipe = viewModel::showRecipeDetails,
-                onRemoveFavorite = viewModel::toggleFavorite,
-                modifier = Modifier.padding(padding),
-            )
-            else -> CalendarScreen(
-                shownMonth = state.shownMonth,
-                meals = state.calendarMeals,
-                onPreviousMonth = viewModel::previousMonth,
-                onNextMonth = viewModel::nextMonth,
-                onCurrentMonth = viewModel::currentMonth,
-                onOpenRecipe = viewModel::showRecipeDetails,
-                onToggleCompleted = viewModel::toggleCompleted,
-                modifier = Modifier.padding(padding),
-            )
+
+            else -> when (Destinations[selectedDestination].key) {
+                PrimaryDestination.WEEK -> WeekScreen(
+                    state = state,
+                    onPreviousWeek = viewModel::previousWeek,
+                    onNextWeek = viewModel::nextWeek,
+                    onCurrentWeek = viewModel::currentWeek,
+                    onReroll = viewModel::reroll,
+                    onEdit = viewModel::editFilters,
+                    onToggleFavorite = viewModel::toggleFavorite,
+                    onToggleCompleted = viewModel::toggleCompleted,
+                    onOpenRecipe = viewModel::showRecipeDetails,
+                    onShuffleWeek = viewModel::shuffleWeek,
+                    onSaveFilters = viewModel::saveFilters,
+                    onDismissEditor = viewModel::dismissFilters,
+                    onChooseFavorite = viewModel::showFavoriteReplacement,
+                    modifier = Modifier.padding(padding),
+                )
+
+                PrimaryDestination.EXPLORE -> ExploreScreen(
+                    query = state.exploreQuery,
+                    recipes = state.exploreRecipes,
+                    totalRecipeCount = state.exploreTotalRecipeCount,
+                    filters = state.exploreFilters,
+                    options = state.exploreOptions,
+                    onQueryChange = viewModel::updateExploreQuery,
+                    onApplyFilters = viewModel::applyExploreFilters,
+                    onOpenRecipe = viewModel::showRecipeDetails,
+                    onToggleFavorite = viewModel::toggleFavorite,
+                    onCreateRecipe = { isCreatingRecipe = true },
+                    modifier = Modifier.padding(padding),
+                )
+
+                PrimaryDestination.FAVORITES -> FavoritesScreen(
+                    favorites = state.favorites,
+                    onOpenRecipe = viewModel::showRecipeDetails,
+                    onRemoveFavorite = viewModel::toggleFavorite,
+                    modifier = Modifier.padding(padding),
+                )
+
+                PrimaryDestination.SHOPPING -> ShoppingScreen(
+                    items = state.shoppingItems,
+                    onToggle = viewModel::toggleShoppingItem,
+                    onRemove = viewModel::removeShoppingItem,
+                    onClearChecked = viewModel::clearCheckedShoppingItems,
+                    onAddManual = viewModel::addManualShoppingItem,
+                    modifier = Modifier.padding(padding),
+                )
+
+                PrimaryDestination.MORE -> when (morePage) {
+                    MorePage.HUB -> MoreScreen(
+                        onOpenCalendar = { morePage = MorePage.CALENDAR },
+                        onOpenHistory = { morePage = MorePage.HISTORY },
+                        onOpenAccount = { morePage = MorePage.ACCOUNT },
+                        onCreateRecipe = { isCreatingRecipe = true },
+                        modifier = Modifier.padding(padding),
+                    )
+                    MorePage.CALENDAR -> CalendarScreen(
+                        shownMonth = state.shownMonth,
+                        meals = state.calendarMeals,
+                        onPreviousMonth = viewModel::previousMonth,
+                        onNextMonth = viewModel::nextMonth,
+                        onCurrentMonth = viewModel::currentMonth,
+                        onOpenRecipe = viewModel::showRecipeDetails,
+                        onToggleCompleted = viewModel::toggleCompleted,
+                        modifier = Modifier.padding(padding),
+                    )
+                    MorePage.HISTORY -> HistoryScreen(
+                        entries = state.historyEntries,
+                        onOpenRecipe = viewModel::showRecipeDetails,
+                        onToggleCompleted = viewModel::toggleCompleted,
+                        modifier = Modifier.padding(padding),
+                    )
+                    MorePage.ACCOUNT -> AccountScreen(
+                        state = state.account,
+                        onBack = {
+                            viewModel.clearAccountError()
+                            morePage = MorePage.HUB
+                        },
+                        onCreateOrLinkAccount = viewModel::createOrLinkAccount,
+                        onSignIn = viewModel::signInWithEmail,
+                        onResetPassword = viewModel::resetPassword,
+                        onSignOut = viewModel::signOut,
+                        onClearError = viewModel::clearAccountError,
+                        modifier = Modifier.padding(padding),
+                    )
+                }
+            }
         }
     }
 

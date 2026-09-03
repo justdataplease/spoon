@@ -7,6 +7,9 @@ import com.justdataplease.spoon.domain.repository.BackendState
 import com.justdataplease.spoon.ui.explore.ExploreFacetOptionsUi
 import com.justdataplease.spoon.ui.explore.ExploreFiltersUi
 import com.justdataplease.spoon.ui.explore.ExploreRecipeUi
+import com.justdataplease.spoon.ui.account.AccountUiState
+import com.justdataplease.spoon.ui.history.HistoryEntryUi
+import com.justdataplease.spoon.ui.shopping.ShoppingListItemUi
 import java.time.LocalDate
 import java.time.YearMonth
 
@@ -24,6 +27,8 @@ val AvailableCategories = listOf(
     CategoryUi("pasta", "Ζυμαρικά", "🍝"),
     CategoryUi("vegetarian", "Λαχανικά", "🥬"),
     CategoryUi("dirty", "Βρώμικο", "🍔"),
+    CategoryUi("dessert", "Γλυκά", "🍰"),
+    CategoryUi("other", "Άλλο", "🍽️"),
 )
 
 enum class EaseUi(val key: String, val greekLabel: String, val detail: String) {
@@ -220,5 +225,10 @@ data class SpoonUiState(
     val exploreOptions: ExploreFacetOptionsUi = ExploreFacetOptionsUi(),
     val isRecipeDetailsLoading: Boolean = false,
     val selectedRecipe: RecipeDetailUi? = null,
+    val selectedRecipeNote: String = "",
+    val historyEntries: List<HistoryEntryUi> = emptyList(),
+    val shoppingItems: List<ShoppingListItemUi> = emptyList(),
+    val isSavingCustomRecipe: Boolean = false,
+    val account: AccountUiState = AccountUiState(),
     val message: String? = null,
 )

@@ -42,9 +42,20 @@ class WeeklyPlanDefaultsTest {
     fun `demo catalog supports alternatives for every default category`() {
         val counts = DemoRecipeCatalog.recipes.groupingBy(Recipe::category).eachCount()
 
-        MealCategory.entries.filterNot { it == MealCategory.ANY }.forEach { category ->
+        DayOfWeek.entries.map(WeeklyPlanDefaults::categoryFor).forEach { category ->
             assertTrue("Missing alternatives for ${category.key}", (counts[category.key] ?: 0) >= 2)
         }
+    }
+
+    @Test
+    fun `catalog categories include dessert and other without changing the weekly rhythm`() {
+        assertEquals(MealCategory.DESSERT, MealCategory.fromKey("dessert"))
+        assertEquals("Γλυκά", MealCategory.DESSERT.greekLabel)
+        assertEquals(MealCategory.OTHER, MealCategory.fromKey("other"))
+        assertEquals("Άλλο", MealCategory.OTHER.greekLabel)
+        assertTrue(DayOfWeek.entries.map(WeeklyPlanDefaults::categoryFor).none {
+            it == MealCategory.DESSERT || it == MealCategory.OTHER
+        })
     }
 
     @Test

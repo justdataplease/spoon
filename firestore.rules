@@ -35,8 +35,179 @@ service cloud.firestore {
         'fish',
         'street_food',
         'pasta_rice',
+        'dessert',
+        'other',
         'any'
       ];
+    }
+
+    function validText(value, minimum, maximum) {
+      return value is string &&
+        value.size() >= minimum &&
+        value.size() <= maximum;
+    }
+
+    function validCustomRecipeId(recipeId) {
+      return recipeId.matches(
+        '^custom_[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[1-5][0-9A-Fa-f]{3}-[89AaBb][0-9A-Fa-f]{3}-[0-9A-Fa-f]{12}$'
+      );
+    }
+
+    function validShoppingItem(data, itemId) {
+      return data.keys().hasAll([
+          'name',
+          'quantity',
+          'unit',
+          'info',
+          'recipeId',
+          'recipeTitle',
+          'sectionTitle',
+          'checked',
+          'createdAtEpochMillis',
+          'updatedAtEpochMillis'
+        ]) &&
+        data.keys().hasOnly([
+          'name',
+          'quantity',
+          'unit',
+          'info',
+          'recipeId',
+          'recipeTitle',
+          'sectionTitle',
+          'checked',
+          'createdAtEpochMillis',
+          'updatedAtEpochMillis'
+        ]) &&
+        validRecipeId(itemId) &&
+        validText(data.name, 1, 200) &&
+        validText(data.quantity, 0, 100) &&
+        validText(data.unit, 0, 100) &&
+        validText(data.info, 0, 500) &&
+        data.recipeId is string &&
+        (data.recipeId == '' || validRecipeId(data.recipeId)) &&
+        validText(data.recipeTitle, 0, 300) &&
+        validText(data.sectionTitle, 0, 200) &&
+        data.checked is bool &&
+        validEpochMillis(data.createdAtEpochMillis) &&
+        validEpochMillis(data.updatedAtEpochMillis) &&
+        data.updatedAtEpochMillis >= data.createdAtEpochMillis;
+    }
+
+    function validRecipeNote(data, noteId) {
+      return data.keys().hasAll(['recipeId', 'text', 'updatedAtEpochMillis']) &&
+        data.keys().hasOnly(['recipeId', 'text', 'updatedAtEpochMillis']) &&
+        validRecipeId(noteId) &&
+        data.recipeId is string &&
+        data.recipeId == noteId &&
+        validText(data.text, 1, 10000) &&
+        validEpochMillis(data.updatedAtEpochMillis);
+    }
+
+    function validCustomRecipe(data, recipeId) {
+      return data.keys().hasAll([
+          'title',
+          'description',
+          'category',
+          'prepMinutes',
+          'cookMinutes',
+          'servings',
+          'ingredientSections',
+          'methodSections',
+          'photoDataUri',
+          'active',
+          'createdAtEpochMillis',
+          'updatedAtEpochMillis'
+        ]) &&
+        data.keys().hasOnly([
+          'title',
+          'description',
+          'category',
+          'prepMinutes',
+          'cookMinutes',
+          'servings',
+          'ingredientSections',
+          'methodSections',
+          'photoDataUri',
+          'active',
+          'createdAtEpochMillis',
+          'updatedAtEpochMillis'
+        ]) &&
+        validCustomRecipeId(recipeId) &&
+        validText(data.title, 1, 300) &&
+        validText(data.description, 0, 10000) &&
+        data.category is string &&
+        validCategory(data.category) &&
+        data.prepMinutes is int &&
+        data.prepMinutes >= 0 &&
+        data.prepMinutes <= 10080 &&
+        data.cookMinutes is int &&
+        data.cookMinutes >= 0 &&
+        data.cookMinutes <= 10080 &&
+        validText(data.servings, 0, 100) &&
+        data.ingredientSections is list &&
+        data.ingredientSections.size() > 0 &&
+        data.ingredientSections.size() <= 20 &&
+        data.methodSections is list &&
+        data.methodSections.size() > 0 &&
+        data.methodSections.size() <= 20 &&
+        data.photoDataUri is string &&
+        data.photoDataUri.size() <= 700000 &&
+        data.photoDataUri.matches('^$|^data:image/jpeg;base64,[A-Za-z0-9+/=]+$') &&
+        data.active is bool &&
+        validEpochMillis(data.createdAtEpochMillis) &&
+        validEpochMillis(data.updatedAtEpochMillis) &&
+        data.updatedAtEpochMillis >= data.createdAtEpochMillis;
+    }
+
+    function validCookedMeal(data, historyId) {
+      return data.keys().hasAll([
+          'date',
+          'recipeId',
+          'recipeTitle',
+          'completedAtEpochMillis'
+        ]) &&
+        data.keys().hasOnly([
+          'date',
+          'recipeId',
+          'recipeTitle',
+          'completedAtEpochMillis'
+        ]) &&
+        validPlanId(historyId) &&
+        data.date is string &&
+        data.date == historyId &&
+        data.recipeId is string &&
+        validRecipeId(data.recipeId) &&
+        validText(data.recipeTitle, 1, 300) &&
+        validEpochMillis(data.completedAtEpochMillis);
+    }
+
+    function planHasConsistentHistory(uid, plan, planId) {
+      let historyPath = /databases/$(database)/documents/spoon/$(uid)/cookedHistory/$(planId);
+      return (plan.completed == false && !existsAfter(historyPath)) ||
+        (
+          plan.completed == true &&
+          existsAfter(historyPath) &&
+          getAfter(historyPath).data.date == plan.date &&
+          getAfter(historyPath).data.recipeId == plan.recipeId &&
+          getAfter(historyPath).data.recipeTitle == plan.recipeTitle &&
+          getAfter(historyPath).data.completedAtEpochMillis == plan.updatedAtEpochMillis
+        );
+    }
+
+    function historyMatchesCompletedPlan(uid, history, historyId) {
+      let planPath = /databases/$(database)/documents/spoon/$(uid)/mealPlans/$(historyId);
+      return existsAfter(planPath) &&
+        getAfter(planPath).data.completed == true &&
+        getAfter(planPath).data.date == history.date &&
+        getAfter(planPath).data.recipeId == history.recipeId &&
+        getAfter(planPath).data.recipeTitle == history.recipeTitle &&
+        getAfter(planPath).data.updatedAtEpochMillis == history.completedAtEpochMillis;
+    }
+
+    function historyCanBeDeleted(uid, historyId) {
+      let planPath = /databases/$(database)/documents/spoon/$(uid)/mealPlans/$(historyId);
+      return existsAfter(planPath) &&
+        getAfter(planPath).data.completed == false;
     }
 
     function validFilters(filters, planCategory) {
@@ -66,7 +237,7 @@ service cloud.firestore {
         filters.maxPrepMinutes <= 10080;
     }
 
-    function validMealPlan(data, planId) {
+    function validMealPlan(data, planId, uid) {
       return data.keys().hasAll([
           'date',
           'category',
@@ -97,6 +268,7 @@ service cloud.firestore {
         data.recipeTitle.size() <= 300 &&
         validFilters(data.filters, data.category) &&
         data.completed is bool &&
+        planHasConsistentHistory(uid, data, planId) &&
         validEpochMillis(data.updatedAtEpochMillis);
     }
 
@@ -152,7 +324,7 @@ service cloud.firestore {
     match /spoon/{uid}/mealPlans/{planId} {
       allow get, list: if isOwner(uid);
       allow create, update: if isOwner(uid) &&
-        validMealPlan(request.resource.data, planId);
+        validMealPlan(request.resource.data, planId, uid);
       allow delete: if false;
     }
 
@@ -163,6 +335,36 @@ service cloud.firestore {
         validFavorite(request.resource.data, favoriteId);
       allow update: if false;
       allow delete: if isOwner(uid);
+    }
+
+    match /spoon/{uid}/shoppingItems/{itemId} {
+      allow get, list: if isOwner(uid);
+      allow create, update: if isOwner(uid) &&
+        validShoppingItem(request.resource.data, itemId);
+      allow delete: if isOwner(uid);
+    }
+
+    match /spoon/{uid}/recipeNotes/{noteId} {
+      allow get, list: if isOwner(uid);
+      allow create, update: if isOwner(uid) &&
+        validRecipeNote(request.resource.data, noteId);
+      allow delete: if isOwner(uid);
+    }
+
+    match /spoon/{uid}/customRecipes/{recipeId} {
+      allow get, list: if isOwner(uid);
+      allow create, update: if isOwner(uid) &&
+        validCustomRecipe(request.resource.data, recipeId);
+      allow delete: if isOwner(uid);
+    }
+
+    match /spoon/{uid}/cookedHistory/{historyId} {
+      allow get, list: if isOwner(uid);
+      allow create, update: if isOwner(uid) &&
+        validCookedMeal(request.resource.data, historyId) &&
+        historyMatchesCompletedPlan(uid, request.resource.data, historyId);
+      allow delete: if isOwner(uid) &&
+        historyCanBeDeleted(uid, historyId);
     }
 
     // App Check enforcement is configured for Cloud Firestore in Firebase,

@@ -4,10 +4,18 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.firebase.FirebaseException
 import com.justdataplease.spoon.data.model.DayMealPlan
+import com.justdataplease.spoon.data.model.CookedMeal
+import com.justdataplease.spoon.data.model.CustomRecipe
 import com.justdataplease.spoon.data.model.EaseLevel
+import com.justdataplease.spoon.data.model.MAX_SHOPPING_ITEMS_PER_WRITE
 import com.justdataplease.spoon.data.model.MealCategory
 import com.justdataplease.spoon.data.model.Recipe
 import com.justdataplease.spoon.data.model.RecipeFilters
+import com.justdataplease.spoon.data.model.RecipeIngredient
+import com.justdataplease.spoon.data.model.RecipeIngredientSection
+import com.justdataplease.spoon.data.model.RecipeMethodSection
+import com.justdataplease.spoon.data.model.RecipeNote
+import com.justdataplease.spoon.data.model.ShoppingListItem
 import com.justdataplease.spoon.domain.MealPlanSelection
 import com.justdataplease.spoon.domain.MealPlanner
 import com.justdataplease.spoon.domain.ExploreCriteria
@@ -17,6 +25,9 @@ import com.justdataplease.spoon.domain.WeeklyPlanDefaults
 import com.justdataplease.spoon.domain.repository.BackendFailureKind
 import com.justdataplease.spoon.domain.repository.BackendState
 import com.justdataplease.spoon.domain.repository.BackendUnavailableException
+import com.justdataplease.spoon.domain.repository.AccountOperationException
+import com.justdataplease.spoon.domain.repository.AccountState
+import com.justdataplease.spoon.ui.account.AccountUiState
 import com.justdataplease.spoon.ui.model.CalendarMealUi
 import com.justdataplease.spoon.ui.model.DayPlanUi
 import com.justdataplease.spoon.ui.model.EaseUi
@@ -27,9 +38,14 @@ import com.justdataplease.spoon.ui.model.SpoonUiState
 import com.justdataplease.spoon.ui.explore.ExploreFacetOptionsUi
 import com.justdataplease.spoon.ui.explore.ExploreFiltersUi
 import com.justdataplease.spoon.ui.explore.ExploreRecipeUi
+import com.justdataplease.spoon.ui.custom.CustomRecipeDraftUi
+import com.justdataplease.spoon.ui.history.HistoryEntryUi
+import com.justdataplease.spoon.ui.shopping.ShoppingIngredientDraftUi
+import com.justdataplease.spoon.ui.shopping.ShoppingListItemUi
 import dagger.hilt.android.lifecycle.HiltViewModel
 import java.time.LocalDate
 import java.time.YearMonth
+import java.util.UUID
 import javax.inject.Inject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -53,6 +69,13 @@ private data class PlannerSnapshot(
     val plans: List<DayMealPlan>,
     val favoriteIds: Set<String>,
     val backendState: BackendState,
+    val userContent: UserContentSnapshot,
+)
+
+private data class UserContentSnapshot(
+    val shoppingItems: List<ShoppingListItem>,
+    val notesByRecipeId: Map<String, RecipeNote>,
+    val cookedHistory: List<CookedMeal>,
 )
 
 private data class DateSelection(
@@ -71,7 +94,14 @@ private data class RecipeSelection(
 private data class WorkStatus(
     val loading: Boolean,
     val working: Boolean,
+    val savingCustomRecipe: Boolean,
     val message: String?,
+    val account: AccountUiState,
+)
+
+private data class AccountOperationStatus(
+    val busy: Boolean,
+    val errorMessage: String?,
 )
 
 private data class ExploreSelection(
@@ -96,7 +126,10 @@ class SpoonViewModel @Inject constructor(
     private val favoriteReplacementDate = MutableStateFlow<LocalDate?>(null)
     private val loading = MutableStateFlow(true)
     private val working = MutableStateFlow(false)
+    private val savingCustomRecipe = MutableStateFlow(false)
     private val message = MutableStateFlow<String?>(null)
+    private val accountBusy = MutableStateFlow(false)
+    private val accountError = MutableStateFlow<String?>(null)
 
     private val catalogProjection = mealPlanner.recipes
         .map { recipes ->
@@ -118,13 +151,26 @@ class SpoonViewModel @Inject constructor(
             initialValue = CatalogProjection(),
         )
 
+    private val userContentSnapshot = combine(
+        mealPlanner.shoppingItems,
+        mealPlanner.recipeNotes,
+        mealPlanner.cookedHistory,
+    ) { shoppingItems, notes, cookedHistory ->
+        UserContentSnapshot(
+            shoppingItems = shoppingItems,
+            notesByRecipeId = notes.associateBy(RecipeNote::recipeId),
+            cookedHistory = cookedHistory,
+        )
+    }
+
     private val plannerSnapshot = combine(
         catalogProjection,
         mealPlanner.mealPlans,
         mealPlanner.favoriteRecipeIds,
         mealPlanner.backendState,
-    ) { catalog, plans, favorites, backendState ->
-        PlannerSnapshot(catalog, plans, favorites, backendState)
+        userContentSnapshot,
+    ) { catalog, plans, favorites, backendState, userContent ->
+        PlannerSnapshot(catalog, plans, favorites, backendState, userContent)
     }
 
     private val recipeSelection = combine(
@@ -144,8 +190,27 @@ class SpoonViewModel @Inject constructor(
         DateSelection(week, month, editing, recipe)
     }
 
-    private val workStatus = combine(loading, working, message) { isLoading, isWorking, currentMessage ->
-        WorkStatus(isLoading, isWorking, currentMessage)
+    private val accountOperationStatus = combine(
+        accountBusy,
+        accountError,
+        ::AccountOperationStatus,
+    )
+
+    private val accountUiState = combine(
+        mealPlanner.accountState,
+        accountOperationStatus,
+    ) { account, operation ->
+        account.toUi(operation)
+    }
+
+    private val workStatus = combine(
+        loading,
+        working,
+        savingCustomRecipe,
+        message,
+        accountUiState,
+    ) { isLoading, isWorking, isSavingCustomRecipe, currentMessage, account ->
+        WorkStatus(isLoading, isWorking, isSavingCustomRecipe, currentMessage, account)
     }
 
     private val exploreSelection = combine(
@@ -191,7 +256,11 @@ class SpoonViewModel @Inject constructor(
                 date = date,
                 recipeId = stored?.recipeId.orEmpty(),
                 recipeTitle = recipe?.title ?: stored?.recipeTitle.orEmpty(),
-                categoryKey = filters.category.toUiCategoryKey(),
+                categoryKey = resolvedUiCategoryKey(
+                    recipeCategory = recipe?.category,
+                    planCategory = stored?.category,
+                    filterCategory = filters.category,
+                ),
                 rating10 = recipe?.rating ?: 0.0,
                 ratingCount = recipe?.ratingCount ?: 0,
                 prepMinutes = recipe?.prepMinutes ?: 0,
@@ -218,11 +287,54 @@ class SpoonViewModel @Inject constructor(
             CalendarMealUi(
                 date = date,
                 recipeId = plan.recipeId,
-                categoryKey = plan.category.toUiCategoryKey(),
+                categoryKey = resolvedUiCategoryKey(
+                    recipeCategory = recipe?.category,
+                    planCategory = plan.category,
+                    filterCategory = plan.filters.category,
+                ),
                 recipeTitle = recipe?.title ?: plan.recipeTitle,
                 isCompleted = plan.completed,
             )
         }
+        val historyEntries = snapshot.userContent.cookedHistory.mapNotNull { cookedMeal ->
+            val date = runCatching { LocalDate.parse(cookedMeal.date) }.getOrNull()
+                ?: return@mapNotNull null
+            val recipe = recipesById[cookedMeal.recipeId]
+            val categoryKey = (recipe?.category ?: plansByDate[cookedMeal.date]?.category.orEmpty())
+                .toUiCategoryKey()
+            val category = com.justdataplease.spoon.ui.model.AvailableCategories
+                .firstOrNull { it.key == categoryKey }
+            HistoryEntryUi(
+                id = cookedMeal.id.ifBlank { cookedMeal.date },
+                date = date,
+                recipeId = cookedMeal.recipeId,
+                title = recipe?.title ?: cookedMeal.recipeTitle,
+                categoryLabel = recipe?.categoryLabel?.takeIf(String::isNotBlank)
+                    ?: category?.label
+                    ?: "Άλλο",
+                categoryEmoji = category?.emoji ?: "🍽️",
+                imageUrl = recipe?.imageUrl.orEmpty(),
+            )
+        }.sortedByDescending(HistoryEntryUi::date)
+        val shoppingItems = snapshot.userContent.shoppingItems.map { item ->
+            ShoppingListItemUi(
+                id = item.id,
+                title = item.name,
+                quantity = item.quantity,
+                unit = item.unit,
+                info = item.info,
+                recipeId = item.recipeId,
+                recipeTitle = item.recipeTitle,
+                isChecked = item.checked,
+            )
+        }
+        val selectedRecipeId = dates.recipeSelection.recipeId
+        val selectedRecipe = selectedRecipeId
+            ?.let { recipeId ->
+                val catalogRecipe = recipesById[recipeId]
+                val details = dates.recipeSelection.details?.takeIf { it.id == recipeId }
+                (details ?: catalogRecipe)?.withCatalogClassification(catalogRecipe)
+            }
         SpoonUiState(
             isLoading = status.loading,
             isWorking = status.working,
@@ -240,13 +352,16 @@ class SpoonViewModel @Inject constructor(
             exploreOptions = snapshot.catalog.exploreOptions,
             favoriteReplacementDate = explore.favoriteReplacementDate,
             isRecipeDetailsLoading = dates.recipeSelection.isLoading,
-            selectedRecipe = dates.recipeSelection.recipeId
-                ?.let { recipeId ->
-                    dates.recipeSelection.details
-                        ?.takeIf { it.id == recipeId }
-                        ?: recipesById[recipeId]
-                }
+            selectedRecipe = selectedRecipe
                 ?.let { recipe -> recipe.toRecipeDetailUi(recipe.id in snapshot.favoriteIds) },
+            selectedRecipeNote = selectedRecipeId
+                ?.let(snapshot.userContent.notesByRecipeId::get)
+                ?.text
+                .orEmpty(),
+            historyEntries = historyEntries,
+            shoppingItems = shoppingItems,
+            isSavingCustomRecipe = status.savingCustomRecipe,
+            account = status.account,
             message = status.message,
         )
     }.flowOn(Dispatchers.Default).stateIn(
@@ -398,12 +513,106 @@ class SpoonViewModel @Inject constructor(
         }
     }
 
+    fun addIngredientsToShopping(drafts: List<ShoppingIngredientDraftUi>) {
+        val items = drafts.toShoppingItems()
+        if (items.isEmpty()) return
+        viewModelScope.launch {
+            working.value = true
+            try {
+                withContext(Dispatchers.Default) {
+                    items.chunked(MAX_SHOPPING_ITEMS_PER_WRITE).forEach { chunk ->
+                        mealPlanner.upsertShoppingItems(chunk)
+                    }
+                }
+                message.value = if (items.size == 1) {
+                    "Το υλικό προστέθηκε στη λίστα αγορών."
+                } else {
+                    "Προστέθηκαν ${items.size} υλικά στη λίστα αγορών."
+                }
+            } catch (error: Exception) {
+                message.value = error.userMessage()
+            } finally {
+                working.value = false
+            }
+        }
+    }
+
+    fun addManualShoppingItem(title: String) {
+        val cleanTitle = title.trim().take(200)
+        if (cleanTitle.isBlank()) return
+        val now = System.currentTimeMillis()
+        viewModelScope.launch {
+            runCatching {
+                mealPlanner.upsertShoppingItems(
+                    listOf(
+                        ShoppingListItem(
+                            id = "shopping_${UUID.randomUUID()}",
+                            name = cleanTitle,
+                            createdAtEpochMillis = now,
+                            updatedAtEpochMillis = now,
+                        ),
+                    ),
+                )
+            }.onFailure { message.value = it.userMessage() }
+        }
+    }
+
+    fun toggleShoppingItem(itemId: String) {
+        val item = uiState.value.shoppingItems.firstOrNull { it.id == itemId } ?: return
+        viewModelScope.launch {
+            runCatching { mealPlanner.setShoppingItemChecked(itemId, !item.isChecked) }
+                .onFailure { message.value = it.userMessage() }
+        }
+    }
+
+    fun removeShoppingItem(itemId: String) {
+        viewModelScope.launch {
+            runCatching { mealPlanner.deleteShoppingItem(itemId) }
+                .onFailure { message.value = it.userMessage() }
+        }
+    }
+
+    fun clearCheckedShoppingItems() {
+        viewModelScope.launch {
+            runCatching { mealPlanner.clearCheckedShoppingItems() }
+                .onFailure { message.value = it.userMessage() }
+        }
+    }
+
+    fun saveRecipeNote(text: String) {
+        val recipeId = selectedRecipeId.value ?: return
+        viewModelScope.launch {
+            runCatching { mealPlanner.saveRecipeNote(recipeId, text.take(10_000)) }
+                .onSuccess { message.value = "Η σημείωση αποθηκεύτηκε." }
+                .onFailure { message.value = it.userMessage() }
+        }
+    }
+
+    fun saveCustomRecipe(draft: CustomRecipeDraftUi) {
+        if (savingCustomRecipe.value) return
+        viewModelScope.launch {
+            savingCustomRecipe.value = true
+            try {
+                val saved = withContext(Dispatchers.Default) {
+                    mealPlanner.saveCustomRecipe(draft.toDomainCustomRecipe())
+                }
+                message.value = "Η δική σου συνταγή αποθηκεύτηκε."
+                showRecipeDetails(saved.id)
+            } catch (error: Exception) {
+                message.value = error.userMessage()
+            } finally {
+                savingCustomRecipe.value = false
+            }
+        }
+    }
+
     fun toggleCompleted(date: LocalDate) {
         val state = uiState.value
         val completed = completionStateForDate(
             date = date,
             calendarMeals = state.calendarMeals,
             weekPlans = state.weekPlans,
+            historyEntries = state.historyEntries,
         )
         viewModelScope.launch {
             runCatching { mealPlanner.setCompleted(date, !completed) }
@@ -413,6 +622,34 @@ class SpoonViewModel @Inject constructor(
 
     fun clearMessage() {
         message.value = null
+    }
+
+    fun createOrLinkAccount(email: String, password: String) {
+        launchAccountOperation("Ο λογαριασμός σου κατοχυρώθηκε και τα δεδομένα σου είναι ασφαλή.") {
+            mealPlanner.registerEmailAccount(email, password)
+        }
+    }
+
+    fun signInWithEmail(email: String, password: String) {
+        launchAccountOperation("Συνδέθηκες στον λογαριασμό σου.") {
+            mealPlanner.signInWithEmail(email, password)
+        }
+    }
+
+    fun resetPassword(email: String) {
+        launchAccountOperation("Σου στείλαμε email επαναφοράς κωδικού.") {
+            mealPlanner.sendPasswordReset(email)
+        }
+    }
+
+    fun signOut() {
+        launchAccountOperation("Αποσυνδέθηκες. Συνεχίζεις με προσωρινό λογαριασμό.") {
+            mealPlanner.signOutToAnonymous()
+        }
+    }
+
+    fun clearAccountError() {
+        accountError.value = null
     }
 
     private fun showWeek(weekStart: LocalDate) {
@@ -446,15 +683,140 @@ class SpoonViewModel @Inject constructor(
             }
         }
     }
+
+    private fun launchAccountOperation(
+        successMessage: String,
+        operation: suspend () -> Unit,
+    ) {
+        if (accountBusy.value) return
+        viewModelScope.launch {
+            accountBusy.value = true
+            accountError.value = null
+            try {
+                operation()
+                message.value = successMessage
+            } catch (error: AccountOperationException) {
+                accountError.value = error.failure.greekMessage
+            } catch (_: Exception) {
+                accountError.value = ACCOUNT_GENERIC_ERROR
+            } finally {
+                accountBusy.value = false
+            }
+        }
+    }
 }
+
+private fun AccountState.toUi(operation: AccountOperationStatus): AccountUiState = when (this) {
+    AccountState.Loading -> AccountUiState(
+        isSignedIn = false,
+        isAnonymous = false,
+        isBusy = true,
+        errorMessage = operation.errorMessage,
+    )
+
+    is AccountState.Anonymous -> AccountUiState(
+        isSignedIn = true,
+        isAnonymous = true,
+        isBusy = operation.busy,
+        errorMessage = operation.errorMessage,
+    )
+
+    is AccountState.Email -> AccountUiState(
+        isSignedIn = true,
+        isAnonymous = false,
+        email = email,
+        isEmailVerified = emailVerified,
+        isBusy = operation.busy,
+        errorMessage = operation.errorMessage,
+    )
+
+    AccountState.Unavailable -> AccountUiState(
+        isSignedIn = false,
+        isAnonymous = false,
+        isBusy = operation.busy,
+        errorMessage = operation.errorMessage,
+    )
+}
+
+private const val ACCOUNT_GENERIC_ERROR =
+    "Δεν ολοκληρώθηκε η ενέργεια λογαριασμού. Δοκίμασε ξανά."
 
 internal fun completionStateForDate(
     date: LocalDate,
     calendarMeals: List<CalendarMealUi>,
     weekPlans: List<DayPlanUi>,
-): Boolean = calendarMeals.firstOrNull { it.date == date }?.isCompleted
-    ?: weekPlans.firstOrNull { it.date == date }?.isCompleted
-    ?: false
+    historyEntries: List<HistoryEntryUi> = emptyList(),
+): Boolean = historyEntries.any { it.date == date } ||
+    (
+        calendarMeals.firstOrNull { it.date == date }?.isCompleted
+            ?: weekPlans.firstOrNull { it.date == date }?.isCompleted
+            ?: false
+        )
+
+private fun CustomRecipeDraftUi.toDomainCustomRecipe(): CustomRecipe {
+    val domainCategory = categoryKey.toDomainCategoryKey()
+        .takeIf { MealCategory.fromKey(it) != null }
+        ?: MealCategory.ANY.key
+    val cleanIngredients = ingredients.asSequence()
+        .filter { it.title.isNotBlank() }
+        .take(200)
+        .map { ingredient ->
+            RecipeIngredient(
+                title = ingredient.title.trim().take(200),
+                quantity = ingredient.quantity.trim().take(100),
+                unit = ingredient.unit.trim().take(100),
+            )
+        }
+        .toList()
+    val cleanSteps = steps.asSequence()
+        .map(String::trim)
+        .filter(String::isNotBlank)
+        .take(100)
+        .map { it.take(5_000) }
+        .toList()
+    return CustomRecipe(
+        title = title.trim().take(300),
+        description = description.trim().take(10_000),
+        category = domainCategory,
+        prepMinutes = prepMinutes.coerceIn(0, 10_080),
+        cookMinutes = cookMinutes.coerceIn(0, 10_080),
+        servings = servings.trim().take(100),
+        ingredientSections = listOf(RecipeIngredientSection(ingredients = cleanIngredients)),
+        methodSections = listOf(RecipeMethodSection(steps = cleanSteps)),
+        photoDataUri = imageDataUrl,
+    )
+}
+
+private fun List<ShoppingIngredientDraftUi>.toShoppingItems(): List<ShoppingListItem> {
+    val now = System.currentTimeMillis()
+    return asSequence()
+        .filter { it.title.isNotBlank() }
+        .map { draft ->
+            ShoppingListItem(
+                id = "shopping_${UUID.randomUUID()}",
+                name = draft.title.trim().take(200),
+                quantity = draft.quantity.trim().take(100),
+                unit = draft.unit.trim().take(100),
+                info = draft.info.trim().take(500),
+                recipeId = draft.recipeId,
+                recipeTitle = draft.recipeTitle.trim().take(300),
+                checked = false,
+                createdAtEpochMillis = now,
+                updatedAtEpochMillis = now,
+            )
+        }
+        .toList()
+}
+
+private fun Recipe.withCatalogClassification(catalogRecipe: Recipe?): Recipe {
+    if (catalogRecipe == null || catalogRecipe.id != id) return this
+    return copy(
+        category = catalogRecipe.category,
+        categoryLabel = catalogRecipe.categoryLabel,
+        categorySourceId = catalogRecipe.categorySourceId,
+        tags = catalogRecipe.tags.ifEmpty { tags },
+    )
+}
 
 private fun Recipe.toFavoriteUi() = FavoriteUi(
     recipeId = id,
@@ -624,6 +986,18 @@ private fun String.toUiCategoryKey(): String = when (this) {
     MealCategory.PASTA_RICE.key -> "pasta"
     else -> this
 }
+
+internal fun resolvedUiCategoryKey(
+    recipeCategory: String?,
+    planCategory: String?,
+    filterCategory: String,
+): String = (
+    recipeCategory
+        ?.takeIf(String::isNotBlank)
+        ?: planCategory
+            ?.takeIf(String::isNotBlank)
+        ?: filterCategory
+    ).toUiCategoryKey()
 
 private fun String.toDomainCategoryKey(): String = when (this) {
     "chicken" -> MealCategory.POULTRY.key

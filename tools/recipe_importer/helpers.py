@@ -22,124 +22,168 @@ _DURATION_RE = re.compile(
 )
 
 
-# These are deliberately broad, app-owned food groups. They are not a copy of
-# the publisher's category taxonomy. Terms are normalized before matching.
-_CATEGORY_TERMS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    (
-        "fish",
-        (
-            "fish",
-            "salmon",
-            "tuna",
-            "cod",
-            "sardine",
-            "sea bass",
-            "sea bream",
-            "ψαρι",
-            "σολομ",
-            "τονο",
-            "μπακαλιαρ",
-            "σαρδελ",
-            "τσιπουρ",
-            "λαβρακ",
-        ),
-    ),
-    (
-        "seafood",
-        (
-            "seafood",
-            "shrimp",
-            "prawn",
-            "squid",
-            "octopus",
-            "mussel",
-            "θαλασσιν",
-            "γαριδ",
-            "καλαμαρ",
-            "χταποδ",
-            "μυδι",
-        ),
-    ),
-    (
-        "legumes",
-        (
-            "legume",
-            "lentil",
-            "chickpea",
-            "bean",
-            "fava",
-            "οσπρι",
-            "φακ",
-            "ρεβιθ",
-            "φασολ",
-            "γιγαντ",
-            "φαβα",
-        ),
-    ),
-    (
-        "poultry",
-        (
-            "chicken",
-            "turkey",
-            "duck",
-            "κοτοπουλ",
-            "γαλοπουλ",
-            "παπια",
-            "πουλερικ",
-        ),
-    ),
-    (
-        "meat",
-        (
-            "meat",
-            "beef",
-            "pork",
-            "lamb",
-            "veal",
-            "steak",
-            "κρεα",
-            "μοσχαρ",
-            "χοιριν",
-            "αρν",
-            "κατσικ",
-            "μπριζολ",
-        ),
-    ),
-    (
-        "pasta",
-        ("pasta", "spaghetti", "linguine", "orzo", "ζυμαρ", "μακαρον", "κριθαρακ"),
-    ),
-    (
-        "rice",
-        ("rice", "risotto", "ρυζ", "ριζοτο"),
-    ),
-    (
-        "vegetables",
-        ("vegetable", "veggie", "λαχανικ", "λαδερα", "ladera"),
-    ),
-    (
-        "dirty",
-        (
-            "street food",
-            "burger",
-            "pizza",
-            "hot dog",
-            "gyros",
-            "kebab",
-            "sandwich",
-            "loaded fries",
-            "μπεργκερ",
-            "πιτσα",
-            "χοτ ντογκ",
-            "γυρο",
-            "σουβλακ",
-            "κεμπαπ",
-            "σαντουιτς",
-        ),
-    ),
+# Coarse planner groups are derived only from publisher-owned taxonomy values.
+# Recipe titles and free-form ingredient text are deliberately excluded: a
+# substring classifier made "Τρουφάκια" match the old "φακ" lentil stem.
+#
+# Precedence is encoded in the returned list: the exact recipe category wins,
+# followed by official main-ingredient facets in this stable order. Generic
+# format categories (sandwich/snack/finger food) are only a final fallback.
+_CATEGORY_KEY_PRECEDENCE = (
+    "dessert",
+    "fish",
+    "seafood",
+    "legumes",
+    "poultry",
+    "meat",
+    "pasta",
+    "rice",
+    "vegetables",
+    "dirty",
 )
 
+_DESSERT_SOURCE_CATEGORY_SLUGS = {
+    "glika",
+    "ta-aghapimena-mas",
+    "keik",
+    "siropiasta",
+    "mpiskota",
+    "glyka-pshgeiou",
+    "cheesecakes",
+    "glikes-tartes",
+    "glikes-pites",
+    "tourtes",
+    "paghota",
+    "glika-tu-kutaliou",
+    "sokolata",
+}
+
+_SOURCE_CATEGORY_KEYS = {
+    # The source's nested "Κυρίως γεύμα" taxonomy.
+    "kreas": "meat",
+    "moskhari": "meat",
+    "xirino": "meat",
+    "xirino-1": "meat",
+    "arni": "meat",
+    "katsiki": "meat",
+    "kuneli": "meat",
+    "kinighi": "meat",
+    "ospria": "legumes",
+    "fakes": "legumes",
+    "fasolia": "legumes",
+    "gighantes": "legumes",
+    "revythia": "legumes",
+    "fava": "legumes",
+    "mauromatika-fasolia": "legumes",
+    "ladera": "vegetables",
+    "lakhanika": "vegetables",
+    "patata": "vegetables",
+    "zimarika": "pasta",
+    "zimarika-1": "pasta",
+    "pulerika": "poultry",
+    "kotopulo": "poultry",
+    "kotopulo-1": "poultry",
+    "galopoula": "poultry",
+    "papia": "poultry",
+    "thalassina": "seafood",
+    "psaria": "fish",
+    "ryzi": "rice",
+}
+
+# These exact source categories describe content that must never be proposed as
+# one of the app's main-meal groups, even if an official ingredient facet is
+# present (for example rice pudding or a vegetable-based cake).
+_TERMINAL_OTHER_SOURCE_CATEGORIES = {
+    "marmelades",
+    "rofimata-pota",
+    "smoothies",
+    "ximi",
+    "detox",
+    "cocktails",
+    "mi-alkooloukha-pota",
+}
+
+_SOURCE_FORMAT_FALLBACK_KEYS = {
+    "finger-food": "dirty",
+    "santuits": "dirty",
+    "snak": "dirty",
+}
+
+# IDs come from the official ingredient facet captured in the manifest.
+# Unknown IDs intentionally remain unclassified until the taxonomy mapping is
+# reviewed; guessing is worse than showing "Άλλο" in a meal planner.
+_INGREDIENT_FACET_KEYS = {
+    **{str(value): "meat" for value in range(129, 135)},
+    **{str(value): "poultry" for value in range(135, 138)},
+    "138": "pasta",
+    **{str(value): "legumes" for value in range(139, 145)},
+    **{str(value): "seafood" for value in (145, 147, 148, 149, 150, 151)},
+    "155": "rice",
+    "158": "rice",
+    **{str(value): "fish" for value in (160, 161, 164, 165, 167, 168, 171)},
+    **{
+        str(value): "vegetables"
+        for value in (157, 172, 173, 174, 175, 177, 178, 179, 180, 181, 182, 252)
+    },
+}
+
+_MEAL_TYPE_FALLBACK_KEYS = {
+    "32": "dirty",  # Σάντουιτς
+    "33": "dirty",  # Σνακ
+    "92": "dirty",  # Finger food
+}
+
+_DESSERT_CATEGORY_ID = "34"
+
+# Exact aliases are retained only for metadata-only JSON-LD inspection. They
+# are compared as complete values (or comma-separated keyword values), never as
+# substrings and never against the recipe title.
+_EXACT_METADATA_ALIASES = {
+    "dessert": "dessert",
+    "desserts": "dessert",
+    "γλυκο": "dessert",
+    "γλυκα": "dessert",
+    "fish": "fish",
+    "ψαρι": "fish",
+    "ψαρια": "fish",
+    "salmon": "fish",
+    "σολομος": "fish",
+    "seafood": "seafood",
+    "θαλασσινα": "seafood",
+    "legume": "legumes",
+    "legumes": "legumes",
+    "οσπρια": "legumes",
+    "lentil": "legumes",
+    "lentils": "legumes",
+    "φακες": "legumes",
+    "chickpea": "legumes",
+    "chickpeas": "legumes",
+    "ρεβιθια": "legumes",
+    "chicken": "poultry",
+    "κοτοπουλο": "poultry",
+    "turkey": "poultry",
+    "γαλοπουλα": "poultry",
+    "meat": "meat",
+    "κρεας": "meat",
+    "beef": "meat",
+    "μοσχαρι": "meat",
+    "pork": "meat",
+    "χοιρινο": "meat",
+    "pasta": "pasta",
+    "ζυμαρικα": "pasta",
+    "rice": "rice",
+    "ρυζι": "rice",
+    "vegetables": "vegetables",
+    "λαχανικα": "vegetables",
+    "street food": "dirty",
+    "street-food": "dirty",
+    "sandwich": "dirty",
+    "σαντουιτς": "dirty",
+}
+
 _CANONICAL_CATEGORY_ALIASES = {
+    "dessert": "dessert",
+    "other": "other",
     "legumes": "legumes",
     "poultry": "poultry",
     "vegetables": "vegetables",
@@ -176,19 +220,97 @@ def _text_values(value: object) -> Iterable[str]:
     return (str(value),)
 
 
+def _ordered_category_keys(values: Iterable[str]) -> list[str]:
+    found = set(values)
+    return [key for key in _CATEGORY_KEY_PRECEDENCE if key in found]
+
+
+def _association_ids(associations: object, facet: str) -> tuple[str, ...]:
+    if not isinstance(associations, Mapping):
+        return ()
+    values = associations.get(facet)
+    if not isinstance(values, Iterable) or isinstance(values, (str, bytes, Mapping)):
+        return ()
+    result = []
+    for value in values:
+        if isinstance(value, Mapping):
+            identifier = str(value.get("id") or "").strip()
+            if identifier:
+                result.append(identifier)
+    return tuple(result)
+
+
+def classify_official_category_keys(
+    source_category: object,
+    associations: object = None,
+) -> list[str]:
+    """Classify using exact official recipe/facet taxonomy metadata only.
+
+    The source recipe category has the strongest authority. Explicit dessert,
+    drink, bread, fruit, and condiment categories are terminal other values so
+    an ingredient facet cannot turn them into main meals. For a generic source
+    category, official main-ingredient IDs are considered next, and an official
+    snack/sandwich/finger-food value is the final street-food fallback.
+    """
+
+    category = source_category if isinstance(source_category, Mapping) else {}
+    slug = str(category.get("slug") or "").strip().casefold()
+    category_id = str(category.get("id") or "").strip()
+    parent_id = str(category.get("parent_id") or "").strip()
+    meal_type_ids = set(_association_ids(associations, "meal_type"))
+    if (
+        category_id == _DESSERT_CATEGORY_ID
+        or parent_id == _DESSERT_CATEGORY_ID
+        or slug in _DESSERT_SOURCE_CATEGORY_SLUGS
+        or _DESSERT_CATEGORY_ID in meal_type_ids
+    ):
+        return ["dessert"]
+    if slug in _TERMINAL_OTHER_SOURCE_CATEGORIES:
+        return ["other"]
+
+    ingredient_keys = _ordered_category_keys(
+        _INGREDIENT_FACET_KEYS[identifier]
+        for identifier in _association_ids(associations, "ingredient")
+        if identifier in _INGREDIENT_FACET_KEYS
+    )
+    source_key = _SOURCE_CATEGORY_KEYS.get(slug)
+    if source_key:
+        return [source_key, *(key for key in ingredient_keys if key != source_key)]
+    if ingredient_keys:
+        return ingredient_keys
+
+    format_key = _SOURCE_FORMAT_FALLBACK_KEYS.get(slug)
+    if not format_key:
+        format_key = next(
+            (
+                key
+                for identifier, key in _MEAL_TYPE_FALLBACK_KEYS.items()
+                if identifier in meal_type_ids
+            ),
+            "",
+        )
+    return [format_key] if format_key else ["other"]
+
+
 def classify_category_keys(
     title: object,
     categories: object = None,
     keywords: object = None,
 ) -> list[str]:
-    """Infer coarse planner groups without retaining source descriptions."""
+    """Classify metadata-only records using exact publisher metadata values.
 
-    haystack = " ".join(
-        normalize_text(part)
-        for part in (*_text_values(title), *_text_values(categories), *_text_values(keywords))
-    )
-    matched = [key for key, terms in _CATEGORY_TERMS if any(term in haystack for term in terms)]
-    return matched or ["other"]
+    title remains in the signature for compatibility, but is intentionally
+    ignored. Full API records use classify_official_category_keys.
+    """
+
+    del title
+    matched = []
+    for raw in (*_text_values(categories), *_text_values(keywords)):
+        for part in re.split(r"[,;|]", raw):
+            key = _EXACT_METADATA_ALIASES.get(normalize_text(part))
+            if key:
+                matched.append(key)
+    return _ordered_category_keys(matched) or ["other"]
 
 
 def canonical_category(category_keys: Iterable[str]) -> str:
@@ -198,9 +320,8 @@ def canonical_category(category_keys: Iterable[str]) -> str:
         mapped = _CANONICAL_CATEGORY_ALIASES.get(key)
         if mapped is not None:
             return mapped
-    # Empty is intentional: MealCategory.ANY will still show the record, while
-    # a false food-group assignment would produce misleading weekly plans.
-    return ""
+    # Fail closed into an explicit value that can be audited and filtered.
+    return "other"
 
 
 def parse_duration_minutes(value: object) -> int | None:

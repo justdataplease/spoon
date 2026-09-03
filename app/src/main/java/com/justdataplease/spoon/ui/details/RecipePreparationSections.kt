@@ -4,7 +4,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -13,18 +12,18 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.OpenInNew
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Lightbulb
 import androidx.compose.material.icons.outlined.LocalDining
 import androidx.compose.material.icons.automirrored.outlined.MenuBook
 import androidx.compose.material.icons.outlined.Restaurant
+import androidx.compose.material.icons.outlined.ShoppingBasket
+import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -34,21 +33,36 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.justdataplease.spoon.data.model.RecipeIngredient
 import com.justdataplease.spoon.ui.model.RecipeDetailUi
+import com.justdataplease.spoon.ui.shopping.ShoppingIngredientDraftUi
 
 @Composable
 internal fun IngredientsSection(
     recipe: RecipeDetailUi,
-    onOpenExternal: (String) -> Unit,
+    onAddIngredients: (List<ShoppingIngredientDraftUi>) -> Unit,
 ) {
     val sections = recipe.ingredientSections.filter { it.ingredients.isNotEmpty() }
     if (sections.isEmpty()) return
+    val shoppingIngredients = recipe.shoppingIngredientDrafts()
     DetailSectionCard("Υλικά", Icons.Outlined.Restaurant) {
+        if (shoppingIngredients.isNotEmpty()) {
+            Button(
+                onClick = { onAddIngredients(shoppingIngredients) },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Icon(Icons.Outlined.ShoppingBasket, contentDescription = null)
+                Text("Προσθήκη όλων στη λίστα", modifier = Modifier.padding(start = 8.dp))
+            }
+        }
         sections.forEachIndexed { sectionIndex, section ->
             if (section.title.isNotBlank()) {
                 Text(section.title, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
             }
             section.ingredients.forEachIndexed { ingredientIndex, ingredient ->
-                IngredientRow(ingredient, onOpenExternal)
+                val draft = ingredient.toShoppingDraft(recipe.recipeId, recipe.title)
+                IngredientRow(
+                    ingredient = ingredient,
+                    onAdd = draft?.let { { onAddIngredients(listOf(it)) } },
+                )
                 if (ingredientIndex < section.ingredients.lastIndex) {
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 }
@@ -61,15 +75,11 @@ internal fun IngredientsSection(
 @Composable
 private fun IngredientRow(
     ingredient: RecipeIngredient,
-    onOpenExternal: (String) -> Unit,
+    onAdd: (() -> Unit)?,
 ) {
-    val amount = listOf(ingredient.quantity, ingredient.unit).filter(String::isNotBlank).joinToString(" ")
+    val primaryLabel = ingredient.primaryLabel()
     val uk = listOf(ingredient.ukQuantity, ingredient.ukUnit).filter(String::isNotBlank).joinToString(" ")
     val us = listOf(ingredient.usQuantity, ingredient.usUnit).filter(String::isNotBlank).joinToString(" ")
-    val links = listOf(
-        "Σχετικό" to ingredient.internalLink,
-        "Εξωτερικό" to ingredient.externalLink,
-    ).filter { (_, link) -> normalizeRecipeLink(link) != null }.distinctBy { it.second }
 
     Row(
         modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp),
@@ -81,11 +91,13 @@ private fun IngredientRow(
                 .background(MaterialTheme.colorScheme.primary),
         )
         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-            if (amount.isNotBlank()) {
-                Text(amount, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-            }
-            if (ingredient.title.isNotBlank()) {
-                Text(ingredient.title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold)
+            if (primaryLabel.isNotBlank()) {
+                Text(
+                    primaryLabel,
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
             }
             if (ingredient.info.isNotBlank()) {
                 Text(
@@ -105,25 +117,44 @@ private fun IngredientRow(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            if (links.isNotEmpty()) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    links.forEach { (label, link) ->
-                        TextButton(
-                            onClick = { onOpenExternal(link) },
-                            contentPadding = PaddingValues(horizontal = 0.dp),
-                        ) {
-                            Text(label)
-                            Icon(
-                                Icons.AutoMirrored.Outlined.OpenInNew,
-                                contentDescription = null,
-                                modifier = Modifier.padding(start = 4.dp).size(15.dp),
-                            )
-                        }
-                    }
-                }
+        }
+        if (onAdd != null) {
+            androidx.compose.material3.IconButton(onClick = onAdd) {
+                Icon(
+                    Icons.Outlined.ShoppingBasket,
+                    contentDescription = "Προσθήκη ${ingredient.title} στη λίστα αγορών",
+                )
             }
         }
     }
+}
+
+internal fun RecipeIngredient.primaryLabel(): String = buildList {
+    listOf(quantity.trim(), unit.trim())
+        .filter(String::isNotBlank)
+        .joinToString(" ")
+        .takeIf(String::isNotBlank)
+        ?.let(::add)
+    title.trim().takeIf(String::isNotBlank)?.let(::add)
+}.joinToString("  ")
+
+internal fun RecipeDetailUi.shoppingIngredientDrafts(): List<ShoppingIngredientDraftUi> =
+    ingredientSections.flatMap { section ->
+        section.ingredients.mapNotNull { ingredient -> ingredient.toShoppingDraft(recipeId, title) }
+    }
+
+private fun RecipeIngredient.toShoppingDraft(
+    recipeId: String,
+    recipeTitle: String,
+): ShoppingIngredientDraftUi? = title.trim().takeIf(String::isNotBlank)?.let { safeTitle ->
+    ShoppingIngredientDraftUi(
+        recipeId = recipeId,
+        recipeTitle = recipeTitle,
+        title = safeTitle,
+        quantity = quantity.trim(),
+        unit = unit.trim(),
+        info = info.trim(),
+    )
 }
 
 @Composable
