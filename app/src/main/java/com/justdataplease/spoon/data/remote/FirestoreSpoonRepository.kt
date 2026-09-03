@@ -23,6 +23,7 @@ import com.justdataplease.spoon.data.model.MAX_SHOPPING_ITEMS_PER_WRITE
 import com.justdataplease.spoon.data.model.Recipe
 import com.justdataplease.spoon.data.model.RecipeNote
 import com.justdataplease.spoon.data.model.ShoppingListItem
+import com.justdataplease.spoon.data.model.cookedMealEventId
 import com.justdataplease.spoon.data.model.isCustomRecipeId
 import com.justdataplease.spoon.data.model.mergeCookedHistory
 import com.justdataplease.spoon.data.model.requireValid
@@ -261,46 +262,79 @@ class FirestoreSpoonRepository(
     override suspend fun upsertMealPlan(plan: DayMealPlan) {
         require(plan.date.isNotBlank())
         val currentUid = awaitUid()
-        val batch = firestore.batch()
-        batch.set(mealPlans(currentUid).document(plan.date), plan.toFirestoreDocument())
-        val historyDocument = cookedHistoryDocuments(currentUid).document(plan.date)
-        if (plan.completed) {
-            batch.set(historyDocument, plan.toCookedMealDocument(plan.updatedAtEpochMillis))
-        } else {
-            batch.delete(historyDocument)
-        }
-        batch.commit().await()
+        mealPlans(currentUid).document(plan.date)
+            .set(plan.toFirestoreDocument())
+            .await()
     }
 
     override suspend fun setMealCompleted(date: String, completed: Boolean) {
         require(date.isNotBlank())
         val currentUid = awaitUid()
         val planDocument = mealPlans(currentUid).document(date)
-        val historyDocument = cookedHistoryDocuments(currentUid).document(date)
         val now = System.currentTimeMillis()
         firestore.runTransaction { transaction ->
             val plan = transaction.get(planDocument)
             check(plan.exists()) { "Cannot complete a meal plan that does not exist: $date" }
             val recipeId = checkNotNull(plan.getString(RECIPE_ID_FIELD))
             val recipeTitle = checkNotNull(plan.getString(RECIPE_TITLE_FIELD))
-            transaction.update(
-                planDocument,
-                mapOf(
-                    COMPLETED_FIELD to completed,
-                    UPDATED_AT_FIELD to now,
-                ),
-            )
-            if (completed) {
-                transaction.set(
-                    historyDocument,
-                    cookedMealDocument(
-                        date = date,
-                        recipeId = recipeId,
-                        recipeTitle = recipeTitle,
-                        completedAtEpochMillis = now,
+            val wasCompleted = plan.getBoolean(COMPLETED_FIELD) == true
+            if (wasCompleted != completed) {
+                val previousUpdatedAt = plan.getLong(UPDATED_AT_FIELD) ?: 0L
+                transaction.update(
+                    planDocument,
+                    mapOf(
+                        COMPLETED_FIELD to completed,
+                        UPDATED_AT_FIELD to now,
                     ),
                 )
-            } else {
+                if (completed) {
+                    transaction.set(
+                        cookedHistoryDocuments(currentUid).document(cookedMealEventId(date, now)),
+                        cookedMealDocument(
+                            date = date,
+                            recipeId = recipeId,
+                            recipeTitle = recipeTitle,
+                            completedAtEpochMillis = now,
+                        ),
+                    )
+                } else {
+                    transaction.delete(
+                        cookedHistoryDocuments(currentUid)
+                            .document(cookedMealEventId(date, previousUpdatedAt)),
+                    )
+                    // Compatibility with the original one-document-per-date history layout.
+                    transaction.delete(cookedHistoryDocuments(currentUid).document(date))
+                }
+            }
+        }.await()
+    }
+
+    override suspend fun deleteCookedHistoryEntry(historyId: String) {
+        val safeHistoryId = requireSafeRecipeDocumentId(historyId)
+        val currentUid = awaitUid()
+        val historyDocument = cookedHistoryDocuments(currentUid).document(safeHistoryId)
+        val now = System.currentTimeMillis()
+        firestore.runTransaction { transaction ->
+            val history = transaction.get(historyDocument)
+            if (history.exists()) {
+                val date = checkNotNull(history.getString(DATE_FIELD))
+                val recipeId = checkNotNull(history.getString(RECIPE_ID_FIELD))
+                val completedAt = checkNotNull(history.getLong(COMPLETED_AT_FIELD))
+                val planDocument = mealPlans(currentUid).document(date)
+                val plan = transaction.get(planDocument)
+                val eventIsCurrentPlanCompletion = plan.exists() &&
+                    plan.getBoolean(COMPLETED_FIELD) == true &&
+                    plan.getString(RECIPE_ID_FIELD) == recipeId &&
+                    plan.getLong(UPDATED_AT_FIELD) == completedAt
+                if (eventIsCurrentPlanCompletion) {
+                    transaction.update(
+                        planDocument,
+                        mapOf(
+                            COMPLETED_FIELD to false,
+                            UPDATED_AT_FIELD to now,
+                        ),
+                    )
+                }
                 transaction.delete(historyDocument)
             }
         }.await()
