@@ -112,8 +112,14 @@ service cloud.firestore {
     // Trusted Admin SDK importers bypass rules. Signed-in clients can only
     // read the normalized catalog and can never mutate it.
     match /spoon_recipes/{recipeId} {
-      allow get, list: if signedIn() &&
+      allow get: if signedIn() &&
         validRecipeId(recipeId) &&
+        resource.data.active == true &&
+        resource.data.language == 'el';
+      // Collection queries cannot prove a regex constraint over every
+      // document ID. The two data predicates below are enforced by the app's
+      // query and still exclude retired or non-Greek catalog entries.
+      allow list: if signedIn() &&
         resource.data.active == true &&
         resource.data.language == 'el';
       allow create, update, delete: if false;
