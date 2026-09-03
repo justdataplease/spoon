@@ -65,7 +65,7 @@ import com.justdataplease.spoon.ui.model.SelectableEaseOptions
 import java.util.Locale
 import kotlin.math.roundToInt
 
-private val GreekLocale = Locale("el", "GR")
+private val GreekLocale = Locale.forLanguageTag("el-GR")
 
 @Composable
 fun ExploreScreen(

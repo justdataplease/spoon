@@ -1,205 +1,224 @@
 # Τι να φάω; (Spoon)
 
-Greek-first Android meal planner built with Kotlin and Jetpack Compose. It creates a
-seven-day plan, keeps each day's food category and constraints, proposes a random
-matching recipe, and remembers favorites and cooked meals.
+Spoon is an Android meal planner written in Kotlin and Jetpack Compose. The entire
+user interface is Greek. It builds a weekly food plan, proposes a matching recipe
+for each day, and makes it easy to reroll, filter, save, replace, and mark meals as
+cooked.
 
-## What works
+The production catalog is backed by Firebase project `spoontheplanner`; the
+Android application ID is `com.spoon.app`.
 
-- A Monday–Sunday plan with sensible defaults: legumes, poultry, vegetables, meat,
-  fish, street food, and pasta/rice.
-- A separate reroll button on every day, plus a whole-week reroll.
-- Per-day filters for main category, minimum rating on a 0–10 scale, maximum hands-on
-  preparation time, and difficulty.
-- A transparent effort index derived from structural preparation and step counts:
-  unknown when both counts are zero, easy for at most one preparation and 1–5
-  steps, involved for 3+ preparations or 10+ steps, and moderate otherwise.
-- Favorites, cooked/not-cooked state, previous/next weeks, and a month calendar.
-- Tappable week and favorite cards open a recipe details page with attribution,
-  rating, preparation/total time, preparation count, effort explanation, favorite
-  control, and a button that opens the publisher's canonical recipe page.
-- A persistent on-device demo catalog so the app is usable before Firebase setup.
-- Anonymous Firebase Auth and Firestore sync when a valid configuration is present.
-- A runtime status banner distinguishes local storage, cloud connection, connecting,
-  and actionable Firebase errors; configured Firebase failures never silently fall
-  back to the demo catalog.
-- A unique, network-constrained Android WorkManager check of server-owned catalog
-  status approximately every 90 days.
-- A trusted, dry-run-first metadata importer under `tools/recipe_importer`.
+## App features
 
-The UI does not reproduce recipe instructions, ingredients, descriptions, or
-videos. The bundled
-[`food_hero.png`](app/src/main/res/drawable-nodpi/food_hero.png) is the default,
-loading, and error artwork. A production catalog may supply a remote `imageUrl`
-only when written photo-display rights exist and the importer is explicitly run
-with `--allow-licensed-images`; otherwise the bundled artwork remains visible.
-The details page opens `sourceUrl` in the browser for the actual recipe.
+- Monday-to-Sunday planning with default main-food groups such as όσπρια, κοτόπουλο,
+  λαχανικά, κρέας, ψάρι, βρώμικο, and ζυμαρικά/ρύζι.
+- Independent random reroll for one day or the whole week.
+- Per-day constraints for category, difficulty, minimum rating on a 0–10 scale,
+  and maximum hands-on preparation time.
+- A clear effort index based on preparation sections and method steps: unknown
+  when both are absent, easy for at most one preparation and 1–5 steps, demanding
+  for at least three preparations or ten steps, and moderate otherwise.
+- Favorites, cooked/not-cooked tracking, previous/next weeks, and a month calendar.
+- Replacement of an existing day's suggestion with any saved favorite.
+- An Explore screen with accent-insensitive Greek search and combined filters for
+  category, effort, rating, preparation time, quick recipes, special diet, meal
+  type, occasion, cooking method, country/cuisine, and main ingredient.
+- Photo-rich cards and a complete recipe page with gallery, descriptions, timing,
+  difficulty, servings, rating distribution, grouped ingredients and conversions,
+  numbered method steps, tips, nutrition, equipment, publication metadata, and the
+  canonical source link.
+- User-initiated inline video. YouTube uses the privacy-enhanced
+  `youtube-nocookie.com` player; direct HTTPS video files use an inline HTML5
+  player. Nothing autoplays, unsafe URLs/navigation are blocked, and an external
+  fallback remains available.
+- A persistent local Greek demo catalog when no Firebase configuration is present.
+- Anonymous Firebase Authentication and offline-capable Firestore sync when the
+  matching configuration is present.
 
-## Run the Android app
+Strict filters are never silently relaxed. If no recipe matches, the current plan
+is preserved and the app explains that no alternative was found.
 
-Prerequisites: Android Studio/JBR 17+ and Android SDK 36.1.
+## Architecture
+
+The app streams lean, active Greek recipe summaries for planning and Explore, then
+fetches the rich details document only when a recipe is opened. This keeps the
+normal catalog read small while retaining full detail pages.
+
+```text
+app/src/main/java/com/justdataplease/spoon/
+  data/       local/Firestore repositories and safe-decoding models
+  domain/     weekly defaults, filtering, random selection, planner operations
+  di/         runtime repository selection
+  sync/       unique 90-day catalog-status check
+  ui/         week, Explore, favorites, calendar, details, video, theme
+
+tools/recipe_importer/
+  crawl_catalog.py    complete permission-gated Greek catalog crawler
+  full_schema.py      rich normalization and Firestore projections
+  import_catalog.py   dry-run-first validator and Admin SDK importer
+  inspect_recipe.py   one-URL metadata inspector
+```
+
+The main libraries are Jetpack Compose/Material 3, Hilt, Navigation Compose,
+Firebase Auth/Firestore, WorkManager, DataStore, Coil, and Kotlin coroutines.
+
+## Build and install
+
+Prerequisites are Android Studio (or JBR 17), Android SDK 36.1, and an Android 8.0
+(API 26) or newer device.
 
 ```powershell
 $env:JAVA_HOME='C:\Program Files\Android\Android Studio\jbr'
 $env:ANDROID_HOME="$env:LOCALAPPDATA\Android\Sdk"
+$env:ANDROID_SDK_ROOT=$env:ANDROID_HOME
+
 .\gradlew.bat testDebugUnitTest
 .\gradlew.bat assembleDebug
 ```
 
-Without `app/google-services.json`, Spoon automatically uses its local persistent
-repository. No code change is needed.
+The installable debug APK is generated at
+`app/build/outputs/apk/debug/app-debug.apk`. To install it over USB:
 
-Production deployment still requires two environment-owned inputs that are not
-checked into this repository: the matching `app/google-services.json` for cloud
-mode and a private release signing key/configuration supplied by the release CI or
-Play App Signing. The repository intentionally contains neither secret.
+```powershell
+adb devices
+adb install -r app\build\outputs\apk\debug\app-debug.apk
+```
 
-## Connect Firebase
+Alternatively, copy the APK to the phone, open it, and approve Android's
+per-app “install unknown apps” prompt. A production release still needs a private
+release signing identity or Play App Signing; neither is stored in this repository.
 
-1. Create a new Firebase Android app with package name
-   `com.justdataplease.spoon`. Do not reuse another app's configuration.
-2. Put its client configuration at `app/google-services.json` (the path is ignored
-   by Git).
-3. In Firebase Authentication, enable Anonymous sign-in.
-4. Create a Firestore database and deploy the checked-in rules:
+Without `app/google-services.json`, the build automatically selects the local
+repository. With a Firebase configuration present, connection/configuration
+failures are shown explicitly and do not silently fall back to demo data.
+
+## Firebase configuration
+
+Use the dedicated Firebase Android app `com.spoon.app` in project
+`spoontheplanner`. Do not copy another application's `google-services.json`:
+the package and Firebase app registration must match. Keep the downloaded file at
+`app/google-services.json`; that path is ignored by Git.
+
+Firebase setup requires:
+
+1. Anonymous sign-in enabled in Firebase Authentication.
+2. A Firestore database in the selected European location.
+3. The checked-in rules and indexes deployed:
 
    ```powershell
-   firebase use YOUR_PROJECT_ID
+   firebase use spoontheplanner
    firebase deploy --only firestore
    ```
 
-   The rules allow signed-in reads of only the normalized recipe catalog and its
-   exact status document. User writes are limited to that authenticated user's
-   exact meal-plan and favorite paths, with document-ID, field allowlist, type,
-   enum, length, and numeric-range checks. Admin SDK importer writes bypass these
-   client rules.
-5. Before production release, configure Firebase App Check with Play Integrity:
-   add and initialize the Play Integrity provider in the release app, register
-   the release package/signing SHA-256 in Firebase, use the debug provider only
-   for local development or CI, monitor App Check metrics, and then enable Cloud
-   Firestore enforcement in the Firebase console. This repository does not
-   enable enforcement or include provider initialization because the Firebase
-   project and release signing identity are deployment-owned inputs. App Check
-   is a separate attestation/enforcement layer; it cannot be expressed in
-   `firestore.rules` and does not replace Authentication or these authorization
-   rules.
-6. Supply authorized recipe metadata with the importer described in
-   [`tools/recipe_importer/README.md`](tools/recipe_importer/README.md).
+4. The authorized catalog imported with the backend tooling below.
 
-The app chooses the Firestore implementation at startup when its Firebase config
-exists. Recipe metadata is globally readable to signed-in users but never writable
-from the APK. Each user's plans and favorites are owner-only.
-Cloud catalog reads query `active == true` and `language == "el"` in Firestore and
-repeat those checks defensively after decoding.
+Before a production Play release, register the release signing SHA-256 and
+configure Firebase App Check with Play Integrity. App Check enforcement is a
+Firebase project setting and is separate from the checked-in authorization rules.
 
 ## Firestore layout
 
 ```text
-spoon_recipes/{recipeId}                 # trusted importer writes; clients read
-spoon_catalog/status                     # importer writes; client worker reads
-spoon/{uid}/mealPlans/{yyyy-MM-dd}       # owner-only plan + filter + completion
-spoon/{uid}/favorites/{recipeId}         # owner-only favorite marker
+spoon_recipes/{recipeId}                 lean summary; signed-in catalog reads
+spoon_recipe_details/{recipeId}          rich detail; exact active Greek get only
+spoon_recipe_payloads/{recipeId}         source audit envelope; backend only
+spoon_catalog/status                     last complete backend import checkpoint
+spoon/{uid}/mealPlans/{yyyy-MM-dd}       owner-only daily plan/filter/completion
+spoon/{uid}/favorites/{recipeId}         owner-only favorite marker
 ```
 
-Every Firestore model has defaults for safe decoding. Recipe records store compact
-selection facts such as title, category, rating, `prepMinutes`, `cookMinutes`,
-`totalMinutes`, `preparationCount`, `stepCount`, `active`, attribution, language,
-canonical source URL, and an optional licensed `imageUrl`. Cooking time
-contributes to the details page's total-time fallback when an explicit total is
-unavailable. The meal plan stores a title snapshot so history remains
-understandable even if a catalog item is later withdrawn.
+Catalog writes are denied to mobile clients. Raw source payload reads are also
+denied; only trusted Admin SDK tooling can access them. User plans and favorites
+are isolated by the anonymous Firebase UID and validated by field/type/range
+allowlists in `firestore.rules`.
 
-All publisher-derived production records are Greek-only: the importer records
-`language: "el"`, rejects `/en/recipe/...`, and accepts only Greek recipe URLs.
-The bundled demo catalog is a separate local fallback, not a publisher import.
+Every Firestore model has safe defaults. The repository queries only
+`active == true` and `language == "el"` summaries and validates those values
+again after decoding. Rich details are fetched server-side by a validated document
+ID and must also be active Greek content.
 
-## Recipe catalog and publisher permission
+## Complete Greek recipe catalog
 
-The current Akis Petretzikis terms reserve site content and explicitly restrict
-copying and storage without prior written consent. For that reason this repository
-does not contain an all-site crawler or copied recipe content.
+The repository includes a permission-gated full crawler because the operator has
+confirmed authorization for this personal use. It discovers every current
+canonical Greek recipe, verifies that sitemap and API totals agree, fetches all six
+filter taxonomies and every rich detail payload, and produces three independently
+size-checked Firestore projections. Generated catalog data is private and ignored
+by Git.
 
-The included tooling supports a compliant workflow after permission is obtained:
+Install and test the tooling:
 
 ```powershell
-python -m pip install -r tools/recipe_importer/requirements.txt
+python -m pip install --require-hashes -r tools/recipe_importer/requirements.lock
 python -m pytest tools/recipe_importer/tests
-
-# Safe default: validate an authorized catalog without connecting to Firebase.
-python tools/recipe_importer/import_catalog.py authorized-catalog.jsonl
-
-# Explicit write after review.
-python tools/recipe_importer/import_catalog.py authorized-catalog.jsonl `
-  --commit --project-id YOUR_PROJECT_ID
-
-# Use this additional flag only when written rights cover remote photo display.
-python tools/recipe_importer/import_catalog.py authorized-catalog.jsonl `
-  --allow-licensed-images --commit --project-id YOUR_PROJECT_ID
 ```
 
-`inspect_recipe.py` can inspect one explicitly supplied, authorized recipe URL. It
-checks `robots.txt`, rate-limits requests, discards full-content fields, and requires
-an acknowledgement flag. Robots permission does not replace publisher permission.
+The checked-in lock pins and hashes every direct and transitive package used by
+the credentialed quarterly workflow. `requirements.txt` remains the human-edited
+input when intentionally refreshing that lock.
 
-## Catalog freshness: device check vs backend ingestion
+Crawl, validate, then import the exact manifest/catalog pair:
 
-These are two independent operations:
+```powershell
+python tools/recipe_importer/crawl_catalog.py --i-have-permission
 
-1. **Android status check.** `SpoonApplication` enqueues the unique periodic work
-   `spoon-quarterly-catalog-freshness` with `ExistingPeriodicWorkPolicy.KEEP`.
-   WorkManager runs it on an inexact, constraint-aware 90-day interval when a
-   network is available. In Firebase mode it authenticates anonymously and reads
-   only `spoon_catalog/status` with a server-only read. A valid checkpoint must
-   contain `language: "el"`, a positive bounded `recipeCount`, a server
-   `lastImportedAt` timestamp, and matching lowercase SHA-256 hash/version fields.
-   The worker stores the last successful check, last attempt, last-known-good
-   import time/count/hash/version, and any explicit failure in private app
-   preferences. Current/stale state is derived from that persisted successful
-   timestamp, so a missing status document or failed request cannot reset the
-   catalog to successful zero values. Missing status and transient transport
-   errors retry with WorkManager backoff; malformed status and permanent errors
-   fail the attempt while preserving the last-known-good metadata. It never
-   visits the recipe website, imports records, or triggers the backend job.
-   Without a Firebase configuration it records only the bundled demo count
-   locally.
-2. **Backend catalog ingestion.** Approximately quarterly, a trusted Cloud
-   Scheduler/Cloud Run or reviewed CI workflow receives a newly supplied,
-   authorized Greek-only catalog, runs the importer dry-run, and then explicitly
-   commits the same reviewed artifact. A retired recipe must remain in the feed
-   with `active: false`; omission does not delete or deactivate an existing
-   document, and the Android catalog filters inactive records. Each supplied
-   recipe document is fully replaced with normalized metadata so legacy,
-   disallowed, or stale fields do not survive.
-   After all recipe batches succeed, the importer updates `spoon_catalog/status`
-   with `language`, `recipeCount`, the deterministic catalog hash/version, and
-   a server `lastImportedAt` timestamp.
+python tools/recipe_importer/import_catalog.py `
+  tools/recipe_importer/output/akis-greek-full.jsonl `
+  --manifest tools/recipe_importer/output/akis-greek-full.manifest.json `
+  --i-have-permission
 
-Android timing can be delayed by device constraints and is not the ingestion
-schedule. The backend cadence, credentials, approval steps, and failure semantics
-are documented in
-[`tools/recipe_importer/README.md`](tools/recipe_importer/README.md#quarterly-authorized-refresh).
-
-## Project structure
-
-```text
-app/src/main/java/com/justdataplease/spoon/
-  data/       Firestore/local repositories, models, demo metadata
-  domain/     strict filtering, random selection, weekly defaults, planner
-  di/         Hilt backend selection
-  sync/       unique 90-day WorkManager catalog-status check
-  ui/         Compose screens, recipe details, calendar, filters, theme, ViewModel
-tools/recipe_importer/
-  inspect_recipe.py   single-URL metadata inspection
-  import_catalog.py   validated Firestore batch importer
+python tools/recipe_importer/import_catalog.py `
+  tools/recipe_importer/output/akis-greek-full.jsonl `
+  --manifest tools/recipe_importer/output/akis-greek-full.manifest.json `
+  --i-have-permission --commit --project-id spoontheplanner
 ```
+
+The crawler reads `robots.txt`, restricts itself to same-site HTTPS, waits at
+least one second globally between requests, honors retries/`Retry-After`, and
+resumes through SQLite. Any failed recipe prevents a complete artifact. The
+importer recomputes counts and hashes, fully replaces normalized documents,
+tombstones disappeared active IDs instead of deleting them, and writes
+`spoon_catalog/status` only after every batch succeeds.
+
+See [the importer guide](tools/recipe_importer/README.md) for the schema, failure
+semantics, resume/incremental options, and secure identity setup.
+
+## Quarterly refresh
+
+Two independent mechanisms handle freshness:
+
+- Android enqueues `spoon-quarterly-catalog-freshness` with WorkManager about
+  every 90 days. It authenticates and reads only `spoon_catalog/status`; it never
+  crawls the publisher or triggers an import.
+- [The quarterly GitHub Actions workflow](.github/workflows/quarterly-catalog-refresh.yml)
+  runs at 03:00 UTC on January 1, April 1, July 1, and October 1. It tests, crawls,
+  validates, authenticates with short-lived Google OIDC, and imports. A manual
+  dispatch always stops after crawl and validation; its separate job has no OIDC
+  permission, Firebase variables, authentication step, or import step.
+
+The workflow has read-only repository access, pins every action to an immutable
+commit, uploads audit reports but not recipe data, and uses no stored JSON key.
+The `recipe-catalog-production` GitHub environment is restricted to `main`; the
+three non-secret resource values are repository Actions variables documented in
+the importer guide. The Google
+identity checks immutable GitHub repository ID `1355319945` and owner ID
+`117316710`, as well as `justdataplease/spoon`, `main`, and the scheduled event.
+
+The dedicated importer service account receives only a custom
+`spoonCatalogWriter` role with Firestore entity create/get/list/update permissions
+and no delete permission. Its recurring IAM condition permits requests only on the
+first day of January, April, July, and October from 03:00 through 07:59 UTC.
+Firestore IAM cannot scope this binding to particular collections, so during that
+window these permissions apply across every Firestore document in the project.
+Outside the window, the binding grants no catalog data access.
 
 ## Privacy and operating notes
 
-- Anonymous Firebase user IDs isolate cloud data; there is no profile or advertising
-  identity in this version.
-- Firestore's Android SDK supplies offline caching when cloud mode is active. Local
-  mode persists plans and favorites in private app storage.
-- A strict filter with no match leaves the current choice unchanged and tells the
-  user. Filters are never silently relaxed.
-- Ratings with no source value are treated as unknown/zero, so they do not pass a
-  positive rating threshold.
+- The app contains no advertising profile. Anonymous Firebase IDs exist only to
+  isolate each user's plans and favorites.
+- Firestore provides offline caching in cloud mode; local mode persists its state
+  in app-private storage.
+- Unknown ratings do not pass a positive rating filter. Unknown preparation time
+  does not pass a positive time cap.
+- Recipe pages preserve source attribution and a link to the canonical publisher
+  page.

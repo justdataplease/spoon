@@ -193,6 +193,7 @@ private fun categoryForKey(categoryKey: String): CategoryUi =
 
 data class CalendarMealUi(
     val date: LocalDate,
+    val recipeId: String,
     val categoryKey: String,
     val recipeTitle: String,
     val isCompleted: Boolean,

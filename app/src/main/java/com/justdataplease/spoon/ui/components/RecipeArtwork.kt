@@ -7,6 +7,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import coil.compose.AsyncImage
 import com.justdataplease.spoon.R
+import com.justdataplease.spoon.ui.details.normalizeRecipeLink
 
 /**
  * Shows publisher artwork only when the catalog supplies an approved image URL. The original
@@ -21,10 +22,11 @@ fun RecipeArtwork(
 ) {
     val bundledArtwork = painterResource(R.drawable.food_hero)
     val description = "Φωτογραφία συνταγής: $title"
+    val safeImageUrl = normalizeRecipeLink(imageUrl)
 
-    if (imageUrl.isNotBlank()) {
+    if (safeImageUrl != null) {
         AsyncImage(
-            model = imageUrl,
+            model = safeImageUrl,
             contentDescription = description,
             modifier = modifier,
             placeholder = bundledArtwork,

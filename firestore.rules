@@ -112,7 +112,10 @@ service cloud.firestore {
     // Trusted Admin SDK importers bypass rules. Signed-in clients can only
     // read the normalized catalog and can never mutate it.
     match /spoon_recipes/{recipeId} {
-      allow get, list: if signedIn();
+      allow get, list: if signedIn() &&
+        validRecipeId(recipeId) &&
+        resource.data.active == true &&
+        resource.data.language == 'el';
       allow create, update, delete: if false;
     }
 

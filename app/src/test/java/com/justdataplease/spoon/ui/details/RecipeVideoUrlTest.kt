@@ -39,6 +39,22 @@ class RecipeVideoUrlTest {
     }
 
     @Test
+    fun `direct media rejects local and private network hosts`() {
+        listOf(
+            "https://localhost/video.mp4",
+            "https://player.local/video.mp4",
+            "https://127.0.0.1/video.mp4",
+            "https://10.2.3.4/video.mp4",
+            "https://172.16.4.5/video.mp4",
+            "https://192.168.1.4/video.mp4",
+            "https://169.254.2.3/video.mp4",
+            "https://[::1]/video.mp4",
+            "https://[fe80::1]/video.mp4",
+            "https://[fd00::1]/video.mp4",
+        ).forEach { assertNull(it, resolveInlineVideoSource(it)) }
+    }
+
+    @Test
     fun `unsafe malformed and lookalike urls are rejected`() {
         listOf(
             "javascript:alert(1)",
@@ -87,8 +103,32 @@ class RecipeVideoUrlTest {
         assertEquals("https://akispetretzikis.com/recipe/1/test", normalizeRecipeLink("/recipe/1/test"))
         assertEquals("https://cdn.example.test/image.jpg", normalizeRecipeLink("//cdn.example.test/image.jpg"))
         assertEquals("https://example.test/path", normalizeRecipeLink(" https://example.test/path "))
+        assertEquals("https://8.8.8.8/image.jpg", normalizeRecipeLink("https://8.8.8.8/image.jpg"))
         assertNull(normalizeRecipeLink("http://example.test/path"))
+        assertNull(normalizeRecipeLink("https:///missing-host.jpg"))
+        assertNull(normalizeRecipeLink("data:image/png;base64,AAAA"))
         assertNull(normalizeRecipeLink("https://user@example.test/path"))
         assertNull(normalizeRecipeLink("javascript:alert(1)"))
+    }
+
+    @Test
+    fun `recipe links reject local private and ambiguous numeric hosts`() {
+        listOf(
+            "https://localhost/image.jpg",
+            "https://LOCALHOST./image.jpg",
+            "https://assets.local/image.jpg",
+            "https://127.0.0.1/image.jpg",
+            "https://127.1/image.jpg",
+            "https://0177.0.0.1/image.jpg",
+            "https://10.0.0.8/image.jpg",
+            "https://172.31.255.254/image.jpg",
+            "https://192.168.0.1/image.jpg",
+            "https://169.254.10.20/image.jpg",
+            "https://[::]/image.jpg",
+            "https://[::1]/image.jpg",
+            "https://[fe80::1]/image.jpg",
+            "https://[fc00::1]/image.jpg",
+            "https://0x7f000001/image.jpg",
+        ).forEach { assertNull(it, normalizeRecipeLink(it)) }
     }
 }

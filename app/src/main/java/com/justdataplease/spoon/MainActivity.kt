@@ -1,13 +1,13 @@
 package com.justdataplease.spoon
 
 import android.content.Intent
-import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.runtime.getValue
+import androidx.core.net.toUri
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.justdataplease.spoon.ui.SpoonApp
 import com.justdataplease.spoon.ui.SpoonViewModel
@@ -35,8 +35,10 @@ class MainActivity : ComponentActivity() {
 
     private fun openRecipe(url: String) {
         if (url.isBlank()) return
+        val uri = url.toUri()
+        if (uri.scheme != "https" || uri.host.isNullOrBlank()) return
         runCatching {
-            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+            startActivity(Intent(Intent.ACTION_VIEW, uri))
         }
     }
 }

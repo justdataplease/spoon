@@ -66,6 +66,8 @@ def test_normalizes_every_android_detail_and_retains_unknown_source_fields():
     assert record["videoUrls"] == ["https://youtu.be/abc123"]
     assert record["cuisineLabels"] == ["Ελλάδα"]
     assert record["dietLabels"] == ["Χωρίς γλουτένη"]
+    assert record["categoryLabel"] in record["tags"]
+    assert not set(record["categoryKeys"]) & set(record["tags"])
     assert record["quickRecipe"] is True
     assert record["sourcePayload"]["future_api_field"] == {"nested": "retained&safe"}
 

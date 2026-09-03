@@ -83,9 +83,11 @@ internal fun CatalogDetailsSection(
 ) {
     val entries = buildList {
         if (recipe.sourceRecipeId > 0) add("Κωδικός συνταγής" to recipe.sourceRecipeId.toString())
-        if (recipe.slug.isNotBlank()) add("Slug" to recipe.slug)
+        if (recipe.slug.isNotBlank()) add("Σύντομο όνομα" to recipe.slug)
         if (recipe.categorySourceId > 0) add("Κωδικός κατηγορίας" to recipe.categorySourceId.toString())
-        if (recipe.language.isNotBlank()) add("Γλώσσα" to recipe.language)
+        if (recipe.language.isNotBlank()) {
+            add("Γλώσσα" to if (recipe.language == "el") "Ελληνικά" else recipe.language)
+        }
         if (recipe.authorName.isNotBlank()) add("Δημιουργός" to recipe.authorName)
         if (recipe.publishedAt.isNotBlank()) add("Δημοσίευση" to recipe.publishedAt)
         add("Κατάσταση πηγής" to if (recipe.published) "Δημοσιευμένη" else "Μη δημοσιευμένη")
@@ -95,28 +97,27 @@ internal fun CatalogDetailsSection(
     }
     val showSeoTitle = recipe.seoTitle.isNotBlank() && recipe.seoTitle != recipe.title
     val showSeoDescription = recipe.seoDescription.isNotBlank() && recipe.seoDescription != recipe.description
-    if (entries.isEmpty() && !showSeoTitle && !showSeoDescription && recipe.sponsorLogoUrl.isBlank()) return
+    val safeSponsorLogoUrl = normalizeRecipeLink(recipe.sponsorLogoUrl)
+    if (entries.isEmpty() && !showSeoTitle && !showSeoDescription && safeSponsorLogoUrl == null) return
 
     DetailSectionCard("Στοιχεία συνταγής", Icons.Outlined.Badge) {
         entries.forEach { (label, value) -> MetadataRow(label, value) }
-        if (showSeoTitle) MetadataRow("Τίτλος SEO", recipe.seoTitle)
-        if (showSeoDescription) MetadataRow("Περιγραφή SEO", recipe.seoDescription)
-        if (recipe.sponsorLogoUrl.isNotBlank()) {
+        if (showSeoTitle) MetadataRow("Τίτλος για μηχανές αναζήτησης", recipe.seoTitle)
+        if (showSeoDescription) MetadataRow("Περιγραφή για μηχανές αναζήτησης", recipe.seoDescription)
+        if (safeSponsorLogoUrl != null) {
             Text("Χορηγός", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
             AsyncImage(
-                model = recipe.sponsorLogoUrl,
+                model = safeSponsorLogoUrl,
                 contentDescription = "Λογότυπο χορηγού",
                 modifier = Modifier.fillMaxWidth().height(64.dp),
             )
-            if (normalizeRecipeLink(recipe.sponsorLogoUrl) != null) {
-                TextButton(onClick = { onOpenExternal(recipe.sponsorLogoUrl) }) {
-                    Text("Άνοιγμα λογοτύπου")
-                    Icon(
-                        Icons.AutoMirrored.Outlined.OpenInNew,
-                        contentDescription = null,
-                        modifier = Modifier.padding(start = 6.dp).size(17.dp),
-                    )
-                }
+            TextButton(onClick = { onOpenExternal(safeSponsorLogoUrl) }) {
+                Text("Άνοιγμα λογοτύπου")
+                Icon(
+                    Icons.AutoMirrored.Outlined.OpenInNew,
+                    contentDescription = null,
+                    modifier = Modifier.padding(start = 6.dp).size(17.dp),
+                )
             }
         }
     }
@@ -145,6 +146,7 @@ internal fun SourceSection(
     onOpenSource: () -> Unit,
     onOpenExternal: (String) -> Unit,
 ) {
+    val hasSafeSource = normalizeRecipeLink(recipe.sourceUrl) != null
     DetailSectionCard("Πηγή", Icons.Outlined.Info) {
         Text(
             recipe.sourceName.ifBlank { "Αρχική σελίδα συνταγής" },
@@ -157,10 +159,10 @@ internal fun SourceSection(
         )
         Button(
             onClick = onOpenSource,
-            enabled = normalizeRecipeLink(recipe.sourceUrl) != null,
+            enabled = hasSafeSource,
             modifier = Modifier.fillMaxWidth().height(54.dp),
         ) {
-            Text(if (recipe.sourceUrl.isNotBlank()) "Άνοιγμα αρχικής συνταγής" else "Δεν υπάρχει διαθέσιμη πηγή")
+            Text(if (hasSafeSource) "Άνοιγμα αρχικής συνταγής" else "Δεν υπάρχει ασφαλής διαθέσιμη πηγή")
             Spacer(Modifier.size(8.dp))
             Icon(Icons.AutoMirrored.Outlined.OpenInNew, contentDescription = null)
         }

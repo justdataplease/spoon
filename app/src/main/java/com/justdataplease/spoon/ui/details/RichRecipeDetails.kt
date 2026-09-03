@@ -62,8 +62,8 @@ internal fun RichRecipeDetailsContent(
     onBack: () -> Unit,
     onToggleFavorite: () -> Unit,
     onOpenSource: () -> Unit,
-    isLoadingDetails: Boolean = false,
     modifier: Modifier = Modifier,
+    isLoadingDetails: Boolean = false,
 ) {
     val uriHandler = LocalUriHandler.current
     val openExternal = remember(uriHandler) {
@@ -142,8 +142,8 @@ fun RecipeDetailsScreen(
     onBack: () -> Unit,
     onToggleFavorite: () -> Unit,
     onOpenSource: () -> Unit,
-    isLoadingDetails: Boolean = false,
     modifier: Modifier = Modifier,
+    isLoadingDetails: Boolean = false,
 ) = RichRecipeDetailsContent(
     recipe = recipe,
     onBack = onBack,
@@ -256,7 +256,7 @@ private fun RecipeMetricsGrid(recipe: RecipeDetailUi) {
             add(
                 MetricItem(
                     Icons.Outlined.Star,
-                    "${"%.1f".format(Locale("el", "GR"), recipe.rating10)}/10",
+                    "${"%.1f".format(Locale.forLanguageTag("el-GR"), recipe.rating10)}/10",
                     if (recipe.ratingCount > 0) "Βαθμολογία • ${recipe.ratingCount} ψήφοι" else "Βαθμολογία",
                 ),
             )

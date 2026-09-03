@@ -154,6 +154,8 @@ fun SpoonApp(
                 onPreviousMonth = viewModel::previousMonth,
                 onNextMonth = viewModel::nextMonth,
                 onCurrentMonth = viewModel::currentMonth,
+                onOpenRecipe = viewModel::showRecipeDetails,
+                onToggleCompleted = viewModel::toggleCompleted,
                 modifier = Modifier.padding(padding),
             )
         }

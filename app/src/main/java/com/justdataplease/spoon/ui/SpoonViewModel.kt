@@ -166,6 +166,7 @@ class SpoonViewModel @Inject constructor(
             val recipe = recipesById[plan.recipeId]
             CalendarMealUi(
                 date = date,
+                recipeId = plan.recipeId,
                 categoryKey = plan.category.toUiCategoryKey(),
                 recipeTitle = recipe?.title ?: plan.recipeTitle,
                 isCompleted = plan.completed,
@@ -347,7 +348,12 @@ class SpoonViewModel @Inject constructor(
     }
 
     fun toggleCompleted(date: LocalDate) {
-        val completed = uiState.value.weekPlans.firstOrNull { it.date == date }?.isCompleted ?: false
+        val state = uiState.value
+        val completed = completionStateForDate(
+            date = date,
+            calendarMeals = state.calendarMeals,
+            weekPlans = state.weekPlans,
+        )
         viewModelScope.launch {
             runCatching { mealPlanner.setCompleted(date, !completed) }
                 .onFailure { message.value = it.userMessage() }
@@ -390,6 +396,14 @@ class SpoonViewModel @Inject constructor(
         }
     }
 }
+
+internal fun completionStateForDate(
+    date: LocalDate,
+    calendarMeals: List<CalendarMealUi>,
+    weekPlans: List<DayPlanUi>,
+): Boolean = calendarMeals.firstOrNull { it.date == date }?.isCompleted
+    ?: weekPlans.firstOrNull { it.date == date }?.isCompleted
+    ?: false
 
 private fun Recipe.toFavoriteUi() = FavoriteUi(
     recipeId = id,
@@ -568,7 +582,7 @@ private fun String.toDomainCategoryKey(): String = when (this) {
     else -> this
 }
 
-private fun Throwable.userMessage(): String {
+internal fun Throwable.userMessage(): String {
     if (this is BackendUnavailableException) {
         return when (failure.kind) {
             BackendFailureKind.PERMISSION -> "Το Firestore απέρριψε την πρόσβαση. Έλεγξε τους κανόνες ασφαλείας."
@@ -581,5 +595,5 @@ private fun Throwable.userMessage(): String {
     if (this is FirebaseException) {
         return "Δεν ολοκληρώθηκε ο συγχρονισμός με το Firebase. Δοκίμασε ξανά."
     }
-    return message?.takeIf { it.isNotBlank() } ?: "Κάτι πήγε στραβά. Δοκίμασε ξανά."
+    return "Κάτι πήγε στραβά. Δοκίμασε ξανά."
 }

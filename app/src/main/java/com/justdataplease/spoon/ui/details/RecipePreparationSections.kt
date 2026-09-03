@@ -17,7 +17,7 @@ import androidx.compose.material.icons.automirrored.outlined.OpenInNew
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Lightbulb
 import androidx.compose.material.icons.outlined.LocalDining
-import androidx.compose.material.icons.outlined.MenuBook
+import androidx.compose.material.icons.automirrored.outlined.MenuBook
 import androidx.compose.material.icons.outlined.Restaurant
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -95,8 +95,8 @@ private fun IngredientRow(
                 )
             }
             val conversions = buildList {
-                if (uk.isNotBlank()) add("UK: $uk")
-                if (us.isNotBlank()) add("US: $us")
+                if (uk.isNotBlank()) add("Ην. Βασίλειο: $uk")
+                if (us.isNotBlank()) add("ΗΠΑ: $us")
             }
             if (conversions.isNotEmpty()) {
                 Text(
@@ -130,7 +130,7 @@ private fun IngredientRow(
 internal fun MethodSection(recipe: RecipeDetailUi) {
     val sections = recipe.methodSections.filter { it.steps.any(String::isNotBlank) }
     if (sections.isEmpty()) return
-    DetailSectionCard("Εκτέλεση", Icons.Outlined.MenuBook) {
+    DetailSectionCard("Εκτέλεση", Icons.AutoMirrored.Outlined.MenuBook) {
         var runningStep = 1
         sections.forEachIndexed { sectionIndex, section ->
             if (section.title.isNotBlank()) {

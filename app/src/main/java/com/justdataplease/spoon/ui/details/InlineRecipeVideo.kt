@@ -228,6 +228,7 @@ private fun SecureInlineVideo(
 
 private object WebViewHolder {
     @SuppressLint("SetJavaScriptEnabled")
+    @Suppress("DEPRECATION")
     fun create(
         context: Context,
         source: InlineVideoSource,

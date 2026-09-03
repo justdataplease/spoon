@@ -13,6 +13,7 @@ class CalendarAccessibilityTest {
             date = date,
             meal = CalendarMealUi(
                 date = date,
+                recipeId = "fish-lemon",
                 categoryKey = "fish",
                 recipeTitle = "Ψάρι λεμονάτο",
                 isCompleted = true,

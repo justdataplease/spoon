@@ -35,7 +35,7 @@ import com.justdataplease.spoon.ui.model.FavoriteUi
 import java.time.LocalDate
 import java.util.Locale
 
-private val GreekLocale = Locale("el", "GR")
+private val GreekLocale = Locale.forLanguageTag("el-GR")
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

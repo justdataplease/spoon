@@ -43,7 +43,7 @@ import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
-private val GreekLocale = Locale("el", "GR")
+private val GreekLocale = Locale.forLanguageTag("el-GR")
 
 fun LocalDate.greekDayLabel(): String =
     format(DateTimeFormatter.ofPattern("EEEE", GreekLocale)).replaceFirstChar { it.titlecase(GreekLocale) }

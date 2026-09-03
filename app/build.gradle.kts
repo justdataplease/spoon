@@ -21,7 +21,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.justdataplease.spoon"
+        applicationId = "com.spoon.app"
         minSdk = 26
         targetSdk = 36
         versionCode = 1

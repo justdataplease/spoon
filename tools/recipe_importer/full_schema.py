@@ -388,6 +388,7 @@ def normalize_recipe_detail(
         [*label_fields["mealTypeLabels"], *label_fields["occasionLabels"], *label_fields["cuisineLabels"]],
     )
     category = canonical_category(category_keys)
+    category_label = CATEGORY_LABELS.get(category, "Άλλο")
     prep_minutes = _int(source_payload.get("make_time"))
     cook_minutes = _int(source_payload.get("bake_time"))
     wait_minutes = parse_wait_minutes(source_payload.get("localized_wait_time"))
@@ -430,7 +431,8 @@ def normalize_recipe_detail(
         for item in normalized_associations["occasion"]
     )
     labels = [label for group in label_fields.values() for label in group]
-    tags = _unique([*category_keys, *labels])
+    # Tags are rendered in the Greek app, so keep internal category keys out.
+    tags = _unique([category_label, *labels])
 
     record: dict[str, Any] = {
         "id": str(source_recipe_id),
@@ -443,7 +445,7 @@ def normalize_recipe_detail(
         "seoDescription": _string(source_payload.get("seo_description")),
         "categoryKeys": category_keys,
         "category": category,
-        "categoryLabel": CATEGORY_LABELS.get(category, "Άλλο"),
+        "categoryLabel": category_label,
         "categorySourceId": _int(raw_category.get("id") or source_payload.get("recipe_category_id")),
         "rating10": rating,
         "rating": rating,

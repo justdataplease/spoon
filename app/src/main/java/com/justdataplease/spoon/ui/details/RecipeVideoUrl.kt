@@ -1,5 +1,6 @@
 package com.justdataplease.spoon.ui.details
 
+import java.net.InetAddress
 import java.net.URI
 import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
@@ -36,17 +37,18 @@ internal fun normalizeRecipeLink(rawUrl: String): String? {
         else -> rawUrl.trim()
     }
     val uri = runCatching { URI(candidate) }.getOrNull() ?: return null
-    if (!uri.scheme.equals("https", ignoreCase = true) || uri.userInfo != null || uri.host.isNullOrBlank()) {
+    if (!uri.scheme.equals("https", ignoreCase = true) || uri.userInfo != null) {
         return null
     }
+    val host = uri.host?.lowercase()?.trimEnd('.') ?: return null
+    if (host.isBlank() || host.isLocalNetworkHost()) return null
     return candidate
 }
 
 /** Returns an embeddable source only for a strict HTTPS YouTube or direct-video URL. */
 internal fun resolveInlineVideoSource(rawUrl: String): InlineVideoSource? {
-    val url = rawUrl.trim()
-    val uri = runCatching { URI(url) }.getOrNull() ?: return null
-    if (!uri.scheme.equals("https", ignoreCase = true) || uri.userInfo != null) return null
+    val url = normalizeRecipeLink(rawUrl) ?: return null
+    val uri = URI(url)
 
     val host = uri.host?.lowercase()?.trimEnd('.') ?: return null
     val videoId = when {
@@ -69,6 +71,45 @@ internal fun resolveInlineVideoSource(rawUrl: String): InlineVideoSource? {
     } else {
         null
     }
+}
+
+private fun String.isLocalNetworkHost(): Boolean {
+    val host = removePrefix("[").removeSuffix("]")
+    if (host == "localhost" || host.endsWith(".localhost") || host.endsWith(".local")) return true
+
+    if (':' in host) {
+        // A colon in a URI host denotes an IPv6 literal. Reject malformed/scoped literals too.
+        if ('%' in host) return true
+        val address = runCatching { InetAddress.getByName(host) }.getOrNull() ?: return true
+        val bytes = address.address
+        val isUniqueLocalIpv6 = bytes.size == 16 && (bytes[0].toInt() and 0xfe) == 0xfc
+        return address.isAnyLocalAddress ||
+            address.isLoopbackAddress ||
+            address.isLinkLocalAddress ||
+            address.isSiteLocalAddress ||
+            address.isMulticastAddress ||
+            isUniqueLocalIpv6
+    }
+
+    val looksNumeric = host.all { it.isDigit() || it == '.' }
+    if (!looksNumeric) {
+        // Avoid alternate hexadecimal IPv4 forms that network stacks may interpret numerically.
+        return host.startsWith("0x", ignoreCase = true)
+    }
+    val octets = host.split('.')
+    if (
+        octets.size != 4 ||
+        octets.any { it.isEmpty() || (it.length > 1 && it.startsWith('0')) || it.toIntOrNull() !in 0..255 }
+    ) {
+        return true
+    }
+    val bytes = octets.map { it.toInt().toByte() }.toByteArray()
+    val address = InetAddress.getByAddress(bytes)
+    return address.isAnyLocalAddress ||
+        address.isLoopbackAddress ||
+        address.isLinkLocalAddress ||
+        address.isSiteLocalAddress ||
+        address.isMulticastAddress
 }
 
 internal fun isAllowedVideoNavigation(url: String, source: InlineVideoSource): Boolean {

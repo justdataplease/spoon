@@ -20,11 +20,13 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.outlined.ChevronLeft
 import androidx.compose.material.icons.outlined.ChevronRight
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -51,7 +53,7 @@ import java.time.YearMonth
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
-private val GreekLocale = Locale("el", "GR")
+private val GreekLocale = Locale.forLanguageTag("el-GR")
 private val FullDateFormatter = DateTimeFormatter.ofPattern("EEEE d MMMM yyyy", GreekLocale)
 
 @Composable
@@ -61,6 +63,8 @@ fun CalendarScreen(
     onPreviousMonth: () -> Unit,
     onNextMonth: () -> Unit,
     onCurrentMonth: () -> Unit,
+    onOpenRecipe: (String) -> Unit,
+    onToggleCompleted: (LocalDate) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var selectedDate by remember(shownMonth) { mutableStateOf<LocalDate?>(null) }
@@ -92,7 +96,12 @@ fun CalendarScreen(
         }
         if (selectedDate != null) {
             item {
-                SelectedDayCard(date = selectedDate!!, meal = selectedMeal)
+                SelectedDayCard(
+                    date = selectedDate!!,
+                    meal = selectedMeal,
+                    onOpenRecipe = onOpenRecipe,
+                    onToggleCompleted = onToggleCompleted,
+                )
             }
         }
         item {
@@ -276,7 +285,12 @@ internal fun calendarDayDescription(
 }.joinToString(". ")
 
 @Composable
-private fun SelectedDayCard(date: LocalDate, meal: CalendarMealUi?) {
+private fun SelectedDayCard(
+    date: LocalDate,
+    meal: CalendarMealUi?,
+    onOpenRecipe: (String) -> Unit,
+    onToggleCompleted: (LocalDate) -> Unit,
+) {
     Surface(
         color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.48f),
         shape = RoundedCornerShape(20.dp),
@@ -289,6 +303,25 @@ private fun SelectedDayCard(date: LocalDate, meal: CalendarMealUi?) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
                     Text(meal.recipeTitle, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
                     Text(meal.emoji, modifier = Modifier.padding(start = 12.dp))
+                }
+                OutlinedButton(
+                    onClick = { onOpenRecipe(meal.recipeId) },
+                    enabled = meal.recipeId.isNotBlank(),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("Προβολή λεπτομερειών")
+                }
+                Button(
+                    onClick = { onToggleCompleted(date) },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(
+                        if (meal.isCompleted) {
+                            "Αναίρεση ολοκλήρωσης"
+                        } else {
+                            "Το έφτιαξα"
+                        },
+                    )
                 }
                 Text(if (meal.isCompleted) "✓ Το έφτιαξες" else "Προγραμματισμένο", color = MaterialTheme.colorScheme.secondary, fontWeight = FontWeight.SemiBold)
             }
