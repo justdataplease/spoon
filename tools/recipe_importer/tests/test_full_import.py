@@ -1,10 +1,21 @@
 """Tests for permission-gated three-collection Firestore imports."""
 
 import json
+import hashlib
 from pathlib import Path
 
 import pytest
 
+import tools.recipe_importer.import_catalog as importer
+from tools.recipe_importer.crawl_argiro import (
+    AUDITED_CANONICAL_ALIASES,
+    AUDITED_EXTERNAL_REDIRECTS,
+    AUDITED_INTERNAL_STALE_REDIRECTS,
+    AUDITED_NON_GREEK_STUBS,
+    checkpoint_run_key,
+    parser_contract_hash,
+)
+from tools.recipe_importer.full_schema import ARGIRO_DETAIL_SCHEMA_VERSION
 from tools.recipe_importer.full_schema import normalize_recipe_detail
 from tools.recipe_importer.import_catalog import (
     COLLECTION_NAME,
@@ -140,6 +151,136 @@ def test_manifest_mismatch_is_rejected_before_firestore():
             "failedRecipeCount": 0,
             "outputRecipeCount": 999,
         })
+
+
+def test_argiro_manifest_requires_exact_allowlists_hashes_and_discovery_algebra(
+    monkeypatch,
+):
+    aliases = sorted(
+        [
+            {"sourceUrl": source_url, **details}
+            for source_url, details in AUDITED_CANONICAL_ALIASES.items()
+        ],
+        key=lambda item: item["sourceUrl"],
+    )
+    external = sorted(
+        [
+            {
+                "sourceUrl": source_url,
+                **details,
+                "reason": "redirected outside /recipe/{slug}/",
+            }
+            for source_url, details in AUDITED_EXTERNAL_REDIRECTS.items()
+        ],
+        key=lambda item: item["sourceUrl"],
+    )
+    stubs = sorted(
+        [
+            {
+                "sourceUrl": source_url,
+                "providerRecipeId": provider_recipe_id,
+                "finalStatus": 200,
+                "reason": "recipe content is not substantively Greek",
+            }
+            for source_url, provider_recipe_id in AUDITED_NON_GREEK_STUBS.items()
+        ],
+        key=lambda item: item["sourceUrl"],
+    )
+    internal_stale = sorted(
+        [
+            {
+                "sourceUrl": source_url,
+                **details,
+                "reason": (
+                    "redirected to a distinct surviving recipe; "
+                    "content substitution is forbidden"
+                ),
+            }
+            for source_url, details in AUDITED_INTERNAL_STALE_REDIRECTS.items()
+        ],
+        key=lambda item: item["sourceUrl"],
+    )
+    exclusions = sorted(
+        [{"kind": "externalRedirect", **item} for item in external]
+        + [{"kind": "nonGreekStub", **item} for item in stubs]
+        + [{"kind": "internalStaleRedirect", **item} for item in internal_stale],
+        key=lambda item: item["sourceUrl"],
+    )
+    records = [
+        {
+            "id": f"argiro_{alias['providerRecipeId']}",
+            "providerRecipeId": alias["providerRecipeId"],
+            "canonicalUrl": alias["canonicalUrl"],
+            "sourceKey": "argiro",
+            "detailSchemaVersion": ARGIRO_DETAIL_SCHEMA_VERSION,
+            "active": True,
+        }
+        for alias in aliases
+    ]
+    monkeypatch.setattr(importer, "compute_catalog_hash", lambda values: "a" * 64)
+    monkeypatch.setattr(
+        importer,
+        "collection_hash",
+        lambda values, projector: "b" * 64,
+    )
+    active_ids = sorted(record["id"] for record in records)
+    active_ids_hash = hashlib.sha256(
+        json.dumps(
+            active_ids,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+    ).hexdigest()
+    manifest = {
+        "complete": True,
+        "failedRecipeCount": 0,
+        "sourceKey": "argiro",
+        "detailSchemaVersion": ARGIRO_DETAIL_SCHEMA_VERSION,
+        "outputRecipeCount": len(records),
+        "activeRecipeCount": len(records),
+        "detailRecipeCount": len(records),
+        "sourcePayloadCount": len(records),
+        "discoveredActiveRecipeCount": len(records),
+        "activeIdsHash": active_ids_hash,
+        "catalogHash": "a" * 64,
+        "summaryHash": "b" * 64,
+        "detailHash": "b" * 64,
+        "sourcePayloadHash": "b" * 64,
+        "oversizedDocumentCount": 0,
+        "canonicalGreekRecipeCount": len(records),
+        "canonicalAliasCount": len(aliases),
+        "canonicalAliases": aliases,
+        "canonicalAliasesHash": importer._manifest_value_hash(aliases),
+        "externalRedirectExclusionCount": len(external),
+        "externalRedirectExclusions": external,
+        "externalRedirectExclusionsHash": importer._manifest_value_hash(external),
+        "internalStaleRedirectExclusionCount": len(internal_stale),
+        "internalStaleRedirectExclusions": internal_stale,
+        "internalStaleRedirectExclusionsHash": importer._manifest_value_hash(internal_stale),
+        "nonGreekStubExclusionCount": len(stubs),
+        "nonGreekStubExclusions": stubs,
+        "nonGreekStubExclusionsHash": importer._manifest_value_hash(stubs),
+        "excludedRecipeUrlCount": len(exclusions),
+        "excludedRecipeUrls": exclusions,
+        "excludedRecipeUrlsHash": importer._manifest_value_hash(exclusions),
+        "parserContractHash": parser_contract_hash(),
+        "checkpointRunKey": checkpoint_run_key(),
+        "discoveredRecipeUrlCount": len(records) + len(aliases) + len(exclusions),
+        "duplicateRecipeEntryCount": 0,
+        "declaredRecipeEntryCount": len(records) + len(aliases) + len(exclusions),
+    }
+    importer.validate_manifest(records, manifest)
+
+    for field, invalid in (
+        ("canonicalAliasesHash", "0" * 64),
+        ("excludedRecipeUrlCount", len(exclusions) - 1),
+        ("parserContractHash", "0" * 64),
+        ("declaredRecipeEntryCount", manifest["declaredRecipeEntryCount"] + 1),
+    ):
+        with pytest.raises(CatalogError, match="manifest/catalog mismatch"):
+            importer.validate_manifest(records, manifest | {field: invalid})
 
 
 def test_full_commit_retires_existing_active_ids_missing_from_new_active_catalog():

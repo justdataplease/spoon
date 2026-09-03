@@ -5,14 +5,22 @@ import json
 import pytest
 
 from tools.recipe_importer import crawl_argiro
+from tools.recipe_importer import import_catalog
 from tools.recipe_importer.crawl_argiro import (
+    AUDITED_CANONICAL_ALIASES,
+    AUDITED_EXTERNAL_REDIRECTS,
+    AUDITED_INTERNAL_STALE_REDIRECTS,
+    AUDITED_NON_GREEK_STUBS,
     CheckpointStore,
     DiscoveredRecipe,
     DiscoveryResult,
     IncompleteArgiroCrawl,
     canonical_recipe_location,
+    checkpoint_run_key,
     parse_sitemap,
+    parser_contract_hash,
     run_argiro_crawl,
+    validate_checkpoint_record,
 )
 
 
@@ -45,6 +53,12 @@ def test_recipe_sitemap_requires_every_declared_entry_to_be_canonical_greek_reci
     assert canonical_recipe_location("https://evil.test/recipe/no/") is None
 
 
+def test_canonical_recipe_location_normalizes_percent_escape_hex_case():
+    assert canonical_recipe_location(
+        "https://www.argiro.gr/recipe/christopso%c2%b5o/"
+    ) == "https://www.argiro.gr/recipe/christopso%C2%B5o/"
+
+
 def test_cli_refuses_to_initialize_network_without_argiro_permission(monkeypatch, capsys):
     monkeypatch.setattr(
         crawl_argiro,
@@ -70,8 +84,44 @@ def test_checkpoint_keeps_unchanged_urls_when_catalog_inventory_changes(tmp_path
         assert store.get(
             "https://www.argiro.gr/recipe/one/", "2026-01-02"
         ) is None
+        store.put("https://www.argiro.gr/recipe/no-lastmod/", "", {"id": "argiro_2"})
+        assert store.get("https://www.argiro.gr/recipe/no-lastmod/", "") is None
     finally:
         store.close()
+
+
+def test_audited_inventory_exceptions_and_content_contract_are_exact():
+    assert len(AUDITED_EXTERNAL_REDIRECTS) == 5
+    assert len(AUDITED_INTERNAL_STALE_REDIRECTS) == 1
+    assert len(AUDITED_NON_GREEK_STUBS) == 3
+    assert len(AUDITED_CANONICAL_ALIASES) == 8
+    assert len(parser_contract_hash()) == 64
+    assert len(checkpoint_run_key()) == 64
+
+
+def test_checkpoint_record_requires_exact_greek_sitemap_identity(monkeypatch):
+    source_url = "https://www.argiro.gr/recipe/synthetic-one/"
+    lastmod = "2026-01-01"
+    value = {
+        "id": "argiro_123",
+        "sourceKey": "argiro",
+        "providerRecipeId": "123",
+        "sourceUrl": source_url,
+        "canonicalUrl": source_url,
+        "sitemapLastModified": lastmod,
+        "language": "el",
+        "active": True,
+    }
+    monkeypatch.setattr(crawl_argiro, "ensure_full_record", lambda record: None)
+    assert validate_checkpoint_record(value, source_url, lastmod) == value
+    with pytest.raises(crawl_argiro.FullSchemaError, match="identity"):
+        validate_checkpoint_record(value | {"language": "en"}, source_url, lastmod)
+    with pytest.raises(crawl_argiro.FullSchemaError, match="identity"):
+        validate_checkpoint_record(
+            value | {"canonicalUrl": "https://www.argiro.gr/recipe/other/"},
+            source_url,
+            lastmod,
+        )
 
 
 class _Response:
@@ -129,6 +179,15 @@ def test_non_recipe_redirect_is_an_explicit_exclusion_not_a_failure(monkeypatch,
     recipe_url = "https://www.argiro.gr/recipe/kept/"
     redirect_url = "https://www.argiro.gr/recipe/redirected/"
     _configure_discovery(monkeypatch, [recipe_url, redirect_url])
+    monkeypatch.setattr(crawl_argiro, "AUDITED_EXTERNAL_REDIRECTS", {
+        redirect_url: {
+            "finalUrl": "https://www.argiro.gr/recipe-category/glika/",
+            "finalStatus": 200,
+        },
+    })
+    monkeypatch.setattr(crawl_argiro, "AUDITED_NON_GREEK_STUBS", {})
+    monkeypatch.setattr(crawl_argiro, "AUDITED_CANONICAL_ALIASES", {})
+    monkeypatch.setattr(crawl_argiro, "AUDITED_INTERNAL_STALE_REDIRECTS", {})
     client = _DetailClient({
         recipe_url: recipe_url,
         redirect_url: "https://www.argiro.gr/recipe-category/glika/",
@@ -136,8 +195,21 @@ def test_non_recipe_redirect_is_an_explicit_exclusion_not_a_failure(monkeypatch,
     monkeypatch.setattr(
         crawl_argiro,
         "normalize_argiro_page",
-        lambda html, *, source_url, sitemap_last_modified: {"id": "argiro_1"},
+        lambda html, *, source_url, sitemap_last_modified: {
+            "id": "argiro_1",
+            "sourceUrl": source_url,
+            "canonicalUrl": source_url,
+            "providerRecipeId": "1",
+            "ingredientSections": [{"ingredients": [{}]}],
+            "methodSections": [{"steps": ["synthetic"]}],
+        },
     )
+    monkeypatch.setattr(
+        crawl_argiro,
+        "validate_checkpoint_record",
+        lambda record, sitemap_url, sitemap_last_modified: dict(record),
+    )
+    monkeypatch.setattr(import_catalog, "compute_catalog_hash", lambda records: "1" * 64)
 
     paths = _run_paths(tmp_path)
     manifest = run_argiro_crawl(client=client, robots=object(), **paths)
@@ -147,13 +219,65 @@ def test_non_recipe_redirect_is_an_explicit_exclusion_not_a_failure(monkeypatch,
     assert manifest["excludedRecipeUrlCount"] == 1
     assert manifest["failedRecipeCount"] == 0
     assert manifest["excludedRecipeUrls"] == [{
+        "kind": "externalRedirect",
         "sourceUrl": redirect_url,
         "finalUrl": "https://www.argiro.gr/recipe-category/glika/",
+        "finalStatus": 200,
         "reason": "redirected outside /recipe/{slug}/",
     }]
     report = json.loads(paths["failures_path"].read_text(encoding="utf-8"))
     assert report["complete"] is True
     assert report["failures"] == []
+
+
+def test_internal_stale_recipe_redirect_is_excluded_without_aliasing_content(
+    monkeypatch, tmp_path
+):
+    target_url = "https://www.argiro.gr/recipe/surviving-target/"
+    stale_url = "https://www.argiro.gr/recipe/distinct-stale-source/"
+    _configure_discovery(monkeypatch, [target_url, stale_url])
+    monkeypatch.setattr(crawl_argiro, "AUDITED_EXTERNAL_REDIRECTS", {})
+    monkeypatch.setattr(crawl_argiro, "AUDITED_NON_GREEK_STUBS", {})
+    monkeypatch.setattr(crawl_argiro, "AUDITED_CANONICAL_ALIASES", {})
+    monkeypatch.setattr(crawl_argiro, "AUDITED_INTERNAL_STALE_REDIRECTS", {
+        stale_url: {"finalUrl": target_url, "finalStatus": 200},
+    })
+    client = _DetailClient({target_url: target_url, stale_url: target_url})
+    monkeypatch.setattr(
+        crawl_argiro,
+        "normalize_argiro_page",
+        lambda html, *, source_url, sitemap_last_modified: {
+            "id": "argiro_1",
+            "sourceUrl": source_url,
+            "canonicalUrl": source_url,
+            "providerRecipeId": "1",
+            "ingredientSections": [{"ingredients": [{}]}],
+            "methodSections": [{"steps": ["synthetic"]}],
+        },
+    )
+    monkeypatch.setattr(
+        crawl_argiro,
+        "validate_checkpoint_record",
+        lambda record, sitemap_url, sitemap_last_modified: dict(record),
+    )
+    monkeypatch.setattr(import_catalog, "compute_catalog_hash", lambda records: "1" * 64)
+
+    paths = _run_paths(tmp_path)
+    manifest = run_argiro_crawl(client=client, robots=object(), **paths)
+
+    assert manifest["outputRecipeCount"] == 1
+    assert manifest["canonicalAliasCount"] == 0
+    assert manifest["internalStaleRedirectExclusionCount"] == 1
+    assert manifest["excludedRecipeUrls"] == [{
+        "kind": "internalStaleRedirect",
+        "sourceUrl": stale_url,
+        "finalUrl": target_url,
+        "finalStatus": 200,
+        "reason": (
+            "redirected to a distinct surviving recipe; "
+            "content substitution is forbidden"
+        ),
+    }]
 
 
 def test_schema_error_retries_three_fresh_fetches_then_reports_failure(monkeypatch, tmp_path):

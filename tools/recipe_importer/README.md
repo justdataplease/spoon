@@ -1,31 +1,32 @@
 # Permission-gated full Greek recipe catalog pipeline
 
-This directory contains the crawler, normalizer, validator, and Firestore importer
-used by Spoon. It is designed to capture every currently published canonical Greek
-recipe exposed by `akispetretzikis.com`, including the details and filter taxonomy
-needed by the app.
+This directory contains the crawlers, normalizers, validators, and Firestore
+importer used by Spoon. It is designed to capture every currently published
+canonical Greek recipe exposed by `akispetretzikis.com`, `argiro.gr`, and
+`gastronomos.gr`, including the details and filter taxonomy needed by the app.
 
 Run the full-content commands only when the publisher has authorized the intended
-collection, storage, media display, and refresh cadence. The required
-`--i-have-permission` option is an explicit operational guard; it does not create
-permission by itself. The generated catalog, checkpoints, reports, and credentials
-are ignored by Git.
+collection, storage, media display, and refresh cadence. The required permission
+switches—`--i-have-permission` for Akis, `--i-have-argiro-permission` for Argiro,
+and `--i-have-gastronomos-permission` for Gastronomos—are explicit operational
+guards; they do not create permission by themselves. The generated catalog,
+checkpoints, reports, and credentials are ignored by Git.
 
 ## Multiple recipe providers
 
-Records now include additive provenance fields: source (legacy publisher
-domain), sourceKey (akis or argiro), string providerRecipeId, legacy numeric
-sourceRecipeId, sourceUrl/canonicalUrl, and Greek sourceName. Existing Akis
-document IDs remain numeric so saved plans, favorites, history, and notes do not
-break. Other providers are namespaced: Argiro WordPress ID 17265 becomes
-argiro_17265, with a deterministic hash fallback only when a native ID is not
-document-safe.
+Records include additive provenance fields: source (legacy publisher domain),
+sourceKey (`akis`, `argiro`, or `gastronomos`), string providerRecipeId, legacy
+numeric sourceRecipeId, sourceUrl/canonicalUrl, and Greek sourceName. Existing
+Akis document IDs remain numeric so saved plans, favorites, history, and notes do
+not break. Other providers are namespaced (`argiro_...` and `gastronomos_...`),
+with a deterministic hash fallback only when a native ID is not document-safe.
 
 Full imports are deliberately single-provider. Retirement inventory is filtered
-by source (including legacy Akis inference), so an Argiro refresh cannot
-tombstone Akis recipes. spoon_catalog/status remains app-compatible and gains
-per-source metadata; spoon_catalog/status_{sourceKey} stores each provider's own
-counts and freshness.
+by source (including legacy Akis inference), so refreshing any one provider cannot
+tombstone another provider's recipes. `spoon_catalog/status` remains
+app-compatible and gains per-source metadata;
+`spoon_catalog/status_{sourceKey}` stores each provider's own counts and
+freshness.
 
 ### Argiro provider and permission requirement
 
@@ -51,15 +52,42 @@ Outputs are argiro-greek-full.jsonl, argiro-greek-full.manifest.json,
 argiro-greek-full.failures.json, and the private resumable
 .argiro-greek-full.checkpoint.sqlite3.
 
+### Gastronomos provider and permission requirement
+
+`crawl_gastronomos.py` discovers the strict recipe URLs declared by the official
+Gastronomos sitemap index, verifies the publisher's recipe identities and
+canonical redirects, and extracts Greek JSON-LD Recipe data plus scoped metadata.
+It uses bounded parallel requests while enforcing the shared per-host delay and
+the same fail-closed manifest/checkpoint rules.
+
+Run or schedule it only while the operator's Gastronomos permission covers the
+systematic recipe text, image/video metadata, Firestore storage, personal-app
+display, and requested refresh cadence. The exact crawler acknowledgement is
+`--i-have-gastronomos-permission`; a full-content import requires that flag plus
+the general `--i-have-permission` acknowledgement.
+
+Run these commands after confirming that authorization:
+
+    python tools/recipe_importer/crawl_gastronomos.py --i-have-gastronomos-permission
+    python tools/recipe_importer/import_catalog.py tools/recipe_importer/output/gastronomos-greek-full.jsonl --manifest tools/recipe_importer/output/gastronomos-greek-full.manifest.json --i-have-permission --i-have-gastronomos-permission
+    python tools/recipe_importer/import_catalog.py tools/recipe_importer/output/gastronomos-greek-full.jsonl --manifest tools/recipe_importer/output/gastronomos-greek-full.manifest.json --i-have-permission --i-have-gastronomos-permission --commit --project-id spoontheplanner
+
+Outputs are `gastronomos-greek-full.jsonl`,
+`gastronomos-greek-full.manifest.json`,
+`gastronomos-greek-full.failures.json`, and the private resumable
+`.gastronomos-greek-full.checkpoint.sqlite3`.
+
 ## What the pipeline captures
 
-`crawl_catalog.py` performs a complete, consistency-checked run:
+`crawl_catalog.py` performs the complete, consistency-checked Akis run:
 
 1. Reads `robots.txt` and follows only approved same-site HTTPS URLs.
 2. Walks the sitemap and keeps only canonical Greek
    `/recipe/{numeric-id}/{slug}` entries.
-3. Compares the unique sitemap ID count with the Greek recipe API total. A
-   mismatch fails the run.
+3. Enumerates the official Greek recipe API as well. Sitemap IDs missing from the
+   API fail the run; a newly published API recipe may be included while its
+   sitemap entry is still lagging, and that difference is recorded in the
+   manifest.
 4. Reads all six Greek filter groups: diet, meal type, occasion, method,
    cuisine/country, and main ingredient. Every returned recipe ID must also exist
    in the Greek sitemap.
@@ -79,11 +107,12 @@ Planner categories are derived only from exact publisher category ancestry and
 official facet IDs. Recipe-title and free-text substring guessing is deliberately
 excluded, so words such as `Τρουφάκια` cannot be misclassified as lentils.
 
-The HTTP client enforces a global delay of at least one second, honors
-`Retry-After`, retries only transient statuses, limits response size, rejects
-cross-site redirects, and can resume from a transactional SQLite checkpoint.
-Images and videos are referenced by their authorized HTTPS URLs; the crawler does
-not download or transform media files.
+Each HTTP client identifies itself exactly as
+`PeltesSpoonRecipeImporter/1.0 (+mailto:hey@spoon.gr)`, enforces a global delay of
+at least one second per provider host, honors `Retry-After`, retries only transient
+statuses, limits response size, rejects cross-site redirects, and can resume from
+a transactional SQLite checkpoint. Images and videos are referenced by their
+authorized HTTPS URLs; the crawlers do not download or transform media files.
 
 ## Install and test
 
@@ -106,6 +135,8 @@ manifest verification, replacement writes, retirement, and status publication.
 
 ```powershell
 python tools/recipe_importer/crawl_catalog.py --i-have-permission
+python tools/recipe_importer/crawl_argiro.py --i-have-argiro-permission
+python tools/recipe_importer/crawl_gastronomos.py --i-have-gastronomos-permission
 ```
 
 The default private output directory is `tools/recipe_importer/output/`:
@@ -115,6 +146,14 @@ akis-greek-full.jsonl                    complete normalized records
 akis-greek-full.manifest.json            counts, taxonomy, hashes, sizes, provenance
 akis-greek-full.failures.json            explicit success/failure report
 .akis-greek-full.checkpoint.sqlite3      resumable payload and facet checkpoint
+argiro-greek-full.jsonl                  complete normalized Argiro records
+argiro-greek-full.manifest.json          Argiro completeness/audit contract
+argiro-greek-full.failures.json          Argiro success/failure report
+.argiro-greek-full.checkpoint.sqlite3    resumable Argiro checkpoint
+gastronomos-greek-full.jsonl             complete normalized Gastronomos records
+gastronomos-greek-full.manifest.json     Gastronomos completeness/audit contract
+gastronomos-greek-full.failures.json     Gastronomos success/failure report
+.gastronomos-greek-full.checkpoint.sqlite3 resumable Gastronomos checkpoint
 ```
 
 The JSONL and manifest are written atomically only after a zero-failure run. The
@@ -141,6 +180,9 @@ Running the default command again resumes matching recipe and facet work from th
 checkpoint. If the sitemap discovery key or taxonomy changes, incompatible
 checkpoint portions are reset automatically. When the default output already
 exists it is also used as the previous catalog unless `--no-incremental` is set.
+Argiro and Gastronomos likewise resume only records whose sitemap identity,
+last-modified value, and parser contract still match; use their own `--no-resume`
+flag for a deliberately clean run.
 
 ## Validate before Firestore
 
@@ -152,6 +194,16 @@ python tools/recipe_importer/import_catalog.py `
   tools/recipe_importer/output/akis-greek-full.jsonl `
   --manifest tools/recipe_importer/output/akis-greek-full.manifest.json `
   --i-have-permission
+
+python tools/recipe_importer/import_catalog.py `
+  tools/recipe_importer/output/argiro-greek-full.jsonl `
+  --manifest tools/recipe_importer/output/argiro-greek-full.manifest.json `
+  --i-have-permission --i-have-argiro-permission
+
+python tools/recipe_importer/import_catalog.py `
+  tools/recipe_importer/output/gastronomos-greek-full.jsonl `
+  --manifest tools/recipe_importer/output/gastronomos-greek-full.manifest.json `
+  --i-have-permission --i-have-gastronomos-permission
 ```
 
 The importer recomputes the catalog, active-ID, summary, detail, and raw-payload
@@ -234,20 +286,27 @@ Firestore data access needed by this job.
 ## Quarterly GitHub Actions refresh
 
 `.github/workflows/quarterly-catalog-refresh.yml` runs at 03:00 UTC on January,
-April, July, and October 1 for Akis and on the following day for Argiro. Splitting
-the providers keeps each three-projection import below Firestore's free daily
-write allowance. Each scheduled run tests the tooling, performs one complete
-crawl, validates its manifest without cloud credentials, obtains a short-lived
-Google credential through GitHub OIDC, and imports that same file.
+April, July, and October 1 for Akis, day 2 for Argiro, and day 3 for Gastronomos.
+Splitting providers bounds each run's write burst and isolates failures; it does
+not make the imports cost-free. A full import with
+`N` catalog records and `R` newly retired IDs performs `3N + 3R` recipe-document
+writes plus two status-document writes. It also reads active summary documents to
+build the source-scoped retirement inventory. Review current Firestore pricing
+and quotas for the project, and configure a billing budget/alerts, before enabling
+the schedule. Each scheduled run tests the tooling, performs one complete crawl,
+validates its manifest without cloud credentials, obtains a short-lived Google
+credential through GitHub OIDC, and imports that same file.
 
-A manual `workflow_dispatch` is structurally crawl-and-validate only. It runs in
-a separate job with `contents: read` as its only permission and has no production
-environment, Firebase variables, `id-token: write`, authentication action, or
-import command. Only the `schedule` event can run the scheduled import job.
+A manual `workflow_dispatch` is structurally crawl-and-validate only. Its three
+provider matrix jobs run concurrently with `contents: read` as their only
+permission and have no production environment, Firebase variables,
+`id-token: write`, authentication action, or import command. Only the
+`schedule` event can run the scheduled import job.
 
-The job has read-only repository access and cannot push. Third-party actions are
-pinned to immutable commits. It uploads only the manifest and failure report for
-30 days—not the catalog, checkpoint, or generated Google credential.
+The jobs have read-only repository access and cannot push. Third-party actions
+are pinned to immutable commits. Each matrix job uploads only its provider's
+manifest and failure report for 30 days—not the catalog, checkpoint, or generated
+Google credential.
 
 Create a GitHub environment named `recipe-catalog-production` and restrict its
 deployment branch policy to `main`. Add these repository Actions variables
@@ -279,7 +338,7 @@ datastore.entities.update
 There is deliberately no `datastore.entities.delete` permission. Bind this custom
 role only to `spoon-catalog-importer@spoontheplanner.iam.gserviceaccount.com` with
 a recurring IAM condition that permits requests only on January/April/July/October
-1 and 2 from hour 03 through hour 07 UTC (03:00:00–07:59:59 UTC).
+1, 2, and 3 from hour 03 through hour 07 UTC (03:00:00–07:59:59 UTC).
 
 Important scope limitation: Firestore IAM cannot collection-scope this project
 binding. During those quarterly windows, the four permissions therefore apply to
@@ -298,7 +357,7 @@ PROJECT_ID="spoontheplanner"
 PROJECT_NUMBER="$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')"
 SERVICE_ACCOUNT="spoon-catalog-importer@spoontheplanner.iam.gserviceaccount.com"
 ROLE_NAME="projects/$PROJECT_ID/roles/spoonCatalogWriter"
-IAM_CONDITION="(request.time.getDate() == 1 || request.time.getDate() == 2) && (request.time.getMonth() == 0 || request.time.getMonth() == 3 || request.time.getMonth() == 6 || request.time.getMonth() == 9) && request.time.getHours() >= 3 && request.time.getHours() <= 7"
+IAM_CONDITION="(request.time.getDate() == 1 || request.time.getDate() == 2 || request.time.getDate() == 3) && (request.time.getMonth() == 0 || request.time.getMonth() == 3 || request.time.getMonth() == 6 || request.time.getMonth() == 9) && request.time.getHours() >= 3 && request.time.getHours() <= 7"
 
 gcloud services enable iamcredentials.googleapis.com sts.googleapis.com \
   firestore.googleapis.com --project="$PROJECT_ID"
@@ -322,7 +381,7 @@ gcloud iam service-accounts add-iam-policy-binding "$SERVICE_ACCOUNT" \
 gcloud projects add-iam-policy-binding "$PROJECT_ID" \
   --member="serviceAccount:$SERVICE_ACCOUNT" \
   --role="$ROLE_NAME" \
-  --condition="title=quarterly_catalog_window,description=UTC quarter-start hours 03 through 07,expression=$IAM_CONDITION"
+  --condition="title=quarterly_catalog_window,description=UTC quarter-start days 1 through 3 hours 03 through 07,expression=$IAM_CONDITION"
 gcloud iam workload-identity-pools providers describe spoon-repo \
   --project="$PROJECT_ID" --location=global --workload-identity-pool=github \
   --format='value(name)'

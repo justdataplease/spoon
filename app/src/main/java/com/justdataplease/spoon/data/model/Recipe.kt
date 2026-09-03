@@ -25,7 +25,7 @@ data class Recipe(
     val sourceName: String = "",
     /** Legacy publisher domain, retained for already-published Firestore documents. */
     val source: String = "",
-    /** Stable machine key such as akis or argiro. */
+    /** Stable machine key such as akis, argiro, or gastronomos. */
     val sourceKey: String = "",
     /** Provider-native identity as text; unlike sourceRecipeId it may be non-numeric. */
     val providerRecipeId: String = "",
@@ -88,6 +88,7 @@ data class Recipe(
             return when {
                 legacy == "akispetretzikis.com" -> "akis"
                 legacy == "argiro.gr" -> "argiro"
+                legacy == "gastronomos.gr" -> "gastronomos"
                 legacy == "personal" || id.startsWith("custom_") -> "personal"
                 sourceName == "Προσωπική συνταγή" -> "personal"
                 sourceName == "Δείγμα εφαρμογής" -> "demo"

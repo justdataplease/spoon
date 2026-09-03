@@ -6,6 +6,8 @@ from tools.recipe_importer.argiro_schema import (
     _RecipeDomParser,
     _align_method_groups,
     _extract_method_details,
+    _filter_method_groups,
+    _instructions,
     _leaf_texts,
     normalize_argiro_page,
     parse_iso8601_minutes,
@@ -61,6 +63,92 @@ SYNTHETIC_PAGE = """
 """
 
 
+AUDITED_INSTRUCTION_ARTIFACTS = [
+    ("16147", "RELATED ARTICLE"),
+    ("16274", "https://www.argiro.gr/recipe/kineziko-tiganito-ruzi-sto-gouok/"),
+    ("16315", "https://www.argiro.gr/recipe/fakes-pikantikes-me-xoriatiko-loukaniko/"),
+    ("16315", "Θέλετε περισσότερες νόστιμες συνταγές με φακές; Βρείτε τες όλες εδώ!"),
+    ("16586", "[adrotate banner=\u201d29\u2033]"),
+    ("16601", "[adrotate banner=\u201d29\u2033]"),
+    ("16601", "Δείτε εδώ και φτιάξτε τα ωραιότερα παγωτά για τους αγαπημένους σας."),
+    ("16620", "[adrotate banner=\u201d32\u2033]"),
+    (
+        "16620",
+        "Αγαπάτε τις φράουλες; Δείτε περισσότερες εύκολες και φαντασικές "
+        "φραουλένιες συνταγές εδώ!",
+    ),
+    ("16642", "[adrotate banner=\u201d32\u2033]"),
+    ("16726", "[adrotate banner=\u201d72\u2033]"),
+    ("16759", "[adrotate banner=\u201d29\u2033]"),
+    (
+        "16759",
+        "Θέλετε περισσότερες συνταγές για μοναδικά νηστίσιμα γλυκά; "
+        "Βρείτε τες όλες εδώ!",
+    ),
+    ("17014", "https://www.argiro.gr/recipe/banoffee-me-mpiskoto/"),
+    ("17030", "[adrotate banner=\u201d72\u2033]"),
+    ("17032", "[adrotate banner=\u201d72\u2033]"),
+    ("17308", "[adrotate banner=\u201d71\u2033]"),
+    ("17314", "https://www.argiro.gr/recipe/keik-mpananas-me-mpiskoto/"),
+    ("17522", "[adrotate banner=\u201d33\u2033]"),
+    ("17717", "https://www.argiro.gr/recipe/galatopita-me-krema-sokolata-vanilia-diorofi/"),
+    ("20163", "[adrotate banner=\u201d29\u2033]"),
+    ("20193", "[adrotate banner=\u201d27]"),
+    ("20193", "[adrotate banner=\u201d72\u2033]"),
+    ("20222", "https://www.argiro.gr/recipe/kolluba/"),
+    ("20264", "https://www.argiro.gr/recipe/cupcakes-sokolata/"),
+    ("20311", "ΜΑΓΕΙΡΕΨΕ ΚΑΙ\nΜανιτάρια στο φούρνο"),
+    ("20591", "ΜΑΓΕΙΡΕΨΕ ΚΑΙ\nΣεβίτσε (Ceviche)"),
+    ("20597", "ΜΑΓΕΙΡΕΨΕ ΚΑΙ\nZombie Cocktail"),
+    ("20690", "[adrotate banner=\u201d33\u2033]"),
+    (
+        "20708",
+        "Τα Νούντλς (Noodles) της Kόμπρας του Άνταμ Κοντοβά, "
+        "εύκολα & πεντανόστιμα!",
+    ),
+    ("20708", "http://www.argiro.gr/recipe/noodles-kotopoulo-kai-glykoksini-saltsa/"),
+]
+
+
+AUDITED_INSTRUCTION_ARTIFACTS.extend([
+    (
+        '15401',
+        'Σπιτικό fast food που θα σας συναρπάσει και θα σας γλιτώσει από περιττά έξοδα!',
+    ),
+    (
+        '20035',
+        'Διαβάστε και όλα τα μυστικά μου, για να λιώσετε σωστά τη σοκολάτα.',
+    ),
+    ('17166', '[recipe_grid recipe_ids=”14154″]'),
+    ('17673', '[recipe_grid recipe_ids=”3863,4598,2569″]'),
+    ('20854', '[recipe_grid recipe_ids=”4264,1479,11893″]'),
+    ('20946', '[recipe_grid recipe_ids=”3743,3789,3763,14154″]'),
+])
+
+
+def test_audited_mixed_instruction_keeps_only_the_legitimate_step():
+    legitimate = 'Μπορείτε να φτιάξετε τη συνταγή με μαρόν γλασέ.'
+    cta = 'Διαβάστε και όλα τα μυστικά μου, για να λιώσετε σωστά τη σοκολάτα.'
+    combined = f'{legitimate}\n{cta}'
+    _jsonld_sections, jsonld_steps = _instructions(
+        [{'@type': 'HowToStep', 'text': combined}],
+        provider_recipe_id='20035',
+    )
+    groups = _filter_method_groups(
+        [{
+            'title': '',
+            'steps': [legitimate, cta],
+            'sourceSteps': [legitimate, cta],
+            'isTip': False,
+        }],
+        provider_recipe_id='20035',
+    )
+    sections, tips = _align_method_groups(groups, jsonld_steps)
+    assert jsonld_steps == [legitimate]
+    assert sections == [{'title': '', 'steps': [legitimate]}]
+    assert tips == []
+
+
 def test_method_alignment_accepts_only_exact_concatenated_adjacent_html_steps():
     sections, tips = _align_method_groups(
         [{
@@ -87,6 +175,62 @@ def test_method_alignment_accepts_only_exact_concatenated_adjacent_html_steps():
         )
 
 
+def test_method_alignment_removes_only_explicit_inline_related_recipe_card():
+    source_step = (
+        "Ετοιμάζουμε το μείγμα για κρέπες. "
+        "ΜΑΓΕΙΡΕΨΕ ΚΑΙ Κρέπες (βασική συνταγή)"
+    )
+    sections, tips = _align_method_groups(
+        [{
+            "title": "",
+            "steps": ["Ετοιμάζουμε το μείγμα για κρέπες."],
+            "sourceSteps": [source_step],
+            "isTip": False,
+        }],
+        [source_step],
+    )
+    assert sections == [{
+        "title": "",
+        "steps": ["Ετοιμάζουμε το μείγμα για κρέπες."],
+    }]
+    assert tips == []
+
+    with pytest.raises(FullSchemaError, match="anchor not found"):
+        _align_method_groups(
+            [{
+                "title": "",
+                "steps": ["Ετοιμάζουμε το μείγμα για κρέπες."],
+                "isTip": False,
+            }],
+            ["Ετοιμάζουμε το μείγμα για κρέπες. Διαφορετική οδηγία."],
+        )
+
+
+def test_method_dom_records_full_anchor_only_for_exact_read_also_container():
+    parser = _RecipeDomParser()
+    parser.feed(
+        '<section class="single_recipe__method_steps"><ol>'
+        '<li>Πρώτο βήμα.'
+        '<div class="read_also__container media_content">'
+        '<span class="read_also_item__caption">ΜΑΓΕΙΡΕΨΕ ΚΑΙ</span>'
+        '<h2 class="read_also_item__title"><a>Σχετική συνταγή</a></h2>'
+        '</div></li>'
+        '<li>Δεύτερο βήμα.<span> Κανονικό inline κείμενο.</span></li>'
+        '</ol></section>'
+    )
+    parser.close()
+    details = _extract_method_details(parser.root)
+    assert details["methodGroups"] == [{
+        "title": "",
+        "steps": ["Πρώτο βήμα.", "Δεύτερο βήμα. Κανονικό inline κείμενο."],
+        "sourceSteps": [
+            "Πρώτο βήμα.\nΜΑΓΕΙΡΕΨΕ ΚΑΙ\nΣχετική συνταγή",
+            "Δεύτερο βήμα. Κανονικό inline κείμενο.",
+        ],
+        "isTip": False,
+    }]
+
+
 def test_method_alignment_ignores_only_terminal_escaped_span_artifact():
     sections, tips = _align_method_groups(
         [{
@@ -111,6 +255,22 @@ def test_method_alignment_ignores_only_terminal_escaped_span_artifact():
             }],
             ["Arrange the fruit closely."],
         )
+
+
+def test_samali_style_tip_only_dom_recovers_the_unanchored_method_prefix():
+    sections, tips = _align_method_groups(
+        [{
+            "title": "ΜΥΣΤΙΚΑ ΓΙΑ ΤΕΛΕΙΟ ΣΑΜΑΛΙ",
+            "steps": ["Τελικό μυστικό."],
+            "isTip": True,
+        }],
+        ["Πρώτο βήμα.", "Δεύτερο βήμα.", "Τελικό μυστικό."],
+    )
+    assert sections == [{
+        "title": "",
+        "steps": ["Πρώτο βήμα.", "Δεύτερο βήμα."],
+    }]
+    assert tips == ["Τελικό μυστικό."]
 
 
 def test_leaf_text_excludes_nested_recommendations_but_keeps_inline_content():
@@ -401,6 +561,42 @@ def test_quoted_am_rating_and_semantic_youtube_duplicates():
     assert record["videoUrls"] == ["https://www.youtube.com/embed/synthetic"]
 
 
+def test_schema_org_nutrition_maps_exact_portion_strings_and_serving_size():
+    page = SYNTHETIC_PAGE.replace(
+        '"video":{"@type":"VideoObject"',
+        '''"nutrition":{"@type":"NutritionInformation","servingSize":"1 μερίδα","calories":"245 kcal","fatContent":"8 g","saturatedFatContent":"2 g","carbohydrateContent":"35 g","sugarContent":"4 g","proteinContent":"11 g","fiberContent":"6 g","sodiumContent":"320 mg"},"video":{"@type":"VideoObject"''',
+    )
+    record = normalize_argiro_page(
+        page,
+        source_url="https://www.argiro.gr/recipe/synthetiki-fasolada/",
+    )
+    assert record["nutritionPer"] == "1 μερίδα"
+    section = record["nutritionSections"][0]
+    assert section["kcalPortion"] == "245 kcal"
+    assert section["fatPortion"] == "8 g"
+    assert section["saturatedFatPortion"] == "2 g"
+    assert section["carbsPortion"] == "35 g"
+    assert section["sugarsPortion"] == "4 g"
+    assert section["proteinPortion"] == "11 g"
+    assert section["fiberPortion"] == "6 g"
+    assert section["sodiumPortion"] == "320 mg"
+    assert section["kcal100g"] == ""
+    assert record["sourcePayload"]["jsonLd"]["nutrition"]["calories"] == "245 kcal"
+
+
+def test_schema_org_nutrition_uses_neutral_portion_label_when_unspecified():
+    page = SYNTHETIC_PAGE.replace(
+        '"video":{"@type":"VideoObject"',
+        '''"nutrition":{"@type":"NutritionInformation","calories":"100 kcal"},"video":{"@type":"VideoObject"''',
+    )
+    record = normalize_argiro_page(
+        page,
+        source_url="https://www.argiro.gr/recipe/synthetiki-fasolada/",
+    )
+    assert record["nutritionPer"] == "τη δηλωμένη μερίδα"
+    assert record["nutritionSections"][0]["kcalPortion"] == "100 kcal"
+
+
 def test_basic_ingredient_category_cuisine_diet_and_split_keywords_fallbacks():
     page = (
         SYNTHETIC_PAGE
@@ -423,18 +619,43 @@ def test_basic_ingredient_category_cuisine_diet_and_split_keywords_fallbacks():
 
 
 @pytest.mark.parametrize(
-    ("recipe_category", "recipe_slug", "ingredient_slug", "expected"),
+    (
+        "recipe_category", "recipe_slug", "ingredient_slug", "expected",
+        "expected_keys",
+    ),
     [
-        ("Κοτόπουλο", "kotopoulo", "kreas/moschari", "poultry"),
-        ("Ζυμαρικά", "zymarika", "laxanika/brokolo", "pasta_rice"),
-        ("Γλυκά", "glika", "laxanika/karoto", "dessert"),
+        (
+            "Κοτόπουλο", "kotopoulo", "kreas/moschari", "poultry",
+            ["poultry", "meat"],
+        ),
+        (
+            "Ζυμαρικά", "zymarika", "laxanika/brokolo", "pasta_rice",
+            ["pasta_rice", "vegetables"],
+        ),
+        (
+            "Πίτες", "pites", "kreas/kotopoulo", "poultry",
+            ["poultry", "meat"],
+        ),
+        (
+            "Κρέας", "kreas", "kreas/galopoula", "poultry",
+            ["poultry", "meat"],
+        ),
+        (
+            "Κρέας", "kreas", "kreas/kokoras", "poultry",
+            ["poultry", "meat"],
+        ),
+        (
+            "Γλυκά", "glika", "laxanika/karoto", "dessert",
+            ["dessert", "vegetables"],
+        ),
     ],
 )
-def test_recipe_category_strictly_precedes_basic_ingredient_fallback(
+def test_explicit_family_wins_and_nested_poultry_refines_broad_meat(
     recipe_category,
     recipe_slug,
     ingredient_slug,
     expected,
+    expected_keys,
 ):
     page = (
         SYNTHETIC_PAGE
@@ -450,6 +671,75 @@ def test_recipe_category_strictly_precedes_basic_ingredient_fallback(
         source_url="https://www.argiro.gr/recipe/synthetiki-fasolada/",
     )
     assert record["category"] == expected
+    assert record["categoryKeys"] == expected_keys
+
+
+@pytest.mark.parametrize(
+    "recipe_slug",
+    ["rofimata-pota", "ntip-saltses", "sinodeutika", "psomi-zymes"],
+)
+def test_explicit_nonmeal_families_are_terminal_over_ingredients(recipe_slug):
+    page = (
+        SYNTHETIC_PAGE
+        .replace('"recipeCategory":["Όσπρια"]', '"recipeCategory":["Άλλο"]')
+        .replace(
+            'href="https://www.argiro.gr/recipe-category/ospria/">Όσπρια',
+            f'href="https://www.argiro.gr/recipe-category/almira/{recipe_slug}/">Άλλο',
+        )
+        .replace(
+            '</div>\n<aside class="single_recipe__left_column">',
+            '''<a class="tag_item" href="https://www.argiro.gr/basic-ingredient/kreas/kotopoulo/">Κοτόπουλο</a></div>
+<aside class="single_recipe__left_column">''',
+        )
+    )
+    record = normalize_argiro_page(
+        page,
+        source_url="https://www.argiro.gr/recipe/synthetiki-fasolada/",
+    )
+    assert record["category"] == "other"
+    assert record["categoryKeys"][:3] == ["other", "poultry", "meat"]
+
+
+@pytest.mark.parametrize("recipe_slug", ["santouits", "fingerfood", "finger-food"])
+def test_only_exact_sandwich_or_finger_format_is_street_food(recipe_slug):
+    page = (
+        SYNTHETIC_PAGE
+        .replace('"recipeCategory":["Όσπρια"]', '"recipeCategory":["Σνακ"]')
+        .replace(
+            'href="https://www.argiro.gr/recipe-category/ospria/">Όσπρια',
+            f'href="https://www.argiro.gr/recipe-category/almira/{recipe_slug}/">Σνακ',
+        )
+        .replace(
+            '</div>\n<aside class="single_recipe__left_column">',
+            '''<a class="tag_item" href="https://www.argiro.gr/basic-ingredient/kreas/moschari/">Μοσχάρι</a></div>
+<aside class="single_recipe__left_column">''',
+        )
+    )
+    record = normalize_argiro_page(
+        page,
+        source_url="https://www.argiro.gr/recipe/synthetiki-fasolada/",
+    )
+    assert record["category"] == "street_food"
+    assert record["categoryKeys"][:2] == ["street_food", "meat"]
+
+
+@pytest.mark.parametrize("recipe_slug", ["snak", "proino", "brunch", "pitsa"])
+def test_broad_snack_breakfast_and_pizza_families_do_not_imply_street_food(
+    recipe_slug,
+):
+    page = (
+        SYNTHETIC_PAGE
+        .replace('"recipeCategory":["Όσπρια"]', '"recipeCategory":["Σνακ"]')
+        .replace(
+            'href="https://www.argiro.gr/recipe-category/ospria/">Όσπρια',
+            f'href="https://www.argiro.gr/recipe-category/almira/{recipe_slug}/">Σνακ',
+        )
+    )
+    record = normalize_argiro_page(
+        page,
+        source_url="https://www.argiro.gr/recipe/synthetiki-fasolada/",
+    )
+    assert record["category"] == "other"
 
 
 def test_all_facet_and_tag_labels_dedupe_case_and_diacritics():
@@ -565,6 +855,72 @@ def test_promotional_shortcode_and_signoff_are_not_recipe_method_steps():
         "Ανακατεύουμε τα υλικά.", "Μαγειρεύουμε.",
     ]
     assert record["stepCount"] == 2
+
+
+@pytest.mark.parametrize(
+    ("provider_recipe_id", "artifact"),
+    AUDITED_INSTRUCTION_ARTIFACTS,
+    ids=[
+        f"argiro-{provider_recipe_id}-{index}"
+        for index, (provider_recipe_id, _artifact) in enumerate(
+            AUDITED_INSTRUCTION_ARTIFACTS,
+            start=1,
+        )
+    ],
+)
+def test_every_audited_instruction_artifact_is_excluded_exactly(
+    provider_recipe_id,
+    artifact,
+):
+    sections, steps = _instructions(
+        [
+            {"@type": "HowToStep", "text": "Ανακατεύουμε τα υλικά."},
+            {"@type": "HowToStep", "text": artifact},
+        ],
+        provider_recipe_id=provider_recipe_id,
+    )
+    assert steps == ["Ανακατεύουμε τα υλικά."]
+    assert sections == [{"title": "", "steps": steps}]
+
+
+def test_instruction_artifact_filters_do_not_drop_similar_recipe_prose():
+    legitimate = [
+        "Μαγείρεψε και ανακάτεψε προσεκτικά.",
+        "Δείτε εδώ και φτιάξτε διαφορετική δοκιμαστική οδηγία.",
+        "Συμβουλευτείτε https://www.argiro.gr/recipe/example/ αν το χρειάζεστε.",
+        "[adrotate banner=not-a-number]",
+        "RELATED ARTICLE sauce is mixed into the filling.",
+    ]
+    _sections, steps = _instructions(
+        legitimate,
+        provider_recipe_id="unrelated",
+    )
+    assert steps == legitimate
+
+
+def test_filtered_instruction_artifact_remains_in_raw_source_payload():
+    artifact = "[adrotate banner=\u201d29\u2033]"
+    page = SYNTHETIC_PAGE.replace(
+        '{"@type":"HowToStep","text":"Μαγειρεύουμε."}]}],',
+        '{"@type":"HowToStep","text":"Μαγειρεύουμε."},'
+        '{"@type":"HowToStep","text":"[adrotate banner=\\u201d29\\u2033]"}]}],',
+    ).replace(
+        '<li>Μαγειρεύουμε.</li></ol>',
+        '<li>Μαγειρεύουμε.</li><li>[adrotate banner=\u201d29\u2033]</li></ol>',
+    )
+    record = normalize_argiro_page(
+        page,
+        source_url="https://www.argiro.gr/recipe/synthetiki-fasolada/",
+    )
+    assert artifact not in [
+        step
+        for section in record["methodSections"]
+        for step in section["steps"]
+    ]
+    raw_steps = record["sourcePayload"]["jsonLd"]["recipeInstructions"][0][
+        "itemListElement"
+    ]
+    assert raw_steps[-1]["text"] == artifact
 
 
 def test_missing_normal_dom_leaf_is_recovered_from_ordered_jsonld_anchors():

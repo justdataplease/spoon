@@ -74,15 +74,28 @@ _TAXONOMY_FACETS = {
     "basic-ingredient": "ingredient",
 }
 _CATEGORY_SLUGS = {
-    "dessert": {"glyka", "glika", "gliko", "epidorpia", "keik", "tourtes"},
     "legumes": {"ospria"},
     "fish": {"psaria", "psari", "thalassina"},
-    "meat": {"kreas", "moschari", "choirino", "arni", "katsiki"},
-    "poultry": {"kotopoulo", "galopoula", "poulika"},
-    "vegetables": {"lachanika", "laxanika", "ladera"},
-    "street_food": {"street-food", "vromiko", "pizza", "pitsa"},
-    "pasta_rice": {"zymarika", "makaronia", "ryzi", "rizi", "risotto"},
+    "meat": {
+        "kreas", "moschari", "choirino", "xoirino", "arni", "katsiki",
+        "kouneli",
+    },
+    "poultry": {"kotopoulo", "galopoula", "kokoras", "poulika"},
+    "vegetables": {"lachanika", "laxanika", "ladera", "patata"},
+    "pasta_rice": {
+        "zymarika", "makaronia", "ryzi", "rizi", "risotto", "kritharaki",
+    },
 }
+_CATEGORY_KEY_PRECEDENCE = (
+    "fish", "legumes", "poultry", "meat", "pasta_rice", "vegetables",
+)
+_TERMINAL_DESSERT_CATEGORY_SLUGS = {
+    "glyka", "glika", "gliko", "epidorpia", "keik", "tourtes",
+}
+_TERMINAL_OTHER_CATEGORY_SLUGS = {
+    "rofimata-pota", "ntip-saltses", "sinodeutika", "psomi-zymes",
+}
+_STREET_FORMAT_CATEGORY_SLUGS = {"santouits", "fingerfood", "finger-food"}
 _CATEGORY_LABELS_EXACT = {
     "dessert": {"γλυκα", "γλυκο", "επιδορπια", "dessert"},
     "legumes": {"οσπρια", "legumes"},
@@ -90,7 +103,6 @@ _CATEGORY_LABELS_EXACT = {
     "meat": {"κρεας", "μοσχαρι", "χοιρινο", "αρνι", "κατσικι", "meat"},
     "poultry": {"κοτοπουλο", "γαλοπουλα", "πουλερικα", "poultry"},
     "vegetables": {"λαχανικα", "λαδερα", "vegetables"},
-    "street_food": {"street food", "βρωμικο", "πιτσα", "pizza"},
     "pasta_rice": {"ζυμαρικα", "μακαρονια", "ρυζι", "risotto"},
 }
 _VOID_ELEMENTS = {
@@ -107,6 +119,71 @@ _DIET_SCHEMA_LABELS = {
     "lowlactosediet": "Χωρίς λακτόζη",
     "lowsaltdiet": "Χαμηλή σε αλάτι",
     "diabeticdiet": "Κατάλληλη για διαβητικούς",
+}
+_NUTRITION_PORTION_FIELDS = {
+    "calories": "kcal",
+    "fatContent": "fat",
+    "saturatedFatContent": "saturatedFat",
+    "carbohydrateContent": "carbs",
+    "sugarContent": "sugars",
+    "proteinContent": "protein",
+    "fiberContent": "fiber",
+    "sodiumContent": "sodium",
+}
+_ADROTATE_METHOD_NODE_RE = re.compile(
+    r"^\[adrotate\s+banner\s*=\s*[\'\u201c\u201d]?\d+[\'\u201c\u201d\u2032\u2033]?\]$",
+    re.I,
+)
+_RECIPE_GRID_METHOD_NODE_RE = re.compile(
+    r'^\[recipe_grid\s+recipe_ids\s*=\s*[\x22\x27\u201c\u201d]?'
+    r'\d+(?:\s*,\s*\d+)*[\x22\x27\u201c\u201d\u2032\u2033]?\]$',
+    re.I,
+)
+_INTERNAL_RECIPE_METHOD_URL_RE = re.compile(
+    r"^https?://(?:www\.)?argiro\.gr/recipe/[^/?#\s]+/?$",
+    re.I,
+)
+# Exact JSON-LD-only editorial copy, independently audited against the live
+# DOM. Binding every string to its provider ID prevents broad prose filtering.
+# The original values remain unchanged in ``sourcePayload.jsonLd``.
+_AUDITED_JSONLD_EDITORIAL_INSTRUCTION_ARTIFACTS = {
+    "16315": {
+        "Θέλετε περισσότερες νόστιμες συνταγές με φακές; Βρείτε τες όλες εδώ!",
+    },
+    "16601": {
+        "Δείτε εδώ και φτιάξτε τα ωραιότερα παγωτά για τους αγαπημένους σας.",
+    },
+    "16620": {
+        "Αγαπάτε τις φράουλες; Δείτε περισσότερες εύκολες και φαντασικές "
+        "φραουλένιες συνταγές εδώ!",
+    },
+    "16759": {
+        "Θέλετε περισσότερες συνταγές για μοναδικά νηστίσιμα γλυκά; "
+        "Βρείτε τες όλες εδώ!",
+    },
+    "20708": {
+        "Τα Νούντλς (Noodles) της Kόμπρας του Άνταμ Κοντοβά, "
+        "εύκολα & πεντανόστιμα!",
+    },
+}
+
+
+_AUDITED_JSONLD_EDITORIAL_INSTRUCTION_ARTIFACTS.update({
+    '15401': {
+        'Σπιτικό fast food που θα σας συναρπάσει και θα σας γλιτώσει από περιττά έξοδα!',
+    },
+    '20035': {
+        'Διαβάστε και όλα τα μυστικά μου, για να λιώσετε σωστά τη σοκολάτα.',
+    },
+})
+
+_AUDITED_JSONLD_INSTRUCTION_REWRITES = {
+    '20035': {
+        (
+            'Μπορείτε να φτιάξετε τη συνταγή με μαρόν γλασέ.\n'
+            'Διαβάστε και όλα τα μυστικά μου, για να λιώσετε σωστά τη σοκολάτα.'
+        ): 'Μπορείτε να φτιάξετε τη συνταγή με μαρόν γλασέ.',
+    },
 }
 
 
@@ -439,13 +516,13 @@ def _including_self_with_class(node: _HtmlNode, class_name: str) -> list[_HtmlNo
     return ([node] if class_name in node.classes else []) + _with_class(node, class_name)
 
 
-def _leaf_texts(
+def _leaf_nodes(
     node: _HtmlNode,
     tags: frozenset[str],
     *,
     blocked: bool = False,
-) -> list[str]:
-    """Collect leaf semantic text nodes, ignoring unrelated embedded modules."""
+) -> list[_HtmlNode]:
+    """Collect leaf semantic nodes while ignoring embedded non-recipe modules."""
     blocked_here = blocked or any(
         marker in class_name.casefold()
         for class_name in node.classes
@@ -460,15 +537,51 @@ def _leaf_texts(
         for descendant in ([child] + list(_descendants(child)))
     )
     if node.tag in tags and not nested_targets:
+        return [node]
+    result: list[_HtmlNode] = []
+    for child in children:
+        result.extend(_leaf_nodes(child, tags))
+    return result
+
+
+def _leaf_texts(
+    node: _HtmlNode,
+    tags: frozenset[str],
+    *,
+    blocked: bool = False,
+) -> list[str]:
+    """Collect leaf semantic text, ignoring unrelated embedded modules."""
+    result: list[str] = []
+    for leaf in _leaf_nodes(node, tags, blocked=blocked):
         # Malformed legacy paragraphs can contain recommendation headings and
         # read-also cards. Keep legitimate inline spans/links, but exclude those
         # nested modules before exact JSON-LD alignment.
-        text = _node_text(node, leaf_scope=True)
-        return [text] if text else []
-    result: list[str] = []
-    for child in children:
-        result.extend(_leaf_texts(child, tags))
+        text = _node_text(leaf, leaf_scope=True)
+        if text:
+            result.append(text)
     return result
+
+
+def _method_step_entries(
+    node: _HtmlNode,
+    tags: frozenset[str],
+) -> list[tuple[str, str]]:
+    """Return clean steps and exact structured-data anchors from scoped DOM."""
+    entries: list[tuple[str, str]] = []
+    for leaf in _leaf_nodes(node, tags):
+        clean = _node_text(leaf, leaf_scope=True)
+        if not clean or _is_non_recipe_instruction(clean):
+            continue
+        # JSON-LD on a legacy page serializes the whole ``li``, including a
+        # nested related-recipe card. Preserve that full text only when the DOM
+        # proves the exact publisher-owned read-also structure is present.
+        has_read_also = any(
+            "read_also__container" in descendant.classes
+            for descendant in _descendants(leaf)
+        )
+        source = _node_text(leaf) if has_read_also else clean
+        entries.append((clean, source))
+    return entries
 
 
 def _comparison_text(value: str) -> str:
@@ -493,15 +606,49 @@ def _is_tip_title(value: str) -> bool:
     return any(token in normalized for token in _TIP_TITLES)
 
 
-def _is_non_recipe_instruction(value: str) -> bool:
+def _is_non_recipe_instruction(
+    value: str,
+    *,
+    provider_recipe_id: str = "",
+) -> bool:
     text = plain_text(value)
     normalized = _comparison_text(text)
     return (
         not normalized
         or normalized.startswith("[visual-link-preview ")
+        or bool(_ADROTATE_METHOD_NODE_RE.fullmatch(text))
+        or bool(_RECIPE_GRID_METHOD_NODE_RE.fullmatch(text))
+        or bool(_INTERNAL_RECIPE_METHOD_URL_RE.fullmatch(text))
+        or text == "RELATED ARTICLE"
+        or (
+            text.startswith("ΜΑΓΕΙΡΕΨΕ ΚΑΙ\n")
+            and text.count("\n") == 1
+            and bool(text.partition("\n")[2].strip())
+        )
+        or text in _AUDITED_JSONLD_EDITORIAL_INSTRUCTION_ARTIFACTS.get(
+            provider_recipe_id,
+            set(),
+        )
         or normalized in {"καλη επιτυχια!", "καλη επιτυχια"}
         or "social media" in normalized
     )
+
+
+def _recipe_instruction_text(
+    value: object,
+    *,
+    provider_recipe_id: str = '',
+) -> str:
+    text = plain_text(value)
+    if _is_non_recipe_instruction(
+        text,
+        provider_recipe_id=provider_recipe_id,
+    ):
+        return ''
+    return _AUDITED_JSONLD_INSTRUCTION_REWRITES.get(
+        provider_recipe_id,
+        {},
+    ).get(text, text)
 
 
 def _ingredient_link(item: _HtmlNode, *, internal: bool) -> str:
@@ -633,17 +780,23 @@ def _extract_method_details(root: _HtmlNode) -> dict[str, Any]:
             step_roots = _with_class(container, "single_recipe__method_steps")
             step_root = step_roots[0] if step_roots else container
             is_tip = _is_tip_title(title)
-            steps = _leaf_texts(step_root, frozenset({"li"}))
+            step_entries = _method_step_entries(step_root, frozenset({"li"}))
             # Some legacy recipes render every method step as a paragraph.
             # Use paragraphs only when the container has no list steps, which
             # avoids treating explanatory paragraphs as extra steps on modern
             # list-based pages while preserving the legacy section boundaries.
-            if not steps:
-                steps = _leaf_texts(step_root, frozenset({"p"}))
-            steps = [step for step in steps if not _is_non_recipe_instruction(step)]
+            if not step_entries:
+                step_entries = _method_step_entries(step_root, frozenset({"p"}))
+            steps = [clean for clean, _source in step_entries]
+            source_steps = [source for _clean, source in step_entries]
             sequence.extend(steps)
             if steps:
-                groups.append({"title": title, "steps": steps, "isTip": is_tip})
+                groups.append({
+                    "title": title,
+                    "steps": steps,
+                    "sourceSteps": source_steps,
+                    "isTip": is_tip,
+                })
             if is_tip:
                 tips.extend(steps)
             elif steps:
@@ -657,18 +810,27 @@ def _extract_method_details(root: _HtmlNode) -> dict[str, Any]:
             )
             title_node = next(
                 (
-                    node for node in _descendants(method_root)
+                    node for node in _leaf_nodes(
+                        method_root,
+                        frozenset({"h2", "h3", "h4", "h5"}),
+                    )
                     if node.tag in {"h2", "h3", "h4", "h5"}
                     or "single_recipe__method_steps__title" in node.classes
                 ),
                 None,
             )
             title = _node_text(title_node) if title_node else ""
-            steps = _leaf_texts(method_root, frozenset({"li"}))
-            steps = [step for step in steps if not _is_non_recipe_instruction(step)]
+            step_entries = _method_step_entries(method_root, frozenset({"li"}))
+            steps = [clean for clean, _source in step_entries]
+            source_steps = [source for _clean, source in step_entries]
             sequence.extend(steps)
             if steps:
-                groups.append({"title": title, "steps": steps, "isTip": _is_tip_title(title)})
+                groups.append({
+                    "title": title,
+                    "steps": steps,
+                    "sourceSteps": source_steps,
+                    "isTip": _is_tip_title(title),
+                })
             if _is_tip_title(title):
                 tips.extend(steps)
             elif steps:
@@ -871,7 +1033,11 @@ def _fallback_id(canonical_url: str) -> str:
     return f"slug_{digest}"
 
 
-def _instructions(value: object) -> tuple[list[dict[str, Any]], list[str]]:
+def _instructions(
+    value: object,
+    *,
+    provider_recipe_id: str = "",
+) -> tuple[list[dict[str, Any]], list[str]]:
     sections: list[dict[str, Any]] = []
 
     def walk(items: object, heading: str = "") -> None:
@@ -880,7 +1046,10 @@ def _instructions(value: object) -> tuple[list[dict[str, Any]], list[str]]:
         for item in values:
             if isinstance(item, str):
                 text = plain_text(item)
-                if text and not _is_non_recipe_instruction(text):
+                if text and not _is_non_recipe_instruction(
+                    text,
+                    provider_recipe_id=provider_recipe_id,
+                ):
                     direct.append(text)
             elif isinstance(item, Mapping):
                 kind = str(item.get("@type") or "").casefold()
@@ -888,12 +1057,26 @@ def _instructions(value: object) -> tuple[list[dict[str, Any]], list[str]]:
                     walk(item.get("itemListElement") or item.get("steps"), plain_text(item.get("name")))
                 else:
                     text = plain_text(item.get("text") or item.get("name"))
-                    if text and not _is_non_recipe_instruction(text):
+                    if text and not _is_non_recipe_instruction(
+                        text,
+                        provider_recipe_id=provider_recipe_id,
+                    ):
                         direct.append(text)
         if direct:
             sections.append({"title": heading, "steps": direct})
 
     walk(value)
+    for section in sections:
+        section['steps'] = [
+            cleaned
+            for step in section['steps']
+            if (
+                cleaned := _recipe_instruction_text(
+                    step,
+                    provider_recipe_id=provider_recipe_id,
+                )
+            )
+        ]
     return sections, [step for section in sections for step in section["steps"]]
 
 
@@ -915,12 +1098,25 @@ def _is_greek_language(value: str) -> bool:
     )
 
 
-def _has_greek_letters(values: Sequence[str]) -> bool:
-    return any(
-        character.isalpha() and "GREEK" in unicodedata.name(character, "")
-        for value in values
-        for character in value
-    )
+def _has_substantive_greek(values: Sequence[str]) -> bool:
+    """Require Greek to dominate the recipe's core editorial content.
+
+    A live English stub contains the typo ``Μake`` (Greek capital mu followed
+    by Latin letters), so checking for one Greek code point is not sufficient.
+    Legitimate catalog pages are overwhelmingly Greek; a 50% threshold is a
+    deliberately conservative fail-closed boundary for title, description,
+    ingredients, and method text only.
+    """
+    greek_letters = 0
+    latin_letters = 0
+    for value in values:
+        for character in value:
+            if not character.isalpha():
+                continue
+            script_name = unicodedata.name(character, "")
+            greek_letters += "GREEK" in script_name
+            latin_letters += "LATIN" in script_name
+    return greek_letters > 0 and greek_letters >= latin_letters
 
 
 def _display_label_key(value: str) -> str:
@@ -939,7 +1135,7 @@ def _taxonomy(metadata: Mapping[str, Any], recipe: Mapping[str, Any]):
     labels: dict[str, list[str]] = {facet: [] for facet in FACET_KEYS}
     tags: list[str] = []
     category_slugs: set[str] = set()
-    ingredient_category_slugs: set[str] = set()
+    ingredient_paths: list[tuple[str, ...]] = []
     for href, label in metadata.get("tagLinks", []):
         parsed = urlsplit(href)
         if (parsed.hostname or "").casefold().removeprefix("www.") != "argiro.gr":
@@ -954,9 +1150,10 @@ def _taxonomy(metadata: Mapping[str, Any], recipe: Mapping[str, Any]):
         if family == "recipe-category":
             category_slugs.update(part.casefold() for part in parts[1:])
         elif family == "basic-ingredient":
-            # Only the provider's top-level ingredient family is a category
-            # signal; a nested leaf can otherwise misclassify a recipe.
-            ingredient_category_slugs.add(parts[1].casefold())
+            # Preserve the complete official hierarchy.  The deepest mapped
+            # node is the most specific signal: ``kreas/kotopoulo`` must be
+            # poultry, not generic meat.
+            ingredient_paths.append(tuple(part.casefold() for part in parts[1:]))
         _append_display_label(tags, label)
     schema_categories = _strings(recipe.get("recipeCategory"))
     keywords = _split_keywords(recipe.get("keywords"))
@@ -969,22 +1166,79 @@ def _taxonomy(metadata: Mapping[str, Any], recipe: Mapping[str, Any]):
         label = _DIET_SCHEMA_LABELS.get(key, plain_text(raw_diet))
         _append_display_label(labels["diet"], label)
     exact_categories = {_normalized_label(value) for value in schema_categories}
+
     recipe_keys = [
-        key for key, slugs in _CATEGORY_SLUGS.items()
-        if category_slugs & slugs or exact_categories & _CATEGORY_LABELS_EXACT[key]
+        key for key in _CATEGORY_KEY_PRECEDENCE
+        if category_slugs & _CATEGORY_SLUGS[key]
+        or exact_categories & _CATEGORY_LABELS_EXACT[key]
     ]
-    ingredient_fallback_keys = [
-        key for key, slugs in _CATEGORY_SLUGS.items()
-        if ingredient_category_slugs & slugs
-    ]
-    # The explicit recipe taxonomy is authoritative.  Ingredient families are
-    # useful only for broad source categories such as pies that do not map to a
-    # planner category; pooling them would turn chicken into generic meat.
-    candidates = recipe_keys or ingredient_fallback_keys or ["other"]
-    # The planner contract has one primary category per recipe. Preserve all
-    # raw taxonomy labels separately, but collapse mapped evidence through the
-    # stable canonical precedence so filters cannot disagree with the summary.
-    keys = [canonical_category(candidates)]
+
+    # Rank official ingredient evidence by hierarchy depth, then by a stable
+    # category order.  Keep secondary evidence for Explore filters while the
+    # first key remains the single planner category.
+    ingredient_specificity: dict[str, int] = {}
+    for path in ingredient_paths:
+        for depth, slug in enumerate(path, start=1):
+            for key in _CATEGORY_KEY_PRECEDENCE:
+                if slug in _CATEGORY_SLUGS[key]:
+                    ingredient_specificity[key] = max(
+                        depth, ingredient_specificity.get(key, 0)
+                    )
+    ingredient_keys = sorted(
+        ingredient_specificity,
+        key=lambda key: (
+            -ingredient_specificity[key],
+            _CATEGORY_KEY_PRECEDENCE.index(key),
+        ),
+    )
+
+    def ordered_unique(primary: str, *groups: Sequence[str]) -> list[str]:
+        result = [primary]
+        for group in groups:
+            for key in group:
+                if key != primary and key not in result:
+                    result.append(key)
+        return result
+
+    # Fail-closed precedence mirrors the Akis taxonomy contract: sweets and
+    # explicit non-meal families are terminal; only the publisher's exact
+    # sandwich/finger-food paths become Βρώμικο; then the most-specific
+    # ingredient hierarchy wins over a generic recipe family.  Generic Snack,
+    # pizza, titles, and free-form keywords never imply street food.
+    dessert = (
+        bool(category_slugs & _TERMINAL_DESSERT_CATEGORY_SLUGS)
+        or bool(exact_categories & _CATEGORY_LABELS_EXACT["dessert"])
+    )
+    non_meal = bool(category_slugs & _TERMINAL_OTHER_CATEGORY_SLUGS)
+    street_format = bool(category_slugs & _STREET_FORMAT_CATEGORY_SLUGS)
+    nested_poultry = any(
+        len(path) >= 2
+        and path[0] == "kreas"
+        and path[-1] in {"kotopoulo", "galopoula", "kokoras"}
+        for path in ingredient_paths
+    )
+    if dessert:
+        keys = ordered_unique("dessert", recipe_keys, ingredient_keys)
+    elif non_meal:
+        keys = ordered_unique("other", recipe_keys, ingredient_keys)
+    elif street_format:
+        keys = ordered_unique("street_food", recipe_keys, ingredient_keys)
+    elif recipe_keys:
+        # Explicit mapped recipe families outrank cross-family side
+        # ingredients (chicken with broccoli stays poultry; pasta with tomato
+        # stays pasta).  The one strict refinement is the publisher's nested
+        # kreas/kotopoulo|galopoula hierarchy, which is more specific than its
+        # broad Kreas recipe family.
+        primary = (
+            "poultry"
+            if recipe_keys[0] == "meat" and nested_poultry
+            else recipe_keys[0]
+        )
+        keys = ordered_unique(primary, recipe_keys, ingredient_keys)
+    elif ingredient_keys:
+        keys = ordered_unique(ingredient_keys[0], ingredient_keys[1:])
+    else:
+        keys = ["other"]
     return keys, labels, tags
 
 
@@ -1016,6 +1270,39 @@ def _validated_rating(metadata: Mapping[str, Any]) -> tuple[float, int]:
     ):
         return 0.0, 0
     return round(float(value) * 2, 2), max(0, int(votes))
+
+
+def _nutrition_information(value: object) -> tuple[str, list[dict[str, str]]]:
+    """Map schema.org NutritionInformation without changing values or units."""
+    nutrition = value if isinstance(value, Mapping) else {}
+    section: dict[str, str] = {"title": ""}
+    for prefix in _NUTRITION_PORTION_FIELDS.values():
+        section.update({
+            f"{prefix}Portion": "",
+            f"{prefix}PortionPercent": "",
+            f"{prefix}100g": "",
+            f"{prefix}100gPercent": "",
+        })
+    has_value = False
+    for source, prefix in _NUTRITION_PORTION_FIELDS.items():
+        raw = nutrition.get(source)
+        normalized = (
+            plain_text(raw)
+            if isinstance(raw, (str, int, float)) and not isinstance(raw, bool)
+            else ""
+        )
+        section[f"{prefix}Portion"] = normalized
+        has_value = has_value or bool(normalized)
+    if not has_value:
+        return "", []
+    serving_size = nutrition.get("servingSize")
+    nutrition_per = (
+        plain_text(serving_size)
+        if isinstance(serving_size, (str, int, float))
+        and not isinstance(serving_size, bool)
+        else ""
+    )
+    return nutrition_per or "τη δηλωμένη μερίδα", [section]
 
 
 def _ingredient_texts(sections: Sequence[Mapping[str, Any]]) -> list[str]:
@@ -1097,6 +1384,34 @@ def _require_matching_sequence(
         )
 
 
+def _filter_method_groups(
+    groups: Sequence[Mapping[str, Any]],
+    *,
+    provider_recipe_id: str,
+) -> list[dict[str, Any]]:
+    filtered: list[dict[str, Any]] = []
+    for group in groups:
+        steps = list(group.get('steps', []))
+        sources = list(group.get('sourceSteps', []))
+        if len(steps) != len(sources):
+            raise FullSchemaError('Argiro method source-step cardinality mismatch')
+        keep = [
+            index
+            for index, step in enumerate(steps)
+            if not _is_non_recipe_instruction(
+                plain_text(step),
+                provider_recipe_id=provider_recipe_id,
+            )
+        ]
+        if not keep:
+            continue
+        item = dict(group)
+        item['steps'] = [steps[index] for index in keep]
+        item['sourceSteps'] = [sources[index] for index in keep]
+        filtered.append(item)
+    return filtered
+
+
 def _align_method_groups(
     groups: Sequence[Mapping[str, Any]],
     jsonld_steps: Sequence[str],
@@ -1129,25 +1444,44 @@ def _align_method_groups(
                 position = normalized.index(target, search_from)
                 consumed = 1
             except ValueError:
+                position = -1
+                consumed = 0
+                source_steps = group.get("sourceSteps")
+                if (
+                    isinstance(source_steps, list)
+                    and len(source_steps) == len(anchors)
+                ):
+                    source_target = _comparison_text(source_steps[anchor_index])
+                    if source_target != target:
+                        try:
+                            position = normalized.index(source_target, search_from)
+                        except ValueError:
+                            pass
+                        else:
+                            # Exact full-DOM/JSON-LD conservation proves that
+                            # only the structurally scoped read-also subtree was
+                            # removed. Emit the clean visible method sentence.
+                            canonical[position] = anchors[anchor_index]
+                            normalized[position] = target
+                            consumed = 1
                 # Some Argiro JSON-LD nodes concatenate adjacent rendered
                 # ``li`` steps. Accept that structural difference only when
                 # the complete normalized text is an exact match; no fuzzy or
                 # partial content mismatch crosses this fail-closed boundary.
-                position = -1
-                consumed = 0
-                for end in range(
-                    anchor_index + 2,
-                    min(len(anchors), anchor_index + 4) + 1,
-                ):
-                    combined = _comparison_text(
-                        " ".join(anchors[anchor_index:end])
-                    )
-                    try:
-                        position = normalized.index(combined, search_from)
-                    except ValueError:
-                        continue
-                    consumed = end - anchor_index
-                    break
+                if position < 0:
+                    for end in range(
+                        anchor_index + 2,
+                        min(len(anchors), anchor_index + 4) + 1,
+                    ):
+                        combined = _comparison_text(
+                            " ".join(anchors[anchor_index:end])
+                        )
+                        try:
+                            position = normalized.index(combined, search_from)
+                        except ValueError:
+                            continue
+                        consumed = end - anchor_index
+                        break
                 if position < 0:
                     raise FullSchemaError(
                         "Argiro method steps HTML/JSON-LD mismatch: "
@@ -1157,6 +1491,18 @@ def _align_method_groups(
             search_from = position + 1
             anchor_index += consumed
         is_tip = bool(group.get("isTip"))
+        # A few legacy pages have a malformed/missing normal-method container
+        # and expose only the final Tips group in the DOM.  JSON-LD still has
+        # the complete ordered method.  Everything before the first exact tip
+        # anchor is therefore a recovered method section; the anchored suffix
+        # remains tips.  If the tip anchor starts at zero (the audited 20573
+        # video/tips-only recipe), no synthetic method section is created.
+        if group_index == 0 and is_tip and cursor == 0 and positions[0] > 0:
+            sections.append({
+                "title": "",
+                "steps": canonical[:positions[0]],
+            })
+            cursor = positions[0]
         end = (
             len(canonical)
             if group_index + 1 == len(groups)
@@ -1218,7 +1564,10 @@ def normalize_argiro_page(
     prep = parse_iso8601_minutes(recipe.get("prepTime"))
     cook = parse_iso8601_minutes(recipe.get("cookTime"))
     total = parse_iso8601_minutes(recipe.get("totalTime")) or prep + cook
-    jsonld_method_sections, jsonld_steps = _instructions(recipe.get("recipeInstructions"))
+    jsonld_method_sections, jsonld_steps = _instructions(
+        recipe.get("recipeInstructions"),
+        provider_recipe_id=provider_recipe_id,
+    )
     # A small number of provider pages expose orphan numeric list nodes (for
     # example a bare "1") in JSON-LD between otherwise matching ingredients.
     # They have no ingredient name and are not rendered in the recipe HTML.
@@ -1240,7 +1589,7 @@ def normalize_argiro_page(
             provider_recipe_id,
             "JSON-LD inLanguage is not Greek",
         )
-    if not _has_greek_letters([
+    if not _has_substantive_greek([
         title,
         plain_text(recipe.get("description")),
         *ingredients,
@@ -1248,7 +1597,7 @@ def normalize_argiro_page(
     ]):
         raise ArgiroLanguageError(
             provider_recipe_id,
-            "recipe content contains no Greek letters",
+            "recipe content is not substantively Greek",
         )
     jsonld_ingredient_sections = [{
         "title": "",
@@ -1279,6 +1628,11 @@ def normalize_argiro_page(
     if not isinstance(html_method_sequence, list):
         html_method_sequence = []
     html_method_groups = metadata.get("methodGroups")
+    if isinstance(html_method_groups, list):
+        html_method_groups = _filter_method_groups(
+            html_method_groups,
+            provider_recipe_id=provider_recipe_id,
+        )
     method_tips: list[str] = []
     if (
         jsonld_steps
@@ -1300,6 +1654,9 @@ def normalize_argiro_page(
     category_keys, facet_labels, tags = _taxonomy(metadata, recipe)
     category = canonical_category(category_keys)
     rating, rating_count = _validated_rating(metadata)
+    nutrition_per, nutrition_sections = _nutrition_information(
+        recipe.get("nutrition")
+    )
     images = _dedupe_images([
         safe
         for raw in _https_urls(recipe.get("image"))
@@ -1392,8 +1749,8 @@ def normalize_argiro_page(
             *method_tips,
         ]),
         "nutritionTips": nutrition_tips,
-        "nutritionPer": "",
-        "nutritionSections": [],
+        "nutritionPer": nutrition_per,
+        "nutritionSections": nutrition_sections,
         "equipment": list(metadata.get("equipment", [])),
         "authorName": author,
         "published": True,

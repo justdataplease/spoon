@@ -14,6 +14,7 @@ from tools.recipe_importer.crawl_catalog import (
     IncompleteCrawlError,
     RateLimiter,
     canonical_recipe_location,
+    discover_api_recipes,
     fetch_facet_ids,
     parse_sitemap,
     run_catalog_crawl,
@@ -85,7 +86,45 @@ def test_facet_pagination_requires_exact_unique_reported_total():
         fetch_facet_ids(FacetClient(duplicate), object(), "cuisine", "117")
 
 
-def test_sqlite_checkpoint_resumes_only_matching_run_and_lastmod(tmp_path):
+def test_api_inventory_keeps_a_published_recipe_while_the_sitemap_lags():
+    pages = [{
+        "data": [
+            {
+                "id": 9968,
+                "slug": "keik-me-karamelomena-syka",
+                "published": 1,
+                "updated_at": "2026-09-03T16:10:40.000000Z",
+            },
+        ],
+        "meta": {"current_page": 1, "last_page": 1, "total": 1},
+    }]
+    inventory = discover_api_recipes(FacetClient(pages), object())
+    assert inventory == {
+        "9968": DiscoveredRecipe(
+            "9968",
+            "https://akispetretzikis.com/recipe/9968/keik-me-karamelomena-syka",
+            "2026-09-03T16:10:40.000000Z",
+        ),
+    }
+
+
+def test_api_inventory_percent_encodes_an_official_slug_space():
+    pages = [{
+        "data": [{
+            "id": 5483,
+            "slug": "kotosoupa-me-kotopoulo- leftover",
+            "published": 1,
+            "updated_at": "2024-08-07T17:18:05.000000Z",
+        }],
+        "meta": {"current_page": 1, "last_page": 1, "total": 1},
+    }]
+    assert discover_api_recipes(FacetClient(pages), object())["5483"].source_url == (
+        "https://akispetretzikis.com/recipe/5483/"
+        "kotosoupa-me-kotopoulo-%20leftover"
+    )
+
+
+def test_sqlite_checkpoint_reuses_matching_payloads_across_inventory_drift(tmp_path):
     store = CheckpointStore(tmp_path / "checkpoint.sqlite3")
     store.prepare("run-a", "taxonomy-a", resume=True)
     store.put_payload("1", "2026-01-01", {"id": 1})
@@ -94,8 +133,10 @@ def test_sqlite_checkpoint_resumes_only_matching_run_and_lastmod(tmp_path):
     assert store.get_payload("1", "changed") is None
     assert store.get_facet_ids("cuisine", "117", "Ελλάδα") == ["1"]
     store.prepare("run-b", "taxonomy-a", resume=True)
-    assert store.get_payload("1", "2026-01-01") is None
+    assert store.get_payload("1", "2026-01-01") == {"id": 1}
     assert store.get_facet_ids("cuisine", "117", "Ελλάδα") is None
+    store.prepare("run-b", "taxonomy-a", resume=False)
+    assert store.get_payload("1", "2026-01-01") is None
     store.close()
 
 
@@ -118,7 +159,11 @@ def configure_run(monkeypatch, recipe_ids):
         for recipe_id in recipe_ids
     }
     monkeypatch.setattr(crawler, "discover_recipes", lambda client, robots: discovery)
-    monkeypatch.setattr(crawler, "api_reported_recipe_count", lambda client, robots: len(recipe_ids))
+    monkeypatch.setattr(
+        crawler,
+        "discover_api_recipes",
+        lambda client, robots: dict(discovery.recipes),
+    )
     monkeypatch.setattr(crawler, "fetch_taxonomy", lambda client, robots: taxonomy)
     monkeypatch.setattr(
         crawler,

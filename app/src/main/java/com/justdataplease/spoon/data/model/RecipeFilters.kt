@@ -16,6 +16,6 @@ data class RecipeFilters(
     fun isValid(): Boolean =
         MealCategory.fromKey(category) != null &&
             (easeLevel.isEmpty() || EaseLevel.fromKey(easeLevel) != null) &&
-            minRating.isFinite() && minRating in 0.0..10.0 &&
+            minRating.isFinite() && minRating >= 0.0 && minRating < 10.0 &&
             maxPrepMinutes in 0..10_080
 }

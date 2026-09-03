@@ -31,7 +31,7 @@ class RecipeSelector @Inject constructor() {
             .filter { category == MealCategory.ANY || it.category == category.key }
             .filter { ease == null || it.easeLevel == ease }
             .filter { it.rating.isFinite() && it.rating in 0.0..10.0 }
-            .filter { it.rating >= filters.minRating }
+            .filter { filters.minRating == 0.0 || it.rating > filters.minRating }
             // An unknown time must not pass a time cap: that would silently weaken it.
             .filter {
                 filters.maxPrepMinutes == 0 ||

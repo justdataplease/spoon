@@ -101,6 +101,23 @@ def test_projects_lean_list_complete_detail_and_complete_raw_source_docs():
     assert all(size < MAX_FIRESTORE_DOCUMENT_BYTES for size in document_sizes(record))
 
 
+def test_summary_projection_has_an_exact_mobile_allowlist():
+    summary = firestore_recipe_payload(full_record())
+    assert set(summary) == {
+        "active", "canonicalUrl", "category", "categoryLabel", "cookMinutes",
+        "cuisineLabels", "description", "dietLabels", "imageUrl",
+        "ingredientLabels", "language", "mealTypeLabels", "methodLabels",
+        "occasionLabels", "prepMinutes", "preparationCount", "providerRecipeId",
+        "quickRecipe", "rating", "ratingCount", "source", "sourceKey",
+        "sourceName", "sourceUrl", "stepCount", "tags", "title", "totalMinutes",
+    }
+    assert not ({
+        "ingredientSections", "methodSections", "videoUrls", "imageUrls",
+        "nutritionSections", "sourcePayload", "filterAssociations", "seoTitle",
+        "rating1", "sourceDifficulty", "servings", "randomKey",
+    } & set(summary))
+
+
 @pytest.mark.parametrize(
     ("value", "minutes"),
     [("2 ώρες και 5 λεπτά", 125), ("45 λεπτά", 45), ("-", 0), (30, 30)],

@@ -100,6 +100,20 @@ class ExploreRecipeFilterTest {
     }
 
     @Test
+    fun `rating threshold excludes seven and includes seven point one`() {
+        val equal = recipe(id = "equal", rating = 7.0)
+        val above = recipe(id = "above", rating = 7.1)
+
+        assertEquals(
+            listOf(above),
+            ExploreRecipeFilter.filter(
+                listOf(equal, above),
+                ExploreCriteria(minRating = 7.0),
+            ),
+        )
+    }
+
+    @Test
     fun `diet meal type and occasion facets filter independently`() {
         val match = recipe(
             id = "match",
@@ -213,6 +227,9 @@ class ExploreRecipeFilterTest {
         )
         assertTrue(
             ExploreRecipeFilter.filter(recipes, ExploreCriteria(easeLevel = "invalid")).isEmpty(),
+        )
+        assertTrue(
+            ExploreRecipeFilter.filter(recipes, ExploreCriteria(minRating = 10.0)).isEmpty(),
         )
     }
 

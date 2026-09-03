@@ -34,7 +34,8 @@ import androidx.compose.material.icons.outlined.PhotoLibrary
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.Star
 import androidx.compose.material.icons.outlined.Timer
-import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.ElevatedButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -59,7 +60,7 @@ import com.justdataplease.spoon.ui.model.RecipeDetailUi
 import com.justdataplease.spoon.ui.shopping.ShoppingIngredientDraftUi
 import java.util.Locale
 
-internal const val RecipeDetailsBackLabel = "Πίσω στις συνταγές"
+internal const val RecipeDetailsBackLabel = "Επιστροφή στις συνταγές"
 
 @Composable
 internal fun RichRecipeDetailsContent(
@@ -87,7 +88,8 @@ internal fun RichRecipeDetailsContent(
     Box(modifier = modifier.fillMaxSize()) {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(bottom = 112.dp),
+            // Room for the floating back pill plus navigation-bar inset on compact phones.
+            contentPadding = PaddingValues(bottom = 160.dp),
         ) {
             item {
                 RichRecipeHero(recipe, onBack, onToggleFavorite, onEdit)
@@ -145,24 +147,23 @@ internal fun RichRecipeDetailsContent(
                 }
             }
         }
-        Surface(
-            modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().navigationBarsPadding(),
-            color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 2.dp,
-            shadowElevation = 10.dp,
+        ElevatedButton(
+            onClick = onBack,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(horizontal = 24.dp, vertical = 12.dp)
+                .height(56.dp),
+            shape = CircleShape,
+            elevation = ButtonDefaults.elevatedButtonElevation(defaultElevation = 8.dp),
         ) {
-            Button(
-                onClick = onBack,
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 10.dp).height(54.dp),
-                shape = RoundedCornerShape(18.dp),
-            ) {
-                Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = null)
-                Text(
-                    RecipeDetailsBackLabel,
-                    modifier = Modifier.padding(start = 8.dp),
-                    fontWeight = FontWeight.Bold,
-                )
-            }
+            Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = null)
+            Text(
+                RecipeDetailsBackLabel,
+                modifier = Modifier.padding(start = 8.dp),
+                fontWeight = FontWeight.Bold,
+            )
         }
     }
 }

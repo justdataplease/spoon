@@ -34,6 +34,8 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import com.justdataplease.spoon.ui.components.ProviderLabelKind
+import com.justdataplease.spoon.ui.components.greekProviderLabel
 import com.justdataplease.spoon.ui.model.RecipeDetailUi
 
 @Composable
@@ -41,20 +43,34 @@ internal fun EquipmentSection(recipe: RecipeDetailUi) {
     BulletSection("Εξοπλισμός", Icons.Outlined.Kitchen, recipe.equipment)
 }
 
-private data class TaxonomyGroup(val label: String, val values: List<String>)
+private data class TaxonomyGroup(
+    val label: String,
+    val values: List<String>,
+    val kind: ProviderLabelKind,
+)
 
 @Composable
 internal fun TaxonomySection(recipe: RecipeDetailUi) {
     val groups = buildList {
-        add(TaxonomyGroup("Ειδική διατροφή", recipe.dietLabels))
-        add(TaxonomyGroup("Είδος γεύματος", recipe.mealTypeLabels))
-        add(TaxonomyGroup("Περίσταση", recipe.occasionLabels))
-        add(TaxonomyGroup("Τρόπος μαγειρέματος", recipe.methodLabels))
-        add(TaxonomyGroup("Κουζίνα / χώρα", recipe.cuisineLabels))
-        add(TaxonomyGroup("Κύριο υλικό", recipe.ingredientLabels))
-        add(TaxonomyGroup("Ετικέτες", recipe.tags.filterNot { it == "demo" }))
-        if (recipe.quickRecipe) add(TaxonomyGroup("Χρόνος", listOf("Γρήγορη συνταγή")))
-    }.map { it.copy(values = it.values.filter(String::isNotBlank).distinct()) }
+        add(TaxonomyGroup("Ειδική διατροφή", recipe.dietLabels, ProviderLabelKind.DIET))
+        add(TaxonomyGroup("Είδος γεύματος", recipe.mealTypeLabels, ProviderLabelKind.MEAL_TYPE))
+        add(TaxonomyGroup("Περίσταση", recipe.occasionLabels, ProviderLabelKind.OCCASION))
+        add(TaxonomyGroup("Τρόπος μαγειρέματος", recipe.methodLabels, ProviderLabelKind.METHOD))
+        add(TaxonomyGroup("Κουζίνα / χώρα", recipe.cuisineLabels, ProviderLabelKind.CUISINE))
+        add(TaxonomyGroup("Κύριο υλικό", recipe.ingredientLabels, ProviderLabelKind.INGREDIENT))
+        add(TaxonomyGroup("Ετικέτες", recipe.tags.filterNot { it == "demo" }, ProviderLabelKind.TAG))
+        if (recipe.quickRecipe) {
+            add(TaxonomyGroup("Χρόνος", listOf("Γρήγορη συνταγή"), ProviderLabelKind.TAG))
+        }
+    }.map { group ->
+        group.copy(
+            values = group.values
+                .filter(String::isNotBlank)
+                .map { greekProviderLabel(it, group.kind) }
+                .filter(String::isNotBlank)
+                .distinct(),
+        )
+    }
         .filter { it.values.isNotEmpty() }
     if (groups.isEmpty()) return
 

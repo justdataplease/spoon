@@ -60,7 +60,7 @@ else:
 SITE_ORIGIN = "https://www.argiro.gr"
 ROBOTS_URL = f"{SITE_ORIGIN}/robots.txt"
 SITEMAP_URL = f"{SITE_ORIGIN}/sitemap_index.xml"
-USER_AGENT = "SpoonCatalogTool/1.0 (+authorized personal catalog; respectful crawler)"
+USER_AGENT = "PeltesSpoonRecipeImporter/1.0 (+mailto:hey@spoon.gr)"
 ALLOWED_HOSTS = {"argiro.gr", "www.argiro.gr"}
 RECIPE_PATH_RE = re.compile(r"^/recipe/(?P<slug>[^/?#]+)/?$")
 RECIPE_SITEMAP_RE = re.compile(r"^recipe-sitemap(?:\d+)?\.xml$", re.I)
@@ -75,6 +75,18 @@ AUDITED_EXTERNAL_REDIRECTS = {
     },
     "https://www.argiro.gr/recipe/brioche-gemista-me-sokolata/": {
         "finalUrl": "https://www.argiro.gr/basic-ingredients/",
+        "finalStatus": 200,
+    },
+    "https://www.argiro.gr/recipe/galopoula-rolo/": {
+        "finalUrl": "https://www.argiro.gr/basic-ingredients/",
+        "finalStatus": 200,
+    },
+    "https://www.argiro.gr/recipe/koulouria-rodou/": {
+        "finalUrl": "https://www.argiro.gr/basic-ingredients/",
+        "finalStatus": 200,
+    },
+    "https://www.argiro.gr/recipe/mydia-sto-fourno-tragani-krousta/": {
+        "finalUrl": "https://www.argiro.gr/",
         "finalStatus": 200,
     },
 }
@@ -98,7 +110,7 @@ AUDITED_CANONICAL_ALIASES = {
         "canonicalUrl": "https://www.argiro.gr/recipe/efkoli-tyropita-xoris-fyllo/",
         "providerRecipeId": "17572",
     },
-    "https://www.argiro.gr/recipe/kidonia-psita-me-kanelogarifala/": {
+    "https://www.argiro.gr/recipe/kidonia-psita-me-kanelogarifala-kai-koniak/": {
         "canonicalUrl": "https://www.argiro.gr/recipe/kudonia-psita/",
         "providerRecipeId": "17679",
     },
@@ -119,8 +131,19 @@ AUDITED_CANONICAL_ALIASES = {
         "providerRecipeId": "21124",
     },
     "https://www.argiro.gr/recipe/keik-tiramisou/": {
-        "canonicalUrl": "https://www.argiro.gr/recipe/tiramisu-me-pantespani/",
+        "canonicalUrl": "https://www.argiro.gr/recipe/tiramisou-me-pantespani/",
         "providerRecipeId": "17801",
+    },
+}
+
+# This stale sitemap URL redirects to a different surviving recipe.  The live
+# provider category cards prove that the source and target have different
+# titles, images, facets, and video state, so coalescing it as an alias would
+# silently substitute unrelated content.  Keep it as its own exact exclusion.
+AUDITED_INTERNAL_STALE_REDIRECTS = {
+    "https://www.argiro.gr/recipe/pitsa-special-ton-paidion/": {
+        "finalUrl": "https://www.argiro.gr/recipe/zimi-gia-pitsa-eukoli/",
+        "finalStatus": 200,
     },
 }
 
@@ -170,7 +193,16 @@ def canonical_site_url(value: str, *, upgrade_http: bool = False) -> str:
         or parts.port not in (None, 80, 443)
     ):
         raise ArgiroCrawlError(f"refusing non-approved URL: {value}")
-    return urlunsplit(("https", "www.argiro.gr", parts.path, parts.query, ""))
+    # RFC 3986 percent escapes are case-insensitive.  ``requests`` normalizes
+    # them to uppercase in ``response.url`` while the Argiro sitemap currently
+    # contains at least one lowercase escape.  Normalize only the escape hex
+    # digits so a byte-identical recipe path cannot be mistaken for an alias.
+    path = re.sub(
+        r"%[0-9a-fA-F]{2}",
+        lambda match: match.group(0).upper(),
+        parts.path,
+    )
+    return urlunsplit(("https", "www.argiro.gr", path, parts.query, ""))
 
 
 def canonical_recipe_location(value: str) -> str | None:
@@ -415,6 +447,7 @@ def checkpoint_run_key() -> str:
         "externalRedirectAllowlist": AUDITED_EXTERNAL_REDIRECTS,
         "nonGreekStubAllowlist": AUDITED_NON_GREEK_STUBS,
         "canonicalAliasAllowlist": AUDITED_CANONICAL_ALIASES,
+        "internalStaleRedirectAllowlist": AUDITED_INTERNAL_STALE_REDIRECTS,
         "videoTipsOnlyAllowlist": AUDITED_VIDEO_TIPS_ONLY,
     })
 
@@ -438,6 +471,7 @@ def validate_checkpoint_record(
         or value.get("sourceUrl") != expected_url
         or value.get("canonicalUrl") != expected_url
         or value.get("sitemapLastModified") != sitemap_last_modified
+        or value.get("language") != "el"
         or not provider_recipe_id.isdigit()
         or value.get("id") != recipe_document_id(ARGIRO, provider_recipe_id)
         or canonical_recipe_url(ARGIRO, expected_url, provider_recipe_id) != expected_url
@@ -498,6 +532,7 @@ def run_argiro_crawl(
     external_redirects: list[dict[str, object]] = []
     non_greek_stubs: list[dict[str, object]] = []
     canonical_aliases: list[dict[str, str]] = []
+    internal_stale_redirects: list[dict[str, object]] = []
     resumed = 0
     invalidated_checkpoint_records = 0
     try:
@@ -509,6 +544,7 @@ def run_argiro_crawl(
                 item.source_url not in AUDITED_EXTERNAL_REDIRECTS
                 and item.source_url not in AUDITED_NON_GREEK_STUBS
                 and item.source_url not in AUDITED_CANONICAL_ALIASES
+                and item.source_url not in AUDITED_INTERNAL_STALE_REDIRECTS
             ):
                 cached = store.get(item.source_url, item.last_modified)
                 if cached is not None:
@@ -546,6 +582,25 @@ def run_argiro_crawl(
                             progress(index, total, item.source_url)
                         continue
                     if final_recipe_url != item.source_url:
+                        observed_internal_stale = {
+                            "finalUrl": final_recipe_url,
+                            "finalStatus": response.status_code,
+                        }
+                        expected_internal_stale = (
+                            AUDITED_INTERNAL_STALE_REDIRECTS.get(item.source_url)
+                        )
+                        if expected_internal_stale == observed_internal_stale:
+                            internal_stale_redirects.append({
+                                "sourceUrl": item.source_url,
+                                **observed_internal_stale,
+                                "reason": (
+                                    "redirected to a distinct surviving recipe; "
+                                    "content substitution is forbidden"
+                                ),
+                            })
+                            if progress:
+                                progress(index, total, item.source_url)
+                            continue
                         expected_alias = AUDITED_CANONICAL_ALIASES.get(
                             item.source_url
                         )
@@ -573,6 +628,10 @@ def run_argiro_crawl(
                     if item.source_url in AUDITED_CANONICAL_ALIASES:
                         raise ArgiroCrawlError(
                             "audited canonical alias unexpectedly stopped redirecting"
+                        )
+                    if item.source_url in AUDITED_INTERNAL_STALE_REDIRECTS:
+                        raise ArgiroCrawlError(
+                            "audited internal stale redirect unexpectedly became a recipe"
                         )
                     last_schema_error: FullSchemaError | None = None
                     language_excluded = False
@@ -653,6 +712,7 @@ def run_argiro_crawl(
     external_redirects.sort(key=lambda item: str(item["sourceUrl"]))
     non_greek_stubs.sort(key=lambda item: str(item["sourceUrl"]))
     canonical_aliases.sort(key=lambda item: item["sourceUrl"])
+    internal_stale_redirects.sort(key=lambda item: str(item["sourceUrl"]))
     if {item["sourceUrl"] for item in external_redirects} != set(
         AUDITED_EXTERNAL_REDIRECTS
     ):
@@ -671,6 +731,12 @@ def run_argiro_crawl(
         raise ArgiroCrawlError(
             "observed canonical aliases do not match the audited allowlist"
         )
+    if {item["sourceUrl"] for item in internal_stale_redirects} != set(
+        AUDITED_INTERNAL_STALE_REDIRECTS
+    ):
+        raise ArgiroCrawlError(
+            "observed internal stale redirects do not match the audited allowlist"
+        )
 
     document_ids = [str(record["id"]) for record in records]
     canonical_urls = [str(record["canonicalUrl"]) for record in records]
@@ -679,6 +745,7 @@ def run_argiro_crawl(
         + len(canonical_aliases)
         + len(external_redirects)
         + len(non_greek_stubs)
+        + len(internal_stale_redirects)
     )
     if (
         accounted != len(discovery.recipes)
@@ -740,6 +807,9 @@ def run_argiro_crawl(
         {"kind": "externalRedirect", **item} for item in external_redirects
     ] + [
         {"kind": "nonGreekStub", **item} for item in non_greek_stubs
+    ] + [
+        {"kind": "internalStaleRedirect", **item}
+        for item in internal_stale_redirects
     ]
     exclusions.sort(key=lambda item: str(item["sourceUrl"]))
     sizes = [document_sizes(record) for record in records]
@@ -759,6 +829,9 @@ def run_argiro_crawl(
         "canonicalAliasCount": len(canonical_aliases),
         "canonicalAliases": canonical_aliases,
         "canonicalAliasesHash": _hash(canonical_aliases),
+        "internalStaleRedirectExclusionCount": len(internal_stale_redirects),
+        "internalStaleRedirectExclusions": internal_stale_redirects,
+        "internalStaleRedirectExclusionsHash": _hash(internal_stale_redirects),
         "externalRedirectExclusionCount": len(external_redirects),
         "externalRedirectExclusions": external_redirects,
         "externalRedirectExclusionsHash": _hash(external_redirects),

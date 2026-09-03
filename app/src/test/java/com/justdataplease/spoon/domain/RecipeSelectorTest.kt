@@ -85,19 +85,19 @@ class RecipeSelectorTest {
     }
 
     @Test
-    fun `minimum rating supports an exact ten`() {
+    fun `rating threshold is strict at seven`() {
         val candidates = selector.candidates(
             recipes = listOf(
-                Recipe("perfect", "Perfect", MealCategory.FISH.key, 10.0, 20, 4),
-                Recipe("almost", "Almost", MealCategory.FISH.key, 9.9, 20, 4),
+                Recipe("equal", "Equal", MealCategory.FISH.key, 7.0, 20, 4),
+                Recipe("above", "Above", MealCategory.FISH.key, 7.1, 20, 4),
             ),
             filters = RecipeFilters(
                 category = MealCategory.FISH.key,
-                minRating = 10.0,
+                minRating = 7.0,
             ),
         )
 
-        assertEquals(listOf("perfect"), candidates.map(Recipe::id))
+        assertEquals(listOf("above"), candidates.map(Recipe::id))
     }
 
     @Test

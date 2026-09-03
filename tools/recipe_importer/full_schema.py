@@ -37,9 +37,11 @@ except ImportError:  # pragma: no cover - direct script execution
 
 DETAIL_SCHEMA_VERSION = "akis-full-v1"
 ARGIRO_DETAIL_SCHEMA_VERSION = "argiro-jsonld-html-v3"
+GASTRONOMOS_DETAIL_SCHEMA_VERSION = "gastronomos-jsonld-html-v1"
 SUPPORTED_DETAIL_SCHEMA_VERSIONS = {
     DETAIL_SCHEMA_VERSION,
     ARGIRO_DETAIL_SCHEMA_VERSION,
+    GASTRONOMOS_DETAIL_SCHEMA_VERSION,
 }
 MAX_FIRESTORE_DOCUMENT_BYTES = 900 * 1024
 MAX_SOURCE_DEPTH = 32
@@ -542,26 +544,49 @@ def firestore_detail_payload(record: Mapping[str, Any]) -> dict[str, Any]:
     return payload
 
 
-_LEAN_OMIT_FIELDS = {
-    "ingredientSections",
-    "methodSections",
-    "tips",
-    "nutritionTips",
-    "nutritionPer",
-    "nutritionSections",
-    "equipment",
-    "filterAssociations",
-    "sourcePayload",
-}
+FIRESTORE_RECIPE_SUMMARY_FIELDS = frozenset({
+    # Identity, provenance, and query eligibility.
+    "title",
+    "language",
+    "source",
+    "sourceKey",
+    "providerRecipeId",
+    "sourceUrl",
+    "canonicalUrl",
+    "sourceName",
+    "active",
+    # Planner and card fields.
+    "description",
+    "category",
+    "categoryLabel",
+    "rating",
+    "ratingCount",
+    "prepMinutes",
+    "cookMinutes",
+    "totalMinutes",
+    "stepCount",
+    "preparationCount",
+    "imageUrl",
+    "tags",
+    # Explore facets. Full details and all source evidence live in the other
+    # two projections and are fetched by document ID only when a recipe opens.
+    "dietLabels",
+    "mealTypeLabels",
+    "occasionLabels",
+    "methodLabels",
+    "cuisineLabels",
+    "ingredientLabels",
+    "quickRecipe",
+})
 
 
 def firestore_recipe_payload(record: Mapping[str, Any]) -> dict[str, Any]:
     """Return the lean summary streamed by Explore and weekly planning."""
-    payload = dict(record)
-    payload.pop("id", None)
-    for field in _LEAN_OMIT_FIELDS:
-        payload.pop(field, None)
-    return payload
+    return {
+        field: record[field]
+        for field in FIRESTORE_RECIPE_SUMMARY_FIELDS
+        if field in record
+    }
 
 
 def firestore_source_payload(record: Mapping[str, Any]) -> dict[str, Any]:
@@ -636,8 +661,14 @@ def ensure_full_record(record: Mapping[str, Any]) -> None:
             )
         except ProviderError as exc:
             raise FullSchemaError(str(exc)) from exc
-        if provider.key != "argiro" or source_id != expected_document_id:
-            raise FullSchemaError("Argiro full recipe has inconsistent provider identity")
+        expected_provider_key = {
+            ARGIRO_DETAIL_SCHEMA_VERSION: "argiro",
+            GASTRONOMOS_DETAIL_SCHEMA_VERSION: "gastronomos",
+        }.get(str(schema_version))
+        if provider.key != expected_provider_key or source_id != expected_document_id:
+            raise FullSchemaError(
+                "full recipe has inconsistent provider identity for its schema"
+            )
     payload = record.get("sourcePayload")
     if not isinstance(payload, Mapping):
         raise FullSchemaError("sourcePayload must be an object")
@@ -653,7 +684,7 @@ def ensure_full_record(record: Mapping[str, Any]) -> None:
         expected_category_keys = classify_official_category_keys(
             payload.get("category"), associations
         )
-    else:
+    elif schema_version == ARGIRO_DETAIL_SCHEMA_VERSION:
         # Import lazily to avoid a module cycle: argiro_schema itself uses this
         # validator after normalization. Never trust normalized category fields
         # when the preserved provider taxonomy can be re-derived independently.
@@ -666,6 +697,21 @@ def ensure_full_record(record: Mapping[str, Any]) -> None:
         except (ImportError, FullSchemaError) as exc:
             raise FullSchemaError(
                 f"cannot derive Argiro source taxonomy: {exc}"
+            ) from exc
+        expected_category_keys = expected_taxonomy["categoryKeys"]
+    else:
+        # Gastronomos uses the same fail-closed rule: normalized categories are
+        # accepted only when they can be independently reproduced from the raw
+        # publisher-owned taxonomy evidence retained in sourcePayload.
+        try:
+            if __package__ in (None, ""):
+                from gastronomos_schema import derive_gastronomos_taxonomy
+            else:
+                from .gastronomos_schema import derive_gastronomos_taxonomy
+            expected_taxonomy = derive_gastronomos_taxonomy(payload)
+        except (ImportError, FullSchemaError) as exc:
+            raise FullSchemaError(
+                f"cannot derive Gastronomos source taxonomy: {exc}"
             ) from exc
         expected_category_keys = expected_taxonomy["categoryKeys"]
     if (

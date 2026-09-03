@@ -59,7 +59,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.justdataplease.spoon.ui.components.MAX_RATING_THRESHOLD
+import com.justdataplease.spoon.ui.components.ProviderLabelKind
 import com.justdataplease.spoon.ui.components.RecipeArtwork
+import com.justdataplease.spoon.ui.components.greekProviderLabel
+import com.justdataplease.spoon.ui.components.ratingThresholdLabel
 import com.justdataplease.spoon.ui.model.AvailableCategories
 import com.justdataplease.spoon.ui.model.EaseUi
 import com.justdataplease.spoon.ui.model.SelectableEaseOptions
@@ -330,7 +334,9 @@ private fun ExploreFilterSheet(
     onApply: (ExploreFiltersUi) -> Unit,
 ) {
     var draft by remember(current) { mutableStateOf(current) }
-    var rating by remember(current) { mutableFloatStateOf(current.minRating10.toFloat()) }
+    var rating by remember(current) {
+        mutableFloatStateOf(current.minRating10.coerceIn(0, MAX_RATING_THRESHOLD).toFloat())
+    }
     val prepOptions = listOf<Int?>(null, 15, 30, 45, 60, 90, 120)
 
     ModalBottomSheet(onDismissRequest = onDismiss) {
@@ -397,11 +403,16 @@ private fun ExploreFilterSheet(
             item {
                 FilterTitle("Ελάχιστη βαθμολογία")
                 Text(
-                    if (rating.roundToInt() == 0) "Οποιαδήποτε" else "${rating.roundToInt()}+/10",
+                    ratingThresholdLabel(rating.roundToInt()),
                     style = MaterialTheme.typography.titleLarge,
                     color = MaterialTheme.colorScheme.primary,
                 )
-                Slider(value = rating, onValueChange = { rating = it }, valueRange = 0f..10f, steps = 9)
+                Slider(
+                    value = rating,
+                    onValueChange = { rating = it },
+                    valueRange = 0f..MAX_RATING_THRESHOLD.toFloat(),
+                    steps = MAX_RATING_THRESHOLD - 1,
+                )
             }
             item {
                 FilterTitle("Μέγιστος χρόνος προετοιμασίας")
@@ -427,12 +438,12 @@ private fun ExploreFilterSheet(
                     Switch(checked = draft.quickOnly, onCheckedChange = { draft = draft.copy(quickOnly = it) })
                 }
             }
-            item { FacetRow("Ειδική διατροφή", options.diets, draft.diet) { draft = draft.copy(diet = it) } }
-            item { FacetRow("Είδος γεύματος", options.mealTypes, draft.mealType) { draft = draft.copy(mealType = it) } }
-            item { FacetRow("Περίσταση", options.occasions, draft.occasion) { draft = draft.copy(occasion = it) } }
-            item { FacetRow("Τρόπος μαγειρέματος", options.methods, draft.method) { draft = draft.copy(method = it) } }
-            item { FacetRow("Χώρα / διεθνής κουζίνα", options.cuisines, draft.cuisine) { draft = draft.copy(cuisine = it) } }
-            item { FacetRow("Κύριο υλικό", options.ingredients, draft.ingredient) { draft = draft.copy(ingredient = it) } }
+            item { FacetRow("Ειδική διατροφή", ProviderLabelKind.DIET, options.diets, draft.diet) { draft = draft.copy(diet = it) } }
+            item { FacetRow("Είδος γεύματος", ProviderLabelKind.MEAL_TYPE, options.mealTypes, draft.mealType) { draft = draft.copy(mealType = it) } }
+            item { FacetRow("Περίσταση", ProviderLabelKind.OCCASION, options.occasions, draft.occasion) { draft = draft.copy(occasion = it) } }
+            item { FacetRow("Τρόπος μαγειρέματος", ProviderLabelKind.METHOD, options.methods, draft.method) { draft = draft.copy(method = it) } }
+            item { FacetRow("Χώρα / διεθνής κουζίνα", ProviderLabelKind.CUISINE, options.cuisines, draft.cuisine) { draft = draft.copy(cuisine = it) } }
+            item { FacetRow("Κύριο υλικό", ProviderLabelKind.INGREDIENT, options.ingredients, draft.ingredient) { draft = draft.copy(ingredient = it) } }
             item {
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     OutlinedButton(
@@ -453,7 +464,13 @@ private fun ExploreFilterSheet(
 }
 
 @Composable
-private fun FacetRow(title: String, options: List<String>, selected: String, onSelect: (String) -> Unit) {
+private fun FacetRow(
+    title: String,
+    kind: ProviderLabelKind,
+    options: List<String>,
+    selected: String,
+    onSelect: (String) -> Unit,
+) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         FilterTitle(title)
         if (options.isEmpty()) {
@@ -462,7 +479,9 @@ private fun FacetRow(title: String, options: List<String>, selected: String, onS
             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 item { ChoiceChip("Όλα", selected.isBlank()) { onSelect("") } }
                 items(options, key = { it }) { option ->
-                    ChoiceChip(option, selected == option) { onSelect(option) }
+                    ChoiceChip(greekProviderLabel(option, kind), selected == option) {
+                        onSelect(option)
+                    }
                 }
             }
         }

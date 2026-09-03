@@ -61,7 +61,9 @@ app/src/main/java/com/justdataplease/spoon/
               calendar, details, video, theme
 
 tools/recipe_importer/
-  crawl_catalog.py    complete permission-gated Greek catalog crawler
+  crawl_catalog.py    complete permission-gated Akis Greek crawler
+  crawl_argiro.py     complete permission-gated Argiro Greek crawler
+  crawl_gastronomos.py complete permission-gated Gastronomos Greek crawler
   full_schema.py      rich normalization and Firestore projections
   import_catalog.py   dry-run-first validator and Admin SDK importer
   inspect_recipe.py   one-URL metadata inspector
@@ -152,12 +154,12 @@ ID and must also be active Greek content.
 
 ## Complete Greek recipe catalog
 
-The repository includes permission-gated full crawlers for Akis Petretzikis and
-Argiro because the operator has confirmed authorization for this personal use.
-Each provider is discovered from its official Greek sitemap/API, normalized into
-the same auditable planner categories, and emitted as three independently
-size-checked Firestore projections. Generated catalog data is private and ignored
-by Git.
+The repository includes permission-gated full crawlers for Akis Petretzikis,
+Argiro, and Gastronomos because the operator has confirmed authorization for this
+personal use. Each provider is discovered from its official Greek sitemap and,
+where available, API, normalized into the same auditable planner categories, and
+emitted as three independently size-checked Firestore projections. Generated
+catalog data is private and ignored by Git.
 
 Install and test the tooling:
 
@@ -175,6 +177,7 @@ Crawl, validate, then import the exact manifest/catalog pair:
 ```powershell
 python tools/recipe_importer/crawl_catalog.py --i-have-permission
 python tools/recipe_importer/crawl_argiro.py --i-have-argiro-permission
+python tools/recipe_importer/crawl_gastronomos.py --i-have-gastronomos-permission
 
 python tools/recipe_importer/import_catalog.py `
   tools/recipe_importer/output/akis-greek-full.jsonl `
@@ -196,14 +199,26 @@ python tools/recipe_importer/import_catalog.py `
   --manifest tools/recipe_importer/output/argiro-greek-full.manifest.json `
   --i-have-permission --i-have-argiro-permission --commit `
   --project-id spoontheplanner
+
+python tools/recipe_importer/import_catalog.py `
+  tools/recipe_importer/output/gastronomos-greek-full.jsonl `
+  --manifest tools/recipe_importer/output/gastronomos-greek-full.manifest.json `
+  --i-have-permission --i-have-gastronomos-permission
+
+python tools/recipe_importer/import_catalog.py `
+  tools/recipe_importer/output/gastronomos-greek-full.jsonl `
+  --manifest tools/recipe_importer/output/gastronomos-greek-full.manifest.json `
+  --i-have-permission --i-have-gastronomos-permission --commit `
+  --project-id spoontheplanner
 ```
 
-The crawler reads `robots.txt`, restricts itself to same-site HTTPS, waits at
-least one second globally between requests, honors retries/`Retry-After`, and
-resumes through SQLite. Any failed recipe prevents a complete artifact. The
-importer recomputes counts and hashes, fully replaces normalized documents,
-tombstones disappeared active IDs instead of deleting them, and writes
-`spoon_catalog/status` only after every batch succeeds.
+The crawlers identify themselves exactly as
+`PeltesSpoonRecipeImporter/1.0 (+mailto:hey@spoon.gr)`, read `robots.txt`, restrict
+themselves to same-site HTTPS, wait at least one second globally between requests,
+honor retries/`Retry-After`, and resume through SQLite. Any failed recipe prevents
+a complete artifact. The importer recomputes counts and hashes, fully replaces
+normalized documents, tombstones disappeared active IDs instead of deleting them,
+and writes `spoon_catalog/status` only after every batch succeeds.
 
 See [the importer guide](tools/recipe_importer/README.md) for the schema, failure
 semantics, resume/incremental options, and secure identity setup.
@@ -217,11 +232,17 @@ Two independent mechanisms handle freshness:
   crawls the publisher or triggers an import.
 - [The quarterly GitHub Actions workflow](.github/workflows/quarterly-catalog-refresh.yml)
   refreshes Akis at 03:00 UTC on January 1, April 1, July 1, and October 1, then
-  Argiro at the same time on day 2. The split keeps each three-projection import
-  below the Firestore free daily write allowance. Scheduled jobs test, crawl,
+  Argiro at the same time on day 2 and Gastronomos on day 3. Splitting providers
+  bounds each run's write burst and isolates provider failures; it does not make
+  the imports cost-free. A full provider import with `N` catalog records
+  and `R` newly retired IDs performs `3N + 3R` recipe-document writes plus two
+  status writes, and reads the provider's active summaries for retirement
+  inventory. Review current Firestore pricing and quotas and configure a billing
+  budget/alerts before enabling scheduled imports. Scheduled jobs test, crawl,
   validate, authenticate with short-lived Google OIDC, and import. A manual
-  dispatch always stops after crawl and validation; its separate job has no OIDC
-  permission, Firebase variables, authentication step, or import step.
+  dispatch runs the three providers as isolated parallel matrix jobs and always
+  stops after crawl and validation; those jobs have no OIDC permission, Firebase
+  variables, authentication step, or import step.
 
 The workflow has read-only repository access, pins every action to an immutable
 commit, uploads audit reports but not recipe data, and uses no stored JSON key.
@@ -234,7 +255,7 @@ identity checks immutable GitHub repository ID `1355319945` and owner ID
 The dedicated importer service account receives only a custom
 `spoonCatalogWriter` role with Firestore entity create/get/list/update permissions
 and no delete permission. Its recurring IAM condition permits requests only on the
-first two days of January, April, July, and October from 03:00 through 07:59 UTC.
+first three days of January, April, July, and October from 03:00 through 07:59 UTC.
 Firestore IAM cannot scope this binding to particular collections, so during that
 window these permissions apply across every Firestore document in the project.
 Outside the window, the binding grants no catalog data access.

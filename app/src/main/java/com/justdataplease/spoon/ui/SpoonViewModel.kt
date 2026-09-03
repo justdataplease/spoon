@@ -18,6 +18,8 @@ import com.justdataplease.spoon.domain.ExploreCriteria
 import com.justdataplease.spoon.domain.ExploreRecipeFilter
 import com.justdataplease.spoon.domain.FavoriteReplacementResult
 import com.justdataplease.spoon.domain.WeeklyPlanDefaults
+import com.justdataplease.spoon.domain.isActiveGreekRecipe
+import com.justdataplease.spoon.domain.repository.BackendFailure
 import com.justdataplease.spoon.domain.repository.BackendFailureKind
 import com.justdataplease.spoon.domain.repository.BackendState
 import com.justdataplease.spoon.domain.repository.BackendUnavailableException
@@ -34,6 +36,8 @@ import com.justdataplease.spoon.ui.model.SpoonUiState
 import com.justdataplease.spoon.ui.explore.ExploreFacetOptionsUi
 import com.justdataplease.spoon.ui.explore.ExploreFiltersUi
 import com.justdataplease.spoon.ui.explore.ExploreRecipeUi
+import com.justdataplease.spoon.ui.explore.ExploreSearchState
+import com.justdataplease.spoon.ui.explore.exploreFilterInputs
 import com.justdataplease.spoon.ui.explore.toExploreSourceOptionsUi
 import com.justdataplease.spoon.ui.custom.CustomRecipeDraftUi
 import com.justdataplease.spoon.ui.custom.toDomainCustomRecipe
@@ -47,16 +51,22 @@ import java.time.YearMonth
 import java.util.Locale
 import java.util.UUID
 import javax.inject.Inject
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 
 private data class CatalogProjection(
     val recipesById: Map<String, Recipe> = emptyMap(),
@@ -115,13 +125,13 @@ class SpoonViewModel @Inject constructor(
     private val mealPlanner: MealPlanner,
 ) : ViewModel() {
     private val computationScope = CoroutineScope(viewModelScope.coroutineContext + Dispatchers.Default)
+    private val exploreSearchState = ExploreSearchState(computationScope)
     private val selectedWeekStart = MutableStateFlow(WeeklyPlanDefaults.weekStart(LocalDate.now()))
     private val selectedMonth = MutableStateFlow(YearMonth.now())
     private val editingDate = MutableStateFlow<LocalDate?>(null)
     private val selectedRecipeId = MutableStateFlow<String?>(null)
     private val selectedRecipeDetails = MutableStateFlow<Recipe?>(null)
     private val recipeDetailsLoading = MutableStateFlow(false)
-    private val exploreQuery = MutableStateFlow("")
     private val exploreFilters = MutableStateFlow(ExploreFiltersUi())
     private val favoriteReplacementDate = MutableStateFlow<LocalDate?>(null)
     private val loading = MutableStateFlow(true)
@@ -130,6 +140,13 @@ class SpoonViewModel @Inject constructor(
     private val message = MutableStateFlow<String?>(null)
     private val accountBusy = MutableStateFlow(false)
     private val accountError = MutableStateFlow<String?>(null)
+    private val accountOwnerTracker = AccountOwnerTracker()
+    private val catalogWeekRetryGate = CatalogWeekRetryGate()
+    private var recipeDetailsJob: Job? = null
+    private var recipeDetailsGeneration = 0L
+    private var weekEnsureJob: Job? = null
+    private var weekEnsureGeneration = 0L
+    private var ensuringWeekStart: LocalDate? = null
 
     private val catalogProjection = mealPlanner.recipes
         .map { recipes ->
@@ -214,21 +231,25 @@ class SpoonViewModel @Inject constructor(
     }
 
     private val exploreSelection = combine(
-        exploreQuery,
+        exploreSearchState.visibleQuery,
         exploreFilters,
         favoriteReplacementDate,
     ) { query, filters, replacementDate ->
         ExploreSelection(query, filters, replacementDate)
     }
 
+    private val exploreFilterInput = exploreFilterInputs(
+        exploreSearchState.filterQuery,
+        exploreFilters,
+    )
+
     private val filteredExploreRecipes = combine(
         catalogProjection,
-        exploreQuery,
-        exploreFilters,
-    ) { catalog, query, filters ->
+        exploreFilterInput,
+    ) { catalog, input ->
         ExploreRecipeFilter.filter(
             recipes = catalog.activeGreekRecipes,
-            criteria = filters.toDomain(query),
+            criteria = input.filters.toDomain(input.query),
         )
     }.flowOn(Dispatchers.Default)
 
@@ -371,6 +392,8 @@ class SpoonViewModel @Inject constructor(
     )
 
     init {
+        observeAccountOwner()
+        observeCatalogReadiness()
         ensureWeek(selectedWeekStart.value)
     }
 
@@ -402,36 +425,56 @@ class SpoonViewModel @Inject constructor(
 
     fun showRecipeDetails(recipeId: String) {
         if (recipeId.isBlank()) return
+        recipeDetailsJob?.cancel()
+        val generation = ++recipeDetailsGeneration
         selectedRecipeId.value = recipeId
         selectedRecipeDetails.value = null
         recipeDetailsLoading.value = true
-        viewModelScope.launch {
-            runCatching {
+        val job = viewModelScope.launch(start = CoroutineStart.LAZY) {
+            try {
                 withContext(Dispatchers.Default) { mealPlanner.getRecipeDetails(recipeId) }
-            }
-                .onSuccess { details ->
-                    if (selectedRecipeId.value == recipeId) {
+                    .let { details ->
+                        if (!isCurrentRecipeRequest(generation, recipeId)) return@let
                         selectedRecipeDetails.value = details
                         if (details == null) {
                             message.value = "Οι πλήρεις λεπτομέρειες δεν είναι διαθέσιμες ακόμη."
                         }
                     }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                if (isCurrentRecipeRequest(generation, recipeId)) {
+                    message.value = error.userMessage()
                 }
-                .onFailure { error ->
-                    if (selectedRecipeId.value == recipeId) message.value = error.userMessage()
+            } finally {
+                if (isCurrentRecipeRequest(generation, recipeId)) {
+                    recipeDetailsLoading.value = false
+                    recipeDetailsJob = null
                 }
-            if (selectedRecipeId.value == recipeId) recipeDetailsLoading.value = false
+            }
         }
+        recipeDetailsJob = job
+        job.start()
     }
 
     fun dismissRecipeDetails() {
+        clearRecipeSelection()
+    }
+
+    private fun clearRecipeSelection() {
+        recipeDetailsGeneration++
+        recipeDetailsJob?.cancel()
+        recipeDetailsJob = null
         selectedRecipeId.value = null
         selectedRecipeDetails.value = null
         recipeDetailsLoading.value = false
     }
 
+    private fun isCurrentRecipeRequest(generation: Long, recipeId: String): Boolean =
+        recipeDetailsGeneration == generation && selectedRecipeId.value == recipeId
+
     fun updateExploreQuery(query: String) {
-        exploreQuery.value = query.take(160)
+        exploreSearchState.update(query)
     }
 
     fun applyExploreFilters(filters: ExploreFiltersUi) {
@@ -452,8 +495,10 @@ class SpoonViewModel @Inject constructor(
         viewModelScope.launch {
             working.value = true
             try {
-                when (withContext(Dispatchers.Default) {
-                    mealPlanner.replaceWithFavorite(date, recipeId)
+                when (withUserActionTimeout {
+                    withContext(Dispatchers.Default) {
+                        mealPlanner.replaceWithFavorite(date, recipeId)
+                    }
                 }) {
                     is FavoriteReplacementResult.Selected -> {
                         favoriteReplacementDate.value = null
@@ -485,12 +530,14 @@ class SpoonViewModel @Inject constructor(
         viewModelScope.launch {
             working.value = true
             try {
-                val misses = withContext(Dispatchers.Default) {
-                    var misses = 0
-                    WeeklyPlanDefaults.dates(selectedWeekStart.value).forEach { date ->
-                        if (mealPlanner.reroll(date) is MealPlanSelection.NoMatch) misses++
+                val misses = withUserActionTimeout {
+                    withContext(Dispatchers.Default) {
+                        var misses = 0
+                        WeeklyPlanDefaults.dates(selectedWeekStart.value).forEach { date ->
+                            if (mealPlanner.reroll(date) is MealPlanSelection.NoMatch) misses++
+                        }
+                        misses
                     }
-                    misses
                 }
                 message.value = when {
                     misses == 0 -> "Έτοιμη η νέα εβδομάδα!"
@@ -519,9 +566,11 @@ class SpoonViewModel @Inject constructor(
         viewModelScope.launch {
             working.value = true
             try {
-                withContext(Dispatchers.Default) {
-                    items.chunked(MAX_SHOPPING_ITEMS_PER_WRITE).forEach { chunk ->
-                        mealPlanner.upsertShoppingItems(chunk)
+                withUserActionTimeout {
+                    withContext(Dispatchers.Default) {
+                        items.chunked(MAX_SHOPPING_ITEMS_PER_WRITE).forEach { chunk ->
+                            mealPlanner.upsertShoppingItems(chunk)
+                        }
                     }
                 }
                 message.value = if (items.size == 1) {
@@ -661,20 +710,91 @@ class SpoonViewModel @Inject constructor(
         ensureWeek(weekStart)
     }
 
-    private fun ensureWeek(date: LocalDate) {
+    private fun observeAccountOwner() {
         viewModelScope.launch {
-            loading.value = true
-            runCatching { withContext(Dispatchers.Default) { mealPlanner.ensureWeek(date) } }
-                .onFailure { message.value = it.userMessage() }
-            loading.value = false
+            mealPlanner.accountState.collect { account ->
+                if (accountOwnerTracker.onAccountState(account)) {
+                    clearRecipeSelection()
+                    resetWeekEnsureForAccountOwner()
+                }
+            }
         }
+    }
+
+    private fun resetWeekEnsureForAccountOwner() {
+        weekEnsureGeneration++
+        weekEnsureJob?.cancel()
+        weekEnsureJob = null
+        ensuringWeekStart = null
+        loading.value = false
+        catalogWeekRetryGate.onAccountOwnerChanged(selectedWeekStart.value)
+    }
+
+    private fun observeCatalogReadiness() {
+        viewModelScope.launch {
+            combine(
+                mealPlanner.backendState,
+                mealPlanner.recipes,
+                ::isCatalogReadyForPlanning,
+            ).distinctUntilChanged().collect { ready ->
+                catalogWeekRetryGate.onCatalogReadiness(ready)
+                    ?.let(::retryWeekAfterCatalog)
+            }
+        }
+    }
+
+    private fun ensureWeek(date: LocalDate) {
+        val weekStart = WeeklyPlanDefaults.weekStart(date)
+        if (weekEnsureJob?.isActive == true && ensuringWeekStart == weekStart) return
+        catalogWeekRetryGate.onDirectRequest(weekStart)
+        startWeekEnsure(weekStart, isCatalogRetry = false)
+    }
+
+    private fun retryWeekAfterCatalog(weekStart: LocalDate) {
+        if (weekEnsureJob?.isActive == true) return
+        if (!catalogWeekRetryGate.consumeRetry(weekStart)) return
+        startWeekEnsure(weekStart, isCatalogRetry = true)
+    }
+
+    private fun startWeekEnsure(
+        weekStart: LocalDate,
+        isCatalogRetry: Boolean,
+    ) {
+        if (!isCatalogRetry) weekEnsureJob?.cancel()
+        val generation = ++weekEnsureGeneration
+        ensuringWeekStart = weekStart
+        loading.value = true
+        val job = viewModelScope.launch(start = CoroutineStart.LAZY) {
+            try {
+                val plans = withUserActionTimeout {
+                    withContext(Dispatchers.Default) { mealPlanner.ensureWeek(weekStart) }
+                }
+                if (plans.isNotEmpty() && plans.all { it.recipeId.isNotBlank() }) {
+                    catalogWeekRetryGate.onAttemptSucceeded(weekStart)
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                message.value = error.userMessage()
+            } finally {
+                if (weekEnsureGeneration == generation) {
+                    weekEnsureJob = null
+                    ensuringWeekStart = null
+                    loading.value = false
+                    catalogWeekRetryGate.retryCandidate()
+                        ?.let(::retryWeekAfterCatalog)
+                }
+            }
+        }
+        weekEnsureJob = job
+        job.start()
     }
 
     private fun launchSelection(block: suspend () -> MealPlanSelection) {
         viewModelScope.launch {
             working.value = true
             try {
-                when (withContext(Dispatchers.Default) { block() }) {
+                when (withUserActionTimeout { withContext(Dispatchers.Default) { block() } }) {
                     is MealPlanSelection.Selected -> Unit
                     is MealPlanSelection.NoMatch -> {
                         message.value = "Δεν βρέθηκε άλλη συνταγή που να ταιριάζει σε όλα τα φίλτρα."
@@ -707,6 +827,94 @@ class SpoonViewModel @Inject constructor(
                 accountBusy.value = false
             }
         }
+    }
+}
+
+/** Tracks only ownership, so an email-verification refresh on the same UID keeps the selection. */
+internal class AccountOwnerTracker {
+    private var hasObservedAccount = false
+    private var ownerUid: String? = null
+
+    fun onAccountState(account: AccountState): Boolean {
+        val nextOwnerUid = account.ownerUidOrNull()
+        val ownerChanged = hasObservedAccount && ownerUid != nextOwnerUid
+        hasObservedAccount = true
+        ownerUid = nextOwnerUid
+        return ownerChanged
+    }
+}
+
+private fun AccountState.ownerUidOrNull(): String? = when (this) {
+    is AccountState.Anonymous -> uid
+    is AccountState.Email -> uid
+    AccountState.Loading,
+    AccountState.Unavailable,
+    -> null
+}
+
+/**
+ * Remembers a direct request made before the complete catalog is observable. A retry is consumed
+ * before it starts, so another backend-state emission cannot create duplicate plans or a loop.
+ */
+internal class CatalogWeekRetryGate {
+    private var catalogReady = false
+    private var pendingWeekStart: LocalDate? = null
+
+    fun onDirectRequest(weekStart: LocalDate) {
+        pendingWeekStart = weekStart.takeUnless { catalogReady }
+    }
+
+    fun onCatalogReadiness(ready: Boolean): LocalDate? {
+        catalogReady = ready
+        return retryCandidate()
+    }
+
+    /** Invalidates readiness from the previous owner and queues the visible week for the new one. */
+    fun onAccountOwnerChanged(weekStart: LocalDate) {
+        catalogReady = false
+        pendingWeekStart = weekStart
+    }
+
+    fun onAttemptSucceeded(weekStart: LocalDate) {
+        if (pendingWeekStart == weekStart) pendingWeekStart = null
+    }
+
+    fun retryCandidate(): LocalDate? = pendingWeekStart.takeIf { catalogReady }
+
+    fun consumeRetry(weekStart: LocalDate): Boolean {
+        if (!catalogReady || pendingWeekStart != weekStart) return false
+        pendingWeekStart = null
+        return true
+    }
+}
+
+internal fun isCatalogReadyForPlanning(
+    backendState: BackendState,
+    recipes: List<Recipe>,
+): Boolean = (backendState is BackendState.Cloud || backendState is BackendState.Local) &&
+    recipes.any(Recipe::isActiveGreekRecipe)
+
+internal const val USER_ACTION_TIMEOUT_MILLIS = 20_000L
+
+/**
+ * Bounds Firestore-backed UI work so a pending listener or offline write cannot leave progress
+ * chrome on screen forever. The classified exception keeps the existing Greek network feedback.
+ */
+internal suspend fun <T> withUserActionTimeout(
+    timeoutMillis: Long = USER_ACTION_TIMEOUT_MILLIS,
+    block: suspend () -> T,
+): T {
+    require(timeoutMillis > 0L)
+    return try {
+        withTimeout(timeoutMillis) { block() }
+    } catch (_: TimeoutCancellationException) {
+        throw BackendUnavailableException(
+            BackendFailure(
+                kind = BackendFailureKind.NETWORK,
+                isRetryable = true,
+                message = "Timeout",
+            ),
+        )
     }
 }
 
@@ -937,7 +1145,7 @@ private fun ExploreFiltersUi.toDomain(query: String) = ExploreCriteria(
         EaseUi.HARD -> EaseLevel.INVOLVED.key
         EaseUi.ANY, EaseUi.UNKNOWN -> ""
     },
-    minRating = minRating10.coerceIn(0, 10).toDouble(),
+    minRating = minRating10.coerceIn(0, 9).toDouble(),
     maxPrepMinutes = maxPrepMinutes?.coerceAtLeast(0) ?: 0,
     dietLabels = diet.asSelectedSet(),
     mealTypeLabels = mealType.asSelectedSet(),
@@ -959,7 +1167,7 @@ private fun RecipeFilters.toUi() = FiltersUi(
         EaseLevel.INVOLVED.key -> EaseUi.HARD
         else -> EaseUi.ANY
     },
-    minRating10 = minRating.toInt(),
+    minRating10 = minRating.toInt().coerceIn(0, 9),
     maxPrepMinutes = maxPrepMinutes.takeIf { it > 0 },
 )
 
@@ -971,7 +1179,7 @@ private fun FiltersUi.toDomain() = RecipeFilters(
         EaseUi.HARD -> EaseLevel.INVOLVED.key
         EaseUi.ANY, EaseUi.UNKNOWN -> ""
     },
-    minRating = minRating10.toDouble(),
+    minRating = minRating10.coerceIn(0, 9).toDouble(),
     maxPrepMinutes = maxPrepMinutes ?: 0,
 )
 

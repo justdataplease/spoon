@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlencode, urljoin, urlsplit, urlunsplit
+from urllib.parse import quote, urlencode, urljoin, urlsplit, urlunsplit
 from urllib.robotparser import RobotFileParser
 
 import requests
@@ -44,7 +44,7 @@ SITE_ORIGIN = "https://akispetretzikis.com"
 SITEMAP_URL = f"{SITE_ORIGIN}/sitemap.xml"
 ROBOTS_URL = f"{SITE_ORIGIN}/robots.txt"
 API_ROOT = f"{SITE_ORIGIN}/api/v1"
-USER_AGENT = "SpoonCatalogTool/1.0 (+authorized personal catalog; respectful crawler)"
+USER_AGENT = "PeltesSpoonRecipeImporter/1.0 (+mailto:hey@spoon.gr)"
 MINIMUM_DELAY_SECONDS = 1.0
 DEFAULT_DELAY_SECONDS = 1.0
 DEFAULT_TIMEOUT_SECONDS = 30.0
@@ -287,6 +287,74 @@ def api_reported_recipe_count(client: AuthorizedHttpClient, robots: RobotFilePar
     return total
 
 
+def discover_api_recipes(
+    client: AuthorizedHttpClient,
+    robots: RobotFileParser,
+    *,
+    per_page: int = 500,
+) -> dict[str, DiscoveredRecipe]:
+    """Enumerate the official Greek API so newly published sitemap-lag items are kept."""
+    page = 1
+    last_page = 1
+    declared_total: int | None = None
+    recipes: dict[str, DiscoveredRecipe] = {}
+    while page <= last_page:
+        query = urlencode({"lang": "el", "per_page": per_page, "page": page})
+        envelope = _object(
+            client.json(f"{API_ROOT}/recipe?{query}", robots=robots),
+            "recipe list",
+        )
+        data = envelope.get("data")
+        meta = _object(envelope.get("meta"), "recipe list meta")
+        if not isinstance(data, list):
+            raise CrawlError("recipe list data is not a list")
+        if page == 1:
+            last_page = meta.get("last_page")
+            declared_total = meta.get("total")
+            if (
+                isinstance(last_page, bool)
+                or not isinstance(last_page, int)
+                or last_page < 1
+                or isinstance(declared_total, bool)
+                or not isinstance(declared_total, int)
+                or declared_total <= 0
+            ):
+                raise CrawlError("recipe list pagination metadata is invalid")
+        if meta.get("current_page") != page or meta.get("total") != declared_total:
+            raise CrawlError("recipe list pagination metadata changed during discovery")
+        for index, raw in enumerate(data):
+            item = _object(raw, f"recipe list page {page} item {index}")
+            recipe_id = str(item.get("id") or "")
+            slug = str(item.get("slug") or "").strip()
+            published = item.get("published")
+            if (
+                not recipe_id.isdigit()
+                or not slug
+                or any(
+                    ord(character) < 32
+                    or character in "/?#"
+                    or ord(character) == 92
+                    for character in slug
+                )
+                or published not in (1, True)
+                or recipe_id in recipes
+            ):
+                raise CrawlError(f"invalid or duplicate Greek API recipe {recipe_id!r}")
+            encoded_slug = quote(slug, safe="-._~")
+            location = f"{SITE_ORIGIN}/recipe/{recipe_id}/{encoded_slug}"
+            canonical = canonical_recipe_location(location)
+            if canonical is None or canonical[0] != recipe_id:
+                raise CrawlError(f"API recipe {recipe_id} has an unsafe canonical URL")
+            updated = str(item.get("updated_at") or item.get("created_at") or "").strip()
+            recipes[recipe_id] = DiscoveredRecipe(recipe_id, canonical[1], updated)
+        page += 1
+    if declared_total is None or len(recipes) != declared_total:
+        raise CrawlError(
+            f"recipe list reported {declared_total} recipes but returned {len(recipes)}"
+        )
+    return recipes
+
+
 def fetch_taxonomy(client: AuthorizedHttpClient, robots: RobotFileParser) -> dict[str, list[dict[str, str]]]:
     raw = _object(client.json(f"{API_ROOT}/recipe_filters?lang=el", robots=robots), "recipe filters")
     taxonomy: dict[str, list[dict[str, str]]] = {}
@@ -337,12 +405,18 @@ class CheckpointStore:
         )
 
     def prepare(self, run_key: str, taxonomy_hash: str, *, resume: bool) -> None:
-        run_changed = not resume or self._meta("runKey") != run_key
-        if run_changed:
+        run_changed = self._meta("runKey") != run_key
+        if not resume:
             self.connection.execute("DELETE FROM records")
             self.connection.execute("DELETE FROM facets")
             self._set_meta("runKey", run_key)
-        if run_changed or self._meta("taxonomyHash") != taxonomy_hash:
+        elif run_changed:
+            # Raw payload rows are independently keyed by ID + sitemap/API
+            # last-modified, so an added/removed recipe must not force thousands
+            # of unchanged detail requests. Facet membership is inventory-wide.
+            self.connection.execute("DELETE FROM facets")
+            self._set_meta("runKey", run_key)
+        if not resume or run_changed or self._meta("taxonomyHash") != taxonomy_hash:
             self.connection.execute("DELETE FROM facets")
             self._set_meta("taxonomyHash", taxonomy_hash)
         self.connection.commit()
@@ -573,13 +647,35 @@ def run_catalog_crawl(
     progress: Callable[[int, int, str], None] | None = None,
 ) -> dict[str, Any]:
     progress = progress or (lambda done, total, source: None)
-    discovery = discover_recipes(client, robots)
-    api_count = api_reported_recipe_count(client, robots)
-    discovered_ids = set(discovery.recipes)
-    if len(discovered_ids) != api_count:
+    sitemap_discovery = discover_recipes(client, robots)
+    api_recipes = discover_api_recipes(client, robots)
+    sitemap_ids = set(sitemap_discovery.recipes)
+    api_ids = set(api_recipes)
+    sitemap_only_ids = sitemap_ids - api_ids
+    if sitemap_only_ids:
         raise CrawlError(
-            f"completeness mismatch: sitemap has {len(discovered_ids)} Greek IDs, API reports {api_count}"
+            "completeness mismatch: sitemap IDs absent from the Greek API: "
+            + ", ".join(sorted(sitemap_only_ids, key=int)[:20])
         )
+    api_only_ids = api_ids - sitemap_ids
+    merged_recipes: dict[str, DiscoveredRecipe] = {}
+    for recipe_id, api_recipe in api_recipes.items():
+        sitemap_recipe = sitemap_discovery.recipes.get(recipe_id)
+        merged_recipes[recipe_id] = DiscoveredRecipe(
+            recipe_id,
+            api_recipe.source_url,
+            max(
+                api_recipe.last_modified,
+                sitemap_recipe.last_modified if sitemap_recipe else "",
+            ),
+        )
+    discovery = DiscoveryResult(
+        recipes=merged_recipes,
+        sitemap_documents=sitemap_discovery.sitemap_documents,
+        duplicate_recipe_entries=sitemap_discovery.duplicate_recipe_entries,
+    )
+    api_count = len(api_recipes)
+    discovered_ids = set(discovery.recipes)
     if expected_active_count is not None and len(discovered_ids) != expected_active_count:
         raise CrawlError(
             f"expected {expected_active_count} active recipes but discovered {len(discovered_ids)}"
@@ -686,7 +782,10 @@ def run_catalog_crawl(
         "source": "akispetretzikis.com",
         "sitemapUrl": SITEMAP_URL,
         "sitemapDocumentCount": discovery.sitemap_documents,
+        "sitemapRecipeCount": len(sitemap_ids),
         "duplicateSitemapRecipeEntries": discovery.duplicate_recipe_entries,
+        "apiOnlyRecipeCount": len(api_only_ids),
+        "apiOnlyRecipeIds": sorted(api_only_ids, key=int),
         "discoveredActiveRecipeCount": len(discovered_ids),
         "apiReportedActiveRecipeCount": api_count,
         "expectedActiveRecipeCount": expected_active_count,

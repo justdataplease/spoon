@@ -24,7 +24,8 @@ data class ExploreCriteria(
 ) {
     fun isValid(): Boolean =
         minRating.isFinite() &&
-            minRating in 0.0..10.0 &&
+            minRating >= 0.0 &&
+            minRating < 10.0 &&
             maxPrepMinutes >= 0 &&
             (easeLevel.isBlank() || EaseLevel.fromKey(easeLevel.normalizedKey()) != null)
 }
@@ -63,7 +64,7 @@ object ExploreRecipeFilter {
             }
             .filter { requestedEase == null || it.easeLevel == requestedEase }
             .filter { it.rating.isFinite() && it.rating in 0.0..10.0 }
-            .filter { it.rating >= criteria.minRating }
+            .filter { criteria.minRating == 0.0 || it.rating > criteria.minRating }
             // Zero is the source's unknown value and must not silently satisfy a time cap.
             .filter {
                 criteria.maxPrepMinutes == 0 ||

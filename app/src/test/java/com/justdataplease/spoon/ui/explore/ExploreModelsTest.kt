@@ -43,6 +43,7 @@ class ExploreModelsTest {
             Recipe(id = "a2", sourceKey = "AKIS", sourceName = "Άκης Πετρετζίκης"),
             Recipe(id = "a3", source = "www.akispetretzikis.com", sourceName = "Άκης Πετρετζίκης"),
             Recipe(id = "r1", sourceKey = "argiro", sourceName = "Αργυρώ Μπαρμπαρίγου"),
+            Recipe(id = "g1", source = "www.gastronomos.gr", sourceName = "Γαστρονόμος"),
             Recipe(id = "mine", sourceKey = "personal", sourceName = "Προσωπική συνταγή"),
             Recipe(id = "unknown"),
         ).toExploreSourceOptionsUi()
@@ -51,6 +52,7 @@ class ExploreModelsTest {
             listOf(
                 ExploreSourceOptionUi("akis", "Άκης Πετρετζίκης", 3),
                 ExploreSourceOptionUi("argiro", "Αργυρώ Μπαρμπαρίγου", 1),
+                ExploreSourceOptionUi("gastronomos", "Γαστρονόμος", 1),
                 ExploreSourceOptionUi("personal", "Προσωπική συνταγή", 1),
             ),
             options,

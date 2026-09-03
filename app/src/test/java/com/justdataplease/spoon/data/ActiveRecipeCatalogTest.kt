@@ -56,16 +56,37 @@ class ActiveRecipeCatalogTest {
     }
 
     @Test
-    fun `Akis Sandwich and Finger food remain street food`() {
+    fun `Akis Sandwich and Finger food are promoted to street food`() {
         listOf("Σάντουιτς", "Finger food").forEach { facet ->
             val recipe = Recipe(
                 id = facet,
-                category = "street_food",
+                category = "meat",
+                categoryLabel = "Κρέας",
                 sourceKey = "akis",
                 mealTypeLabels = listOf(facet),
+                tags = listOf("Κρέας", facet, "Χοιρινό"),
             )
 
-            assertEquals("street_food", eligibleRemoteRecipes(listOf(recipe)).single().category)
+            val normalized = eligibleRemoteRecipes(listOf(recipe)).single()
+            assertEquals("street_food", normalized.category)
+            assertEquals("Βρώμικο", normalized.categoryLabel)
+            assertEquals(listOf("Βρώμικο", facet, "Χοιρινό"), normalized.tags)
+        }
+    }
+
+    @Test
+    fun `Akis terminal dessert and other categories are never promoted`() {
+        listOf("dessert" to "Γλυκά", "other" to "Άλλο").forEach { (category, label) ->
+            val recipe = Recipe(
+                id = category,
+                category = category,
+                categoryLabel = label,
+                sourceKey = "akis",
+                mealTypeLabels = listOf("Finger food"),
+                tags = listOf(label, "Finger food"),
+            )
+
+            assertEquals(recipe, eligibleRemoteRecipes(listOf(recipe)).single())
         }
     }
 

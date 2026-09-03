@@ -26,10 +26,11 @@ _DURATION_RE = re.compile(
 # Recipe titles and free-form ingredient text are deliberately excluded: a
 # substring classifier made "Τρουφάκια" match the old "φακ" lentil stem.
 #
-# Precedence is encoded in the returned list: the exact recipe category wins,
-# followed by official main-ingredient facets in this stable order. Only the
-# publisher's explicit sandwich/finger-food formats are a street-food fallback;
-# its broader Snack bucket contains sweet bars, cereal, and breakfast recipes.
+# Precedence is encoded in the returned list: terminal dessert/non-meal source
+# categories win, followed by the publisher's exact sandwich/finger-food format,
+# then the exact recipe category and official main-ingredient facets. The broad
+# Snack bucket is never enough on its own: it also contains sweet bars, cereal,
+# and breakfast recipes.
 _CATEGORY_KEY_PRECEDENCE = (
     "dessert",
     "fish",
@@ -248,10 +249,11 @@ def classify_official_category_keys(
     The source recipe category has the strongest authority. Explicit dessert,
     drink, bread, fruit, and condiment categories are terminal other values so
     an ingredient facet cannot turn them into main meals. For a generic source
-    category, official main-ingredient IDs are considered next, and an official
-    sandwich/finger-food value is the final street-food fallback. The source's
-    generic Snack value is deliberately not enough: it also contains clearly
-    sweet snacks and breakfast recipes, so it fails closed to ``other``.
+    category, an official sandwich/finger-food value is authoritative for the
+    Street Food planner group. Exact recipe and main-ingredient categories are
+    retained as secondary keys. The source's generic Snack value is deliberately
+    not enough: it also contains clearly sweet snacks and breakfast recipes, so
+    it fails closed to ``other``.
     """
 
     category = source_category if isinstance(source_category, Mapping) else {}
@@ -275,11 +277,6 @@ def classify_official_category_keys(
         if identifier in _INGREDIENT_FACET_KEYS
     )
     source_key = _SOURCE_CATEGORY_KEYS.get(slug)
-    if source_key:
-        return [source_key, *(key for key in ingredient_keys if key != source_key)]
-    if ingredient_keys:
-        return ingredient_keys
-
     format_key = _SOURCE_FORMAT_FALLBACK_KEYS.get(slug)
     if not format_key:
         format_key = next(
@@ -290,7 +287,15 @@ def classify_official_category_keys(
             ),
             "",
         )
-    return [format_key] if format_key else ["other"]
+    secondary_keys = [
+        *([source_key] if source_key else []),
+        *(key for key in ingredient_keys if key != source_key),
+    ]
+    if format_key:
+        return [format_key, *(key for key in secondary_keys if key != format_key)]
+    if secondary_keys:
+        return secondary_keys
+    return ["other"]
 
 
 def classify_category_keys(

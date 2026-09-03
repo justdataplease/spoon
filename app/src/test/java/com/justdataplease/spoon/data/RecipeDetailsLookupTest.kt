@@ -67,6 +67,24 @@ class RecipeDetailsLookupTest {
     }
 
     @Test
+    fun `eligible Akis details promote exact street food facets`() {
+        val legacy = Recipe(
+            id = "8094",
+            category = "meat",
+            categoryLabel = "Κρέας",
+            sourceKey = "akis",
+            mealTypeLabels = listOf("Σάντουιτς"),
+            tags = listOf("Κρέας", "Σάντουιτς", "Χοιρινό"),
+        )
+
+        val result = eligibleRecipeDetails(legacy, "8094", "8094")
+
+        assertEquals("street_food", result?.category)
+        assertEquals("Βρώμικο", result?.categoryLabel)
+        assertEquals(listOf("Βρώμικο", "Σάντουιτς", "Χοιρινό"), result?.tags)
+    }
+
+    @Test
     fun `details collection contract matches importer`() {
         assertEquals(
             "spoon_recipe_details",

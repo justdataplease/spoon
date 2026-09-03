@@ -36,7 +36,9 @@ class FirestoreModelDefaultsTest {
     fun `recipe filters match Firestore rule boundaries`() {
         assertTrue(RecipeFilters().isValid())
         assertTrue(RecipeFilters(easeLevel = "easy", maxPrepMinutes = 10_080).isValid())
+        assertTrue(RecipeFilters(minRating = 9.9).isValid())
         assertFalse(RecipeFilters(easeLevel = " ").isValid())
+        assertFalse(RecipeFilters(minRating = 10.0).isValid())
         assertFalse(RecipeFilters(maxPrepMinutes = -1).isValid())
         assertFalse(RecipeFilters(maxPrepMinutes = 10_081).isValid())
     }

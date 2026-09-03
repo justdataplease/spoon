@@ -155,6 +155,11 @@ class MealPlanner @Inject constructor(
         repository.setMealCompleted(date.toString(), completed)
     }
 
+    suspend fun deleteCookedHistoryEntry(historyId: String) {
+        repository.ensureReady()
+        repository.deleteCookedHistoryEntry(historyId)
+    }
+
     suspend fun toggleFavorite(recipeId: String): Boolean {
         repository.ensureReady()
         return repository.toggleFavorite(recipeId)

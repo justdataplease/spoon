@@ -255,6 +255,7 @@ def validate_record(
     allow_licensed_images: bool = False,
     have_permission: bool = False,
     have_argiro_permission: bool = False,
+    have_gastronomos_permission: bool = False,
 ) -> dict[str, Any]:
     full_content = is_full_record(raw)
     if full_content and not have_permission:
@@ -293,6 +294,15 @@ def validate_record(
     if full_content and provider.key == "argiro" and not have_argiro_permission:
         raise CatalogError(
             "Argiro full content requires explicit --i-have-argiro-permission"
+        )
+    if (
+        full_content
+        and provider.key == "gastronomos"
+        and not have_gastronomos_permission
+    ):
+        raise CatalogError(
+            "Gastronomos full content requires explicit "
+            "--i-have-gastronomos-permission"
         )
 
     source_id = str(raw.get("id") or expected_document_id).strip()
@@ -421,6 +431,7 @@ def validate_catalog(
     allow_licensed_images: bool = False,
     have_permission: bool = False,
     have_argiro_permission: bool = False,
+    have_gastronomos_permission: bool = False,
 ) -> list[dict[str, Any]]:
     validated: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -431,6 +442,7 @@ def validate_catalog(
                 allow_licensed_images=allow_licensed_images,
                 have_permission=have_permission,
                 have_argiro_permission=have_argiro_permission,
+                have_gastronomos_permission=have_gastronomos_permission,
             )
         except CatalogError as exc:
             raise CatalogError(f"record {index}: {exc}") from exc
@@ -774,6 +786,7 @@ def validate_manifest(records: list[dict[str, Any]], manifest: Mapping[str, Any]
                 from crawl_argiro import (
                     AUDITED_CANONICAL_ALIASES,
                     AUDITED_EXTERNAL_REDIRECTS,
+                    AUDITED_INTERNAL_STALE_REDIRECTS,
                     AUDITED_NON_GREEK_STUBS,
                     checkpoint_run_key,
                     parser_contract_hash,
@@ -782,6 +795,7 @@ def validate_manifest(records: list[dict[str, Any]], manifest: Mapping[str, Any]
                 from .crawl_argiro import (
                     AUDITED_CANONICAL_ALIASES,
                     AUDITED_EXTERNAL_REDIRECTS,
+                    AUDITED_INTERNAL_STALE_REDIRECTS,
                     AUDITED_NON_GREEK_STUBS,
                     checkpoint_run_key,
                     parser_contract_hash,
@@ -792,6 +806,7 @@ def validate_manifest(records: list[dict[str, Any]], manifest: Mapping[str, Any]
         list_fields = (
             "canonicalAliases",
             "externalRedirectExclusions",
+            "internalStaleRedirectExclusions",
             "nonGreekStubExclusions",
             "excludedRecipeUrls",
         )
@@ -823,13 +838,28 @@ def validate_manifest(records: list[dict[str, Any]], manifest: Mapping[str, Any]
                 "sourceUrl": source_url,
                 "providerRecipeId": provider_recipe_id,
                 "finalStatus": 200,
-                "reason": "recipe content contains no Greek letters",
+                "reason": "recipe content is not substantively Greek",
             }
             for source_url, provider_recipe_id in AUDITED_NON_GREEK_STUBS.items()
         ], key=lambda item: item["sourceUrl"])
+        expected_internal_stale = sorted([
+            {
+                "sourceUrl": source_url,
+                **details,
+                "reason": (
+                    "redirected to a distinct surviving recipe; "
+                    "content substitution is forbidden"
+                ),
+            }
+            for source_url, details in AUDITED_INTERNAL_STALE_REDIRECTS.items()
+        ], key=lambda item: item["sourceUrl"])
         expected_exclusions = sorted(
             [{"kind": "externalRedirect", **item} for item in expected_external]
-            + [{"kind": "nonGreekStub", **item} for item in expected_stubs],
+            + [{"kind": "nonGreekStub", **item} for item in expected_stubs]
+            + [
+                {"kind": "internalStaleRedirect", **item}
+                for item in expected_internal_stale
+            ],
             key=lambda item: item["sourceUrl"],
         )
         expected_argiro_values = {
@@ -840,6 +870,9 @@ def validate_manifest(records: list[dict[str, Any]], manifest: Mapping[str, Any]
             "externalRedirectExclusionCount": len(expected_external),
             "externalRedirectExclusions": expected_external,
             "externalRedirectExclusionsHash": _manifest_value_hash(expected_external),
+            "internalStaleRedirectExclusionCount": len(expected_internal_stale),
+            "internalStaleRedirectExclusions": expected_internal_stale,
+            "internalStaleRedirectExclusionsHash": _manifest_value_hash(expected_internal_stale),
             "nonGreekStubExclusionCount": len(expected_stubs),
             "nonGreekStubExclusions": expected_stubs,
             "nonGreekStubExclusionsHash": _manifest_value_hash(expected_stubs),
@@ -883,6 +916,159 @@ def validate_manifest(records: list[dict[str, Any]], manifest: Mapping[str, Any]
             ):
                 mismatches.append("canonicalAliases")
                 break
+    if records[0]["sourceKey"] == "gastronomos":
+        try:
+            if __package__ in (None, ""):
+                from crawl_gastronomos import (
+                    AUDITED_CANONICAL_ALIASES,
+                    AUDITED_EXTERNAL_REDIRECTS,
+                    AUDITED_NON_RECIPE_SITEMAP_ENTRIES,
+                    AUDITED_NON_GREEK_STUBS,
+                    checkpoint_run_key,
+                    parser_contract_hash,
+                )
+            else:
+                from .crawl_gastronomos import (
+                    AUDITED_CANONICAL_ALIASES,
+                    AUDITED_EXTERNAL_REDIRECTS,
+                    AUDITED_NON_RECIPE_SITEMAP_ENTRIES,
+                    AUDITED_NON_GREEK_STUBS,
+                    checkpoint_run_key,
+                    parser_contract_hash,
+                )
+        except ImportError as exc:
+            raise CatalogError(
+                f"cannot load Gastronomos manifest contract: {exc}"
+            ) from exc
+
+        list_fields = (
+            "canonicalAliases",
+            "externalRedirectExclusions",
+            "nonGreekStubExclusions",
+            "excludedRecipeUrls",
+        )
+        for field in list_fields:
+            value = manifest.get(field)
+            if not isinstance(value, list) or any(
+                not isinstance(item, Mapping) for item in value
+            ):
+                mismatches.append(field)
+
+        non_recipe_sitemap_entries = manifest.get("nonRecipeSitemapEntries")
+        if (
+            not isinstance(non_recipe_sitemap_entries, list)
+            or any(
+                not isinstance(item, str)
+                for item in non_recipe_sitemap_entries
+            )
+        ):
+            mismatches.append("nonRecipeSitemapEntries")
+
+        expected_aliases = sorted([
+            {"sourceUrl": source_url, **details}
+            for source_url, details in AUDITED_CANONICAL_ALIASES.items()
+        ], key=lambda item: item["sourceUrl"])
+        expected_external = sorted([
+            {
+                "sourceUrl": source_url,
+                **details,
+                "reason": (
+                    "redirected outside /syntagh/{slug}/{numeric-id}/"
+                ),
+            }
+            for source_url, details in AUDITED_EXTERNAL_REDIRECTS.items()
+        ], key=lambda item: item["sourceUrl"])
+        expected_stubs = sorted([
+            {
+                "sourceUrl": source_url,
+                "providerRecipeId": provider_recipe_id,
+                "finalStatus": 200,
+                "reason": "recipe content is not substantively Greek",
+            }
+            for source_url, provider_recipe_id in AUDITED_NON_GREEK_STUBS.items()
+        ], key=lambda item: item["sourceUrl"])
+        expected_exclusions = sorted(
+            [{"kind": "externalRedirect", **item} for item in expected_external]
+            + [{"kind": "nonGreekStub", **item} for item in expected_stubs],
+            key=lambda item: item["sourceUrl"],
+        )
+        expected_non_recipe_sitemap_entries = sorted(
+            AUDITED_NON_RECIPE_SITEMAP_ENTRIES
+        )
+        expected_gastronomos_values = {
+            "canonicalGreekRecipeCount": len(records),
+            "canonicalAliasCount": len(expected_aliases),
+            "canonicalAliases": expected_aliases,
+            "canonicalAliasesHash": _manifest_value_hash(expected_aliases),
+            "externalRedirectExclusionCount": len(expected_external),
+            "externalRedirectExclusions": expected_external,
+            "externalRedirectExclusionsHash": _manifest_value_hash(expected_external),
+            "nonGreekStubExclusionCount": len(expected_stubs),
+            "nonGreekStubExclusions": expected_stubs,
+            "nonGreekStubExclusionsHash": _manifest_value_hash(expected_stubs),
+            "excludedRecipeUrlCount": len(expected_exclusions),
+            "excludedRecipeUrls": expected_exclusions,
+            "excludedRecipeUrlsHash": _manifest_value_hash(expected_exclusions),
+            "nonRecipeSitemapEntryCount": len(
+                expected_non_recipe_sitemap_entries
+            ),
+            "nonRecipeSitemapEntries": expected_non_recipe_sitemap_entries,
+            "nonRecipeSitemapEntriesHash": _manifest_value_hash(
+                expected_non_recipe_sitemap_entries
+            ),
+            "parserContractHash": parser_contract_hash(),
+            "checkpointRunKey": checkpoint_run_key(),
+        }
+        mismatches.extend(
+            key for key, value in expected_gastronomos_values.items()
+            if manifest.get(key) != value
+        )
+        discovered = manifest.get("discoveredRecipeUrlCount")
+        duplicates = manifest.get("duplicateRecipeEntryCount")
+        declared = manifest.get("declaredRecipeEntryCount")
+        if (
+            not isinstance(discovered, int)
+            or isinstance(discovered, bool)
+            or discovered
+            != len(records) + len(expected_aliases) + len(expected_exclusions)
+        ):
+            mismatches.append("discoveredRecipeUrlCount")
+        if (
+            not isinstance(duplicates, int)
+            or isinstance(duplicates, bool)
+            or duplicates < 0
+            or not isinstance(declared, int)
+            or isinstance(declared, bool)
+        ):
+            mismatches.append("declaredRecipeEntryCount")
+        elif (
+            not isinstance(discovered, int)
+            or isinstance(discovered, bool)
+            or declared
+            != discovered
+            + duplicates
+            + len(expected_non_recipe_sitemap_entries)
+        ):
+            mismatches.append("declaredRecipeEntryCount")
+        if len(active) != len(records):
+            mismatches.append("canonicalGreekRecipeCount")
+        records_by_url = {record["canonicalUrl"]: record for record in records}
+        if len(records_by_url) != len(records):
+            mismatches.append("canonicalAliases")
+        try:
+            provider = provider_for(source_key="gastronomos")
+            for alias in expected_aliases:
+                target = records_by_url.get(alias["canonicalUrl"])
+                if (
+                    target is None
+                    or target.get("providerRecipeId") != alias["providerRecipeId"]
+                    or target.get("id")
+                    != recipe_document_id(provider, alias["providerRecipeId"])
+                ):
+                    mismatches.append("canonicalAliases")
+                    break
+        except ProviderError:
+            mismatches.append("canonicalAliases")
     if mismatches:
         raise CatalogError("manifest/catalog mismatch: " + ", ".join(sorted(set(mismatches))))
 
@@ -916,6 +1102,14 @@ def build_parser() -> argparse.ArgumentParser:
             "Argiro full-content validation/import."
         ),
     )
+    parser.add_argument(
+        "--i-have-gastronomos-permission",
+        action="store_true",
+        help=(
+            "Separately acknowledge written Gastronomos permission; required "
+            "for Gastronomos full-content validation/import."
+        ),
+    )
     parser.add_argument("--batch-size", type=_batch_size, default=DEFAULT_BATCH_SIZE)
     parser.add_argument(
         "--allow-licensed-images",
@@ -936,6 +1130,7 @@ def main(argv: list[str] | None = None) -> int:
             allow_licensed_images=args.allow_licensed_images,
             have_permission=args.i_have_permission,
             have_argiro_permission=args.i_have_argiro_permission,
+            have_gastronomos_permission=args.i_have_gastronomos_permission,
         )
         full = is_full_record(records[0])
         if args.commit and not args.i_have_permission:

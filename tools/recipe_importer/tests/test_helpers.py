@@ -95,7 +95,7 @@ def test_official_recipe_category_wins_then_facets_have_stable_precedence():
     ) == ["seafood", "legumes", "poultry"]
 
 
-def test_unknown_taxonomy_fails_closed_and_format_is_only_a_fallback():
+def test_unknown_taxonomy_fails_closed_and_exact_format_wins_after_terminal_guards():
     assert classify_official_category_keys(
         {"id": 999, "slug": "unknown"},
         {"ingredient": [{"id": "999", "title": "Looks like beans"}]},
@@ -119,14 +119,44 @@ def test_unknown_taxonomy_fails_closed_and_format_is_only_a_fallback():
     assert classify_official_category_keys(
         {"id": 33, "slug": "snak"},
         {
+            "ingredient": [{"id": "129", "title": "Μοσχάρι"}],
+            "meal_type": [{"id": "92", "title": "Finger food"}],
+        },
+    ) == ["dirty", "meat"]
+    assert classify_official_category_keys(
+        {"id": 19, "slug": "kotopulo"},
+        {
+            "ingredient": [{"id": "135", "title": "Κοτόπουλο"}],
+            "meal_type": [{"id": "92", "title": "Finger food"}],
+        },
+    ) == ["dirty", "poultry"]
+    assert classify_official_category_keys(
+        {"id": 999, "slug": "santuits"},
+        {
+            "ingredient": [
+                {"id": "129", "title": "Μοσχάρι"},
+                {"id": "139", "title": "Φακές"},
+            ],
+        },
+    ) == ["dirty", "legumes", "meat"]
+    assert classify_official_category_keys(
+        {"id": 33, "slug": "snak"},
+        {
             "ingredient": [{"id": "154", "title": "Σοκολάτα"}],
             "meal_type": [{"id": "33", "title": "Σνακ"}],
         },
     ) == ["other"]
     assert classify_official_category_keys(
         {"id": 47, "slug": "smoothies"},
-        {"ingredient": [{"id": "139", "title": "Φακές"}]},
+        {
+            "ingredient": [{"id": "139", "title": "Φακές"}],
+            "meal_type": [{"id": "92", "title": "Finger food"}],
+        },
     ) == ["other"]
+    assert classify_official_category_keys(
+        {"id": 34, "slug": "glika"},
+        {"meal_type": [{"id": "92", "title": "Finger food"}]},
+    ) == ["dessert"]
 
 
 def test_canonical_category_uses_first_supported_alias():

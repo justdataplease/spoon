@@ -3,7 +3,7 @@
 The Firestore document ID is part of the mobile app's public data contract: it is
 copied into favorites, plans, history, notes, and shopping-list entries.  Existing
 Akis documents therefore keep their historical numeric IDs.  Every other provider
-uses a source-prefixed, reversible base64url ID so equal native IDs cannot collide.
+uses a source-prefixed ID so equal native IDs cannot collide.
 """
 
 from __future__ import annotations
@@ -60,7 +60,17 @@ ARGIRO = RecipeProvider(
     image_path_prefixes=("/wp-content/", "/images/", "/uploads/"),
 )
 
-PROVIDERS = {provider.key: provider for provider in (AKIS, ARGIRO)}
+GASTRONOMOS = RecipeProvider(
+    key="gastronomos",
+    source="gastronomos.gr",
+    display_name="Γαστρονόμος",
+    hosts=frozenset({"gastronomos.gr", "www.gastronomos.gr"}),
+    canonical_host="www.gastronomos.gr",
+    recipe_path=re.compile(r"^/syntagh/(?P<slug>[^/?#]+)/(?P<id>\d+)/?$"),
+    image_path_prefixes=("/wp-content/", "/uploads/", "/images/"),
+)
+
+PROVIDERS = {provider.key: provider for provider in (AKIS, ARGIRO, GASTRONOMOS)}
 _ALIASES = {
     alias: provider.key
     for provider in PROVIDERS.values()
@@ -155,7 +165,7 @@ def canonical_recipe_url(
     path = parts.path
     if provider is AKIS and path.startswith("/el/recipe/"):
         path = path[3:]
-    if provider is ARGIRO:
+    if provider in {ARGIRO, GASTRONOMOS}:
         path = path.rstrip("/") + "/"
     return urlunsplit(("https", provider.canonical_host, path, "", ""))
 

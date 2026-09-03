@@ -11,8 +11,10 @@ import com.justdataplease.spoon.data.model.Recipe
 import com.justdataplease.spoon.data.model.RecipeNote
 import com.justdataplease.spoon.data.model.ShoppingListItem
 import com.justdataplease.spoon.data.model.isCustomRecipeId
+import com.justdataplease.spoon.data.model.matchesActiveCompletion
 import com.justdataplease.spoon.data.model.mergeCookedHistory
 import com.justdataplease.spoon.data.model.requireValid
+import com.justdataplease.spoon.data.model.toCookedMeal
 import com.justdataplease.spoon.data.requireSafeRecipeDocumentId
 import com.justdataplease.spoon.domain.repository.BackendState
 import com.justdataplease.spoon.domain.repository.AccountOperationException
@@ -79,10 +81,11 @@ class LocalSpoonRepository(
         require(plan.date.isNotBlank()) { "A meal plan needs an ISO date" }
         withContext(Dispatchers.IO) {
             mutationMutex.withLock {
+                val preservedHistory = mergeCookedHistory(_mealPlans.value, _cookedHistory.value)
                 val stored = plan.copy(id = plan.date)
                 val updated = (_mealPlans.value.filterNot { it.date == stored.date } + stored)
                     .sortedBy(DayMealPlan::date)
-                val history = _cookedHistory.value.withPlanCompletion(stored)
+                val history = mergeCookedHistory(updated, preservedHistory)
                 persistPlansAndHistory(updated, history)
                 _mealPlans.value = updated
                 _cookedHistory.value = history
@@ -97,15 +100,49 @@ class LocalSpoonRepository(
                 val current = checkNotNull(_mealPlans.value.firstOrNull { it.date == date }) {
                     "Cannot complete a meal plan that does not exist: $date"
                 }
+                if (current.completed == completed) return@withLock
+                val historyBefore = mergeCookedHistory(_mealPlans.value, _cookedHistory.value)
                 val changed = current.copy(
                     completed = completed,
                     updatedAtEpochMillis = System.currentTimeMillis(),
                 )
                 val updated = (_mealPlans.value.filterNot { it.date == date } + changed)
                     .sortedBy(DayMealPlan::date)
-                val history = _cookedHistory.value.withPlanCompletion(changed)
+                val history = if (completed) {
+                    (historyBefore + changed.toCookedMeal())
+                        .distinctBy(CookedMeal::id)
+                        .sortedByDescending(CookedMeal::completedAtEpochMillis)
+                } else {
+                    historyBefore.filterNot { event -> event.matchesActiveCompletion(current) }
+                }
                 persistPlansAndHistory(updated, history)
                 _mealPlans.value = updated
+                _cookedHistory.value = history
+            }
+        }
+    }
+
+    override suspend fun deleteCookedHistoryEntry(historyId: String) {
+        requireSafeRecipeDocumentId(historyId)
+        withContext(Dispatchers.IO) {
+            mutationMutex.withLock {
+                val historyBefore = mergeCookedHistory(_mealPlans.value, _cookedHistory.value)
+                val event = historyBefore.firstOrNull { it.id == historyId } ?: return@withLock
+                val currentPlan = _mealPlans.value.firstOrNull { it.date == event.date }
+                val updatedPlans = if (currentPlan != null && event.matchesActiveCompletion(currentPlan)) {
+                    _mealPlans.value.map { plan ->
+                        if (plan.date == currentPlan.date) {
+                            plan.copy(completed = false, updatedAtEpochMillis = System.currentTimeMillis())
+                        } else {
+                            plan
+                        }
+                    }
+                } else {
+                    _mealPlans.value
+                }
+                val history = historyBefore.filterNot { it.id == historyId }
+                persistPlansAndHistory(updatedPlans, history)
+                _mealPlans.value = updatedPlans
                 _cookedHistory.value = history
             }
         }
@@ -292,20 +329,6 @@ class LocalSpoonRepository(
                 .putString(KEY_COOKED_HISTORY, json.encodeToString(history))
                 .commit(),
         ) { "Could not persist meal plans and cooked history" }
-    }
-
-    private fun List<CookedMeal>.withPlanCompletion(plan: DayMealPlan): List<CookedMeal> {
-        val withoutDate = filterNot { it.date == plan.date }
-        if (!plan.completed) return withoutDate
-        return (
-            withoutDate + CookedMeal(
-                id = plan.date,
-                date = plan.date,
-                recipeId = plan.recipeId,
-                recipeTitle = plan.recipeTitle,
-                completedAtEpochMillis = plan.updatedAtEpochMillis,
-            )
-            ).sortedByDescending(CookedMeal::completedAtEpochMillis)
     }
 
     companion object {

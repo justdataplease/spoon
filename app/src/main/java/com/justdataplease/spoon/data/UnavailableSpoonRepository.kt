@@ -52,6 +52,8 @@ class UnavailableSpoonRepository(
 
     override suspend fun setMealCompleted(date: String, completed: Boolean): Nothing = unavailable()
 
+    override suspend fun deleteCookedHistoryEntry(historyId: String): Nothing = unavailable()
+
     override suspend fun toggleFavorite(recipeId: String): Nothing = unavailable()
 
     override suspend fun upsertShoppingItems(items: List<ShoppingListItem>): Nothing = unavailable()

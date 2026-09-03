@@ -27,6 +27,8 @@ interface SpoonRepository {
     suspend fun getRecipeDetails(recipeId: String): Recipe?
     suspend fun upsertMealPlan(plan: DayMealPlan)
     suspend fun setMealCompleted(date: String, completed: Boolean)
+    suspend fun deleteCookedHistoryEntry(historyId: String): Unit =
+        unsupported("cooked history")
     suspend fun toggleFavorite(recipeId: String): Boolean
     suspend fun upsertShoppingItems(items: List<ShoppingListItem>): Unit = unsupported("shopping list")
     suspend fun setShoppingItemChecked(itemId: String, checked: Boolean): Unit =

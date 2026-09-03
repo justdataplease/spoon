@@ -85,6 +85,18 @@ def test_explicit_non_greek_language_signal_fails_closed(
         )
 
 
+def test_english_recipe_with_one_greek_lookalike_letter_fails_closed():
+    page = (
+        _synthetic_page()
+        .replace("Συνθετική φακή", "English lentil")
+        .replace("Συνθετική ελληνική περιγραφή.", "English description.")
+        .replace("1 φλιτζάνι φακές", "1 cup lentils")
+        .replace("Βράζουμε τις φακές.", "Μake the lentils.")
+    )
+    with pytest.raises(FullSchemaError, match="Greek"):
+        normalize_argiro_page(page, source_url=SOURCE_URL)
+
+
 def test_direct_string_jsonld_video_is_preserved():
     video_url = "https://www.youtube.com/embed/synthetic-video"
     record = normalize_argiro_page(
@@ -92,6 +104,41 @@ def test_direct_string_jsonld_video_is_preserved():
         source_url=SOURCE_URL,
     )
 
+    assert record["videoUrls"] == [video_url]
+
+
+@pytest.mark.parametrize(
+    "video",
+    [
+        {"@type": "VideoObject", "embedUrl": "https://www.youtube.com/embed/synthetic-video"},
+        [{"contentUrl": "https://cdn.example.test/synthetic-video.mp4"}],
+    ],
+)
+def test_mapping_and_list_jsonld_videos_are_preserved(video):
+    record = normalize_argiro_page(
+        _synthetic_page(video=video),
+        source_url=SOURCE_URL,
+    )
+    expected = (
+        "https://www.youtube.com/embed/synthetic-video"
+        if isinstance(video, dict)
+        else "https://cdn.example.test/synthetic-video.mp4"
+    )
+    assert record["videoUrls"] == [expected]
+
+
+def test_recipe_scoped_supported_iframe_is_preserved():
+    video_url = "https://player.vimeo.com/video/123456"
+    record = normalize_argiro_page(
+        _synthetic_page(
+            video=None,
+            extra_body=(
+                '<section class="single_recipe__video">'
+                f'<iframe src="{video_url}"></iframe></section>'
+            ),
+        ),
+        source_url=SOURCE_URL,
+    )
     assert record["videoUrls"] == [video_url]
 
 

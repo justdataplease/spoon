@@ -66,8 +66,11 @@ import com.justdataplease.spoon.ui.components.EmptyRecipeCard
 import com.justdataplease.spoon.ui.components.MetricPill
 import com.justdataplease.spoon.ui.components.RecipeArtwork
 import com.justdataplease.spoon.ui.components.StatusBanner
+import com.justdataplease.spoon.ui.components.MAX_RATING_THRESHOLD
 import com.justdataplease.spoon.ui.components.greekDayLabel
 import com.justdataplease.spoon.ui.components.greekShortDate
+import com.justdataplease.spoon.ui.components.ratingThresholdLabel
+import com.justdataplease.spoon.domain.repository.BackendState
 import com.justdataplease.spoon.ui.model.AvailableCategories
 import com.justdataplease.spoon.ui.model.DayPlanUi
 import com.justdataplease.spoon.ui.model.EaseUi
@@ -142,7 +145,7 @@ fun WeekScreen(
             }
         }
 
-        if (state.isWorking) {
+        if (shouldShowMealSearchBanner(state.isWorking, state.backendState)) {
             Surface(
                 modifier = Modifier.align(Alignment.TopCenter).padding(top = 12.dp),
                 shape = CircleShape,
@@ -169,6 +172,12 @@ fun WeekScreen(
         )
     }
 }
+
+/** Backend status already explains connecting/offline failures; avoid a duplicate stuck overlay. */
+internal fun shouldShowMealSearchBanner(
+    isWorking: Boolean,
+    backendState: BackendState,
+): Boolean = isWorking && (backendState is BackendState.Cloud || backendState is BackendState.Local)
 
 @Composable
 private fun WeekHero(
@@ -359,7 +368,9 @@ private fun FilterEditorSheet(
 ) {
     var categoryKey by remember(plan.date) { mutableStateOf(plan.filters.categoryKey) }
     var ease by remember(plan.date) { mutableStateOf(plan.filters.ease) }
-    var rating by remember(plan.date) { mutableFloatStateOf(plan.filters.minRating10.toFloat()) }
+    var rating by remember(plan.date) {
+        mutableFloatStateOf(plan.filters.minRating10.coerceIn(0, MAX_RATING_THRESHOLD).toFloat())
+    }
     var maxPrep by remember(plan.date) { mutableStateOf(plan.filters.maxPrepMinutes) }
     val prepOptions = listOf<Int?>(null, 15, 30, 45, 60, 90)
 
@@ -406,18 +417,19 @@ private fun FilterEditorSheet(
                 FilterSectionTitle("Ελάχιστη βαθμολογία")
                 val roundedRating = rating.roundToInt()
                 Text(
-                    when (roundedRating) {
-                        0 -> "Οποιαδήποτε"
-                        10 -> "10/10"
-                        else -> "$roundedRating+/10"
-                    },
+                    ratingThresholdLabel(roundedRating),
                     style = MaterialTheme.typography.titleLarge,
                     color = MaterialTheme.colorScheme.primary,
                 )
-                Slider(value = rating, onValueChange = { rating = it }, valueRange = 0f..10f, steps = 9)
+                Slider(
+                    value = rating,
+                    onValueChange = { rating = it },
+                    valueRange = 0f..MAX_RATING_THRESHOLD.toFloat(),
+                    steps = MAX_RATING_THRESHOLD - 1,
+                )
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Text("Όλες", style = MaterialTheme.typography.bodyMedium)
-                    Text("10/10", style = MaterialTheme.typography.bodyMedium)
+                    Text("Πάνω από 9/10", style = MaterialTheme.typography.bodyMedium)
                 }
             }
             item {

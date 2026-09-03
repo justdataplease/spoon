@@ -2,10 +2,11 @@ name: Quarterly Greek recipe catalog refresh
 
 'on':
   schedule:
-    # Split providers across consecutive UTC days so each import also fits the
-    # Firestore free-tier daily write allowance (three projections per recipe).
+    # One provider per day limits operational blast radius and makes billed
+    # three-projection write volume attributable per publisher.
     - cron: "0 3 1 1,4,7,10 *"
     - cron: "0 3 2 1,4,7,10 *"
+    - cron: "0 3 3 1,4,7,10 *"
   workflow_dispatch: {}
 
 concurrency:
@@ -22,11 +23,21 @@ env:
 jobs:
   manual_validate:
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
-    name: Manual crawl and validation
+    name: Manual crawl and validation (${{ matrix.label }})
     runs-on: ubuntu-24.04
-    timeout-minutes: 240
+    timeout-minutes: 360
     permissions:
       contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - source: akis
+            label: Akis
+          - source: argiro
+            label: Argiro
+          - source: gastronomos
+            label: Gastronomos
 
     steps:
       - name: Check out source
@@ -48,12 +59,19 @@ jobs:
         run: python -m pytest tools/recipe_importer/tests
 
       - name: Crawl the complete authorized Akis catalog
+        if: matrix.source == 'akis'
         run: python tools/recipe_importer/crawl_catalog.py --i-have-permission
 
       - name: Crawl the complete authorized Argiro catalog
+        if: matrix.source == 'argiro'
         run: python tools/recipe_importer/crawl_argiro.py --i-have-argiro-permission
 
+      - name: Crawl the complete authorized Gastronomos catalog
+        if: matrix.source == 'gastronomos'
+        run: python tools/recipe_importer/crawl_gastronomos.py --i-have-gastronomos-permission
+
       - name: Validate Akis catalog and completeness manifest
+        if: matrix.source == 'akis'
         run: >-
           python tools/recipe_importer/import_catalog.py
           tools/recipe_importer/output/akis-greek-full.jsonl
@@ -61,6 +79,7 @@ jobs:
           --i-have-permission
 
       - name: Validate Argiro catalog and completeness manifest
+        if: matrix.source == 'argiro'
         run: >-
           python tools/recipe_importer/import_catalog.py
           tools/recipe_importer/output/argiro-greek-full.jsonl
@@ -68,14 +87,23 @@ jobs:
           --i-have-permission
           --i-have-argiro-permission
 
+      - name: Validate Gastronomos catalog and completeness manifest
+        if: matrix.source == 'gastronomos'
+        run: >-
+          python tools/recipe_importer/import_catalog.py
+          tools/recipe_importer/output/gastronomos-greek-full.jsonl
+          --manifest tools/recipe_importer/output/gastronomos-greek-full.manifest.json
+          --i-have-permission
+          --i-have-gastronomos-permission
+
       - name: Upload audit reports only
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: manual-catalog-audit-${{ github.run_id }}
+          name: manual-catalog-audit-${{ matrix.source }}-${{ github.run_id }}
           path: |
-            tools/recipe_importer/output/*.manifest.json
-            tools/recipe_importer/output/*.failures.json
+            tools/recipe_importer/output/${{ matrix.source }}-greek-full.manifest.json
+            tools/recipe_importer/output/${{ matrix.source }}-greek-full.failures.json
           if-no-files-found: ignore
           retention-days: 30
 
@@ -83,7 +111,7 @@ jobs:
     if: github.event_name == 'schedule' && github.ref == 'refs/heads/main'
     name: Scheduled crawl, validation, and import
     runs-on: ubuntu-24.04
-    timeout-minutes: 240
+    timeout-minutes: 360
     environment: recipe-catalog-production
     permissions:
       contents: read
@@ -127,6 +155,10 @@ jobs:
         if: github.event.schedule == '0 3 2 1,4,7,10 *'
         run: python tools/recipe_importer/crawl_argiro.py --i-have-argiro-permission
 
+      - name: Crawl the complete authorized Gastronomos catalog
+        if: github.event.schedule == '0 3 3 1,4,7,10 *'
+        run: python tools/recipe_importer/crawl_gastronomos.py --i-have-gastronomos-permission
+
       - name: Validate Akis catalog and completeness manifest
         if: github.event.schedule == '0 3 1 1,4,7,10 *'
         run: >-
@@ -143,6 +175,15 @@ jobs:
           --manifest tools/recipe_importer/output/argiro-greek-full.manifest.json
           --i-have-permission
           --i-have-argiro-permission
+
+      - name: Validate Gastronomos catalog and completeness manifest
+        if: github.event.schedule == '0 3 3 1,4,7,10 *'
+        run: >-
+          python tools/recipe_importer/import_catalog.py
+          tools/recipe_importer/output/gastronomos-greek-full.jsonl
+          --manifest tools/recipe_importer/output/gastronomos-greek-full.manifest.json
+          --i-have-permission
+          --i-have-gastronomos-permission
 
       - name: Authenticate to Google Cloud with GitHub OIDC
         uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
@@ -171,6 +212,17 @@ jobs:
           --manifest tools/recipe_importer/output/argiro-greek-full.manifest.json
           --i-have-permission
           --i-have-argiro-permission
+          --commit
+          --project-id "$FIREBASE_PROJECT_ID"
+
+      - name: Import the validated Gastronomos catalog
+        if: github.event.schedule == '0 3 3 1,4,7,10 *'
+        run: >-
+          python tools/recipe_importer/import_catalog.py
+          tools/recipe_importer/output/gastronomos-greek-full.jsonl
+          --manifest tools/recipe_importer/output/gastronomos-greek-full.manifest.json
+          --i-have-permission
+          --i-have-gastronomos-permission
           --commit
           --project-id "$FIREBASE_PROJECT_ID"
 

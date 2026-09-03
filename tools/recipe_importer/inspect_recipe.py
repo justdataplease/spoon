@@ -40,7 +40,7 @@ else:
 
 ALLOWED_HOSTS = {"akispetretzikis.com", "www.akispetretzikis.com"}
 RECIPE_PATH_RE = re.compile(r"^/(?:el/)?recipe/(?P<id>\d+)(?:/[^/?#]+)?/?$")
-USER_AGENT = "SpoonRecipeMetadataInspector/1.0"
+USER_AGENT = "PeltesSpoonRecipeImporter/1.0 (+mailto:hey@spoon.gr)"
 MAX_RESPONSE_BYTES = 5 * 1024 * 1024
 MINIMUM_DELAY_SECONDS = 1.0
 
