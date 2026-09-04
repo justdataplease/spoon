@@ -9,6 +9,7 @@ import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class MealPreferenceSettingsStoreTest {
@@ -91,6 +92,99 @@ class MealPreferenceSettingsStoreTest {
                 store.settings.first().excludedIngredientTerms,
             )
         }
+
+    @Test
+    fun `switching owners never exposes the previous owners cached settings`() = runTest {
+        val store = newStore()
+        val ownerASettings = MealPreferenceSettings(
+            excludedCategories = setOf("fish"),
+            veganOnly = true,
+            excludedIngredientTerms = setOf("φιστίκια"),
+            updatedAtEpochMillis = 100L,
+        )
+
+        store.readForOwner("owner-a")
+        store.replaceForOwner("owner-a", ownerASettings)
+        assertEquals(ownerASettings, store.readForOwner("owner-a"))
+
+        assertEquals(MealPreferenceSettings(), store.readForOwner("owner-b"))
+        assertEquals(MealPreferenceSettings(), store.settings.first())
+        assertEquals(MealPreferenceSettings(), store.readForOwner("owner-a"))
+    }
+
+    @Test
+    fun `remote replacement for a different active owner is ignored`() = runTest {
+        val store = newStore()
+        val ownerASettings = MealPreferenceSettings(
+            excludedCategories = setOf("fish"),
+            updatedAtEpochMillis = 100L,
+        )
+        store.readForOwner("owner-a")
+        store.replaceForOwner("owner-a", ownerASettings)
+
+        store.replaceForOwner(
+            "owner-b",
+            MealPreferenceSettings(
+                veganOnly = true,
+                updatedAtEpochMillis = 200L,
+            ),
+        )
+
+        assertEquals(ownerASettings, store.settings.first())
+        assertEquals(ownerASettings, store.readForOwner("owner-a"))
+    }
+
+    @Test
+    fun `stale remote replacement cannot roll back the active owners cache`() = runTest {
+        val store = newStore()
+        val current = MealPreferenceSettings(
+            excludedCategories = setOf("dessert"),
+            veganOnly = true,
+            updatedAtEpochMillis = 200L,
+        )
+        store.readForOwner("owner-a")
+        store.replaceForOwner("owner-a", current)
+
+        store.replaceForOwner(
+            "owner-a",
+            MealPreferenceSettings(
+                excludedIngredientTerms = setOf("γάλα"),
+                updatedAtEpochMillis = 199L,
+            ),
+        )
+
+        assertEquals(current, store.settings.first())
+    }
+
+    @Test
+    fun `first owner claims legacy selections once at revision zero`() = runTest {
+        val store = newStore()
+        val legacy = MealPreferenceSettings(
+            excludedCategories = setOf("dessert"),
+            veganOnly = true,
+            excludedIngredientTerms = setOf("  Γάλα   καρύδας  "),
+        )
+        store.update { legacy }
+        val migrated = store.readForOwner("owner-a")
+
+        assertEquals(setOf("dessert"), migrated.excludedCategories)
+        assertTrue(migrated.veganOnly)
+        assertEquals(setOf("Γάλα καρύδας"), migrated.excludedIngredientTerms)
+        assertEquals(0L, migrated.updatedAtEpochMillis)
+        assertEquals(migrated, store.settings.first())
+
+        assertEquals(MealPreferenceSettings(), store.readForOwner("owner-b"))
+    }
+
+    @Test
+    fun `empty legacy defaults are claimed without creating a phantom update`() = runTest {
+        val store = newStore()
+
+        val claimed = store.readForOwner("owner-a")
+
+        assertEquals(MealPreferenceSettings(), claimed)
+        assertEquals(0L, store.settings.first().updatedAtEpochMillis)
+    }
 
     private fun kotlinx.coroutines.test.TestScope.newStore(): MealPreferenceSettingsStore {
         val file = File.createTempFile("meal_preference_settings_", ".preferences_pb")

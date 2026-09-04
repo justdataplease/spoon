@@ -9,8 +9,11 @@ import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.FirebaseNetworkException
 import com.google.firebase.FirebaseTooManyRequestsException
 import com.google.firebase.firestore.DocumentSnapshot
+import com.google.firebase.firestore.EventListener
+import com.google.firebase.firestore.FieldPath
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.FirebaseFirestoreException
+import com.google.firebase.firestore.MetadataChanges
 import com.google.firebase.firestore.Query
 import com.google.firebase.firestore.QuerySnapshot
 import com.justdataplease.spoon.data.local.RecipeCatalog
@@ -26,11 +29,13 @@ import com.justdataplease.spoon.data.model.CustomRecipe
 import com.justdataplease.spoon.data.model.DayMealPlan
 import com.justdataplease.spoon.data.model.FavoriteRecipe
 import com.justdataplease.spoon.data.model.MAX_SHOPPING_ITEMS_PER_WRITE
+import com.justdataplease.spoon.data.model.MealPreferenceDocument
 import com.justdataplease.spoon.data.model.Recipe
 import com.justdataplease.spoon.data.model.RecipeFilters
 import com.justdataplease.spoon.data.model.RecipeNote
 import com.justdataplease.spoon.data.model.ShoppingListItem
 import com.justdataplease.spoon.data.preferences.MealPreferenceSettings
+import com.justdataplease.spoon.data.preferences.MealPreferenceSettingsStore
 import com.justdataplease.spoon.data.model.isCustomRecipeId
 import com.justdataplease.spoon.data.model.mergeCookedHistory
 import com.justdataplease.spoon.data.model.newCookedMealEventId
@@ -69,8 +74,10 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.retryWhen
@@ -90,6 +97,7 @@ class FirestoreSpoonRepository internal constructor(
     private val firestore: FirebaseFirestore,
     private val recipeCatalog: RecipeCatalog,
     private val ownerBootstrapStore: OwnerBootstrapStore,
+    private val preferenceStore: MealPreferenceSettingsStore? = null,
 ) : SpoonRepository {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val authMutex = Mutex()
@@ -108,6 +116,7 @@ class FirestoreSpoonRepository internal constructor(
     private val notesHealth = MutableStateFlow<CloudComponentState>(CloudComponentState.Pending)
     private val customRecipesHealth = MutableStateFlow<CloudComponentState>(CloudComponentState.Pending)
     private val cookedHistoryHealth = MutableStateFlow<CloudComponentState>(CloudComponentState.Pending)
+    private val preferencesHealth = MutableStateFlow<CloudComponentState>(CloudComponentState.Pending)
     private val ownerHealth = listOf(
         mealPlansHealth,
         favoritesHealth,
@@ -115,6 +124,7 @@ class FirestoreSpoonRepository internal constructor(
         notesHealth,
         customRecipesHealth,
         cookedHistoryHealth,
+        preferencesHealth,
     )
     private val _referencedCatalogRecipes = MutableStateFlow<List<Recipe>>(emptyList())
     private val _mealPlans = MutableStateFlow<List<DayMealPlan>>(emptyList())
@@ -123,6 +133,7 @@ class FirestoreSpoonRepository internal constructor(
     private val _recipeNotes = MutableStateFlow<List<RecipeNote>>(emptyList())
     private val _customRecipes = MutableStateFlow<List<CustomRecipe>>(emptyList())
     private val _cookedHistory = MutableStateFlow<List<CookedMeal>>(emptyList())
+    private val _mealPreferenceSettings = MutableStateFlow(MealPreferenceSettings())
     private val serverBackedOwnerComponents = MutableStateFlow<Set<String>>(emptySet())
     private val establishedCachedPersonalData = MutableStateFlow(false)
     private val ownerBootstrapComplete = MutableStateFlow(
@@ -152,6 +163,7 @@ class FirestoreSpoonRepository internal constructor(
     override val customRecipes = _customRecipes.asStateFlow()
     override val cookedHistory = combine(_mealPlans, _cookedHistory, ::mergeCookedHistory)
         .stateIn(scope, SharingStarted.Eagerly, emptyList())
+    override val mealPreferenceSettings = _mealPreferenceSettings.asStateFlow()
 
     private val authListener = FirebaseAuth.AuthStateListener { firebaseAuth ->
         val user = firebaseAuth.currentUser
@@ -164,6 +176,7 @@ class FirestoreSpoonRepository internal constructor(
     init {
         startLocalCatalog()
         observeUserQueries()
+        observeMealPreferenceQuery()
         auth.addAuthStateListener(authListener)
         startAuthentication()
     }
@@ -246,6 +259,118 @@ class FirestoreSpoonRepository internal constructor(
         ) { _cookedHistory.value = it }
     }
 
+    /**
+     * Loads the account-scoped DataStore mirror before subscribing to Firestore. A server
+     * document wins on equal/newer revisions; a newer offline local edit is queued back only
+     * after a server-backed snapshot proves what is currently online.
+     */
+    private fun observeMealPreferenceQuery() {
+        scope.launch {
+            uid.flatMapLatest { currentUid ->
+                preferencesHealth.value = CloudComponentState.Pending
+                if (currentUid == null) {
+                    flowOf<Pair<String?, ObservedObjects<MealPreferenceDocument>?>>(null to null)
+                } else {
+                    flow {
+                        val cached = runCatching {
+                            preferenceStore?.readForOwner(currentUid)
+                        }.getOrNull() ?: MealPreferenceSettings()
+                        synchronized(ownerSnapshotLock) {
+                            if (
+                                uid.value == currentUid &&
+                                cached.updatedAtEpochMillis >=
+                                _mealPreferenceSettings.value.updatedAtEpochMillis
+                            ) {
+                                _mealPreferenceSettings.value = cached
+                            }
+                        }
+                        emitAll(
+                            resilientObjectsFlow(
+                                ownerUid = currentUid,
+                                health = preferencesHealth,
+                                type = MealPreferenceDocument::class.java,
+                                query = mealPreferenceDocuments(currentUid)
+                                    .whereEqualTo(
+                                        FieldPath.documentId(),
+                                        MEAL_PREFERENCE_DOCUMENT_ID,
+                                    ),
+                                includeMetadataChanges = true,
+                            ).map { snapshot -> currentUid to snapshot },
+                        )
+                    }
+                }
+            }.collect { (sourceUid, snapshot) ->
+                var remoteToPersist: MealPreferenceSettings? = null
+                var localToBackup: MealPreferenceSettings? = null
+                synchronized(ownerSnapshotLock) {
+                    if (uid.value == sourceUid && sourceUid != null && snapshot != null) {
+                        val remote = snapshot.values.singleOrNull()?.toSettingsOrNull()
+                        val local = _mealPreferenceSettings.value
+                        val awaitingServer =
+                            snapshot.fromCache || snapshot.hasPendingWrites
+                        when {
+                            remote != null &&
+                                remote.updatedAtEpochMillis >= local.updatedAtEpochMillis -> {
+                                _mealPreferenceSettings.value = remote
+                                remoteToPersist = remote
+                            }
+                            !awaitingServer &&
+                                remote == null &&
+                                local.updatedAtEpochMillis == 0L &&
+                                local.hasActiveSelections() -> {
+                                val migrated = local.normalizedForSync(
+                                    nextPreferenceTimestamp(
+                                        now = System.currentTimeMillis(),
+                                        current = 0L,
+                                    ),
+                                )
+                                _mealPreferenceSettings.value = migrated
+                                remoteToPersist = migrated
+                                localToBackup = migrated
+                            }
+                            !awaitingServer &&
+                                local.updatedAtEpochMillis > 0L &&
+                                (remote == null ||
+                                    local.updatedAtEpochMillis > remote.updatedAtEpochMillis) -> {
+                                localToBackup = local
+                            }
+                        }
+                        preferencesHealth.value = CloudComponentState.Ready
+                        recordOwnerSnapshot(
+                            sourceUid = sourceUid,
+                            component = PREFERENCES_COMPONENT,
+                            fromCache = awaitingServer,
+                            hasValues = remote != null,
+                        )
+                    }
+                }
+                if (sourceUid != null) {
+                    remoteToPersist?.let { remote ->
+                        runCatching { preferenceStore?.replaceForOwner(sourceUid, remote) }
+                            .onFailure { Log.w(FIRESTORE_TAG, "Could not cache meal preferences", it) }
+                    }
+                    localToBackup?.let { local ->
+                        runCatching {
+                            withPersonalMutation(sourceUid) {
+                                val task = mealPreferenceDocuments(sourceUid)
+                                    .document(MEAL_PREFERENCE_DOCUMENT_ID)
+                                    .set(local.toFirestoreDocument())
+                                trackQueuedWrite(
+                                    sourceUid,
+                                    "meal preferences",
+                                    preferencesHealth,
+                                    task,
+                                )
+                            }
+                        }.onFailure {
+                            Log.w(FIRESTORE_TAG, "Could not queue cached meal preferences", it)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     override suspend fun ensureReady() {
         recipeCatalog.ensureReady()
         val currentUid = awaitAuthenticatedUid()
@@ -291,6 +416,26 @@ class FirestoreSpoonRepository internal constructor(
         randomSeed = randomSeed,
         preferences = preferences,
     )
+
+    override suspend fun updateMealPreferenceSettings(settings: MealPreferenceSettings) {
+        val currentUid = awaitUid()
+        val stored = withPersonalMutation(currentUid) {
+            val next = settings.normalizedForSync(
+                nextPreferenceTimestamp(
+                    now = System.currentTimeMillis(),
+                    current = _mealPreferenceSettings.value.updatedAtEpochMillis,
+                ),
+            )
+            _mealPreferenceSettings.value = next
+            val task = mealPreferenceDocuments(currentUid)
+                .document(MEAL_PREFERENCE_DOCUMENT_ID)
+                .set(next.toFirestoreDocument())
+            trackQueuedWrite(currentUid, "meal preferences", preferencesHealth, task)
+            next
+        }
+        runCatching { preferenceStore?.replaceForOwner(currentUid, stored) }
+            .onFailure { Log.w(FIRESTORE_TAG, "Could not persist meal preferences locally", it) }
+    }
 
     override suspend fun upsertMealPlan(plan: DayMealPlan) {
         require(plan.date.isNotBlank())
@@ -723,6 +868,7 @@ class FirestoreSpoonRepository internal constructor(
                         health = health,
                         type = type,
                         query = queryFactory(currentUid),
+                        includeMetadataChanges = true,
                     )
                         .map { snapshot -> currentUid to snapshot }
                 }
@@ -732,6 +878,8 @@ class FirestoreSpoonRepository internal constructor(
                 // synchronous clear in publishAuthenticatedUser().
                 synchronized(ownerSnapshotLock) {
                     if (uid.value == sourceUid && snapshot != null) {
+                        val awaitingServer =
+                            snapshot.fromCache || snapshot.hasPendingWrites
                         // Publish decoded values before declaring this component cache-ready. This
                         // ordering prevents ensureWeek from observing a ready flag with an old
                         // empty meal-plan flow. The shared lock also prevents an old account's
@@ -741,7 +889,7 @@ class FirestoreSpoonRepository internal constructor(
                         recordOwnerSnapshot(
                             sourceUid = requireNotNull(sourceUid),
                             component = component,
-                            fromCache = snapshot.fromCache,
+                            fromCache = awaitingServer,
                             hasValues = snapshot.hasValues,
                         )
                     }
@@ -755,7 +903,8 @@ class FirestoreSpoonRepository internal constructor(
         health: MutableStateFlow<CloudComponentState>,
         type: Class<T>,
         query: Query,
-    ): Flow<ObservedObjects<T>> = query.objectsFlow(type)
+        includeMetadataChanges: Boolean = false,
+    ): Flow<ObservedObjects<T>> = query.objectsFlow(type, includeMetadataChanges)
         .retryWhen { error, attempt ->
             retryQuery(ownerUid, health, type, error, attempt)
         }
@@ -889,6 +1038,7 @@ class FirestoreSpoonRepository internal constructor(
         _recipeNotes.value = emptyList()
         _customRecipes.value = emptyList()
         _cookedHistory.value = emptyList()
+        _mealPreferenceSettings.value = MealPreferenceSettings()
     }
 
     private fun markOwnerComponentsPending() {
@@ -928,6 +1078,8 @@ class FirestoreSpoonRepository internal constructor(
     private fun recipeNotes(uid: String) = ownerCollection(uid, RECIPE_NOTES_COLLECTION)
     private fun customRecipeDocuments(uid: String) = ownerCollection(uid, CUSTOM_RECIPES_COLLECTION)
     private fun cookedHistoryDocuments(uid: String) = ownerCollection(uid, COOKED_HISTORY_COLLECTION)
+    private fun mealPreferenceDocuments(uid: String) =
+        ownerCollection(uid, MEAL_PREFERENCES_COLLECTION)
 
     companion object {
         const val USER_ROOT_COLLECTION = "spoon"
@@ -937,6 +1089,7 @@ class FirestoreSpoonRepository internal constructor(
         const val RECIPE_NOTES_COLLECTION = "recipeNotes"
         const val CUSTOM_RECIPES_COLLECTION = "customRecipes"
         const val COOKED_HISTORY_COLLECTION = "cookedHistory"
+        const val MEAL_PREFERENCES_COLLECTION = "preferences"
         private const val DATE_FIELD = "date"
         private const val CREATED_AT_FIELD = "createdAtEpochMillis"
         private const val UPDATED_AT_FIELD = "updatedAtEpochMillis"
@@ -950,6 +1103,7 @@ class FirestoreSpoonRepository internal constructor(
         private const val NOTES_COMPONENT = "notes"
         private const val CUSTOM_RECIPES_COMPONENT = "customRecipes"
         private const val COOKED_HISTORY_COMPONENT = "cookedHistory"
+        private const val PREFERENCES_COMPONENT = "mealPreferences"
         private val ALL_OWNER_COMPONENTS = setOf(
             MEAL_PLANS_COMPONENT,
             FAVORITES_COMPONENT,
@@ -957,6 +1111,7 @@ class FirestoreSpoonRepository internal constructor(
             NOTES_COMPONENT,
             CUSTOM_RECIPES_COMPONENT,
             COOKED_HISTORY_COMPONENT,
+            PREFERENCES_COMPONENT,
         )
     }
 }
@@ -1167,16 +1322,25 @@ internal fun retryDelayMillis(attempt: Long): Long =
 private data class ObservedObjects<T : Any>(
     val values: List<T>,
     val fromCache: Boolean,
+    val hasPendingWrites: Boolean,
     val hasValues: Boolean,
 )
 
-private fun <T : Any> Query.objectsFlow(type: Class<T>): Flow<ObservedObjects<T>> =
+private fun <T : Any> Query.objectsFlow(
+    type: Class<T>,
+    includeMetadataChanges: Boolean,
+): Flow<ObservedObjects<T>> =
     callbackFlow<QuerySnapshot> {
-        val registration = addSnapshotListener { snapshot, error ->
+        val listener = EventListener<QuerySnapshot> { snapshot, error ->
             when {
                 error != null -> close(error)
                 snapshot != null -> trySend(snapshot)
             }
+        }
+        val registration = if (includeMetadataChanges) {
+            addSnapshotListener(MetadataChanges.INCLUDE, listener)
+        } else {
+            addSnapshotListener(listener)
         }
         awaitClose { registration.remove() }
     }
@@ -1191,6 +1355,7 @@ private fun <T : Any> Query.objectsFlow(type: Class<T>): Flow<ObservedObjects<T>
             ObservedObjects(
                 values = values,
                 fromCache = snapshot.metadata.isFromCache,
+                hasPendingWrites = snapshot.metadata.hasPendingWrites(),
                 // Upgrade compatibility should only trust locally cached data that decoded into a
                 // valid owner model, never a malformed document that happened to exist on disk.
                 hasValues = values.isNotEmpty(),

@@ -52,6 +52,53 @@ service cloud.firestore {
         value.size() <= maximum;
     }
 
+    function validExcludedIngredientTerms(values) {
+      let count = values.size();
+      let joined = values.join('\n');
+      return values is list &&
+        count <= 40 &&
+        count == values.toSet().size() &&
+        (
+          count == 0 ||
+          (
+            values == joined.split('\n') &&
+            joined.matches('^[^\\n]{2,60}(\\n[^\\n]{2,60}){0,39}$')
+          )
+        );
+    }
+
+    function validMealPreferences(data) {
+      return data.keys().hasAll([
+          'excludedCategories',
+          'veganOnly',
+          'excludedIngredientTerms',
+          'updatedAtEpochMillis'
+        ]) &&
+        data.keys().hasOnly([
+          'excludedCategories',
+          'veganOnly',
+          'excludedIngredientTerms',
+          'updatedAtEpochMillis'
+        ]) &&
+        data.excludedCategories is list &&
+        data.excludedCategories.size() <= 9 &&
+        data.excludedCategories.size() == data.excludedCategories.toSet().size() &&
+        data.excludedCategories.hasOnly([
+          'legumes',
+          'poultry',
+          'vegetables',
+          'meat',
+          'fish',
+          'street_food',
+          'pasta_rice',
+          'dessert',
+          'other'
+        ]) &&
+        data.veganOnly is bool &&
+        validExcludedIngredientTerms(data.excludedIngredientTerms) &&
+        validEpochMillis(data.updatedAtEpochMillis);
+    }
+
     function validCustomRecipeId(recipeId) {
       return recipeId.matches(
         '^custom_[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[1-5][0-9A-Fa-f]{3}-[89AaBb][0-9A-Fa-f]{3}-[0-9A-Fa-f]{12}$'
@@ -359,6 +406,20 @@ service cloud.firestore {
         validFavorite(request.resource.data, favoriteId);
       allow update: if false;
       allow delete: if isOwner(uid);
+    }
+
+    // A single owner-scoped document backs up device-local meal exclusions.
+    // Queries must constrain the document ID to `meal`; arbitrary preference
+    // documents remain unreadable and cannot be created by mobile clients.
+    match /spoon/{uid}/preferences/{preferenceId} {
+      allow get, list: if preferenceId == 'meal' && isOwner(uid);
+      allow create: if preferenceId == 'meal' &&
+        isOwner(uid) &&
+        validMealPreferences(request.resource.data);
+      allow update: if preferenceId == 'meal' &&
+        isOwner(uid) &&
+        validMealPreferences(request.resource.data);
+      allow delete: if false;
     }
 
     match /spoon/{uid}/shoppingItems/{itemId} {

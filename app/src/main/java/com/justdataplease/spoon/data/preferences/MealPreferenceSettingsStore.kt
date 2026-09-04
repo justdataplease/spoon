@@ -6,6 +6,8 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.longPreferencesKey
+import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -28,7 +30,13 @@ data class MealPreferenceSettings(
     val excludedCategories: Set<String> = emptySet(),
     val veganOnly: Boolean = false,
     val excludedIngredientTerms: Set<String> = emptySet(),
-)
+    val updatedAtEpochMillis: Long = 0L,
+) {
+    fun hasActiveSelections(): Boolean =
+        excludedCategories.isNotEmpty() || veganOnly || excludedIngredientTerms.isNotEmpty()
+}
+
+internal const val MAX_MEAL_PREFERENCE_EPOCH_MILLIS = 253_402_300_799_999L
 
 private val Context.mealPreferenceSettingsDataStore: DataStore<Preferences> by preferencesDataStore(
     name = MealPreferenceSettingsStore.FILE_NAME,
@@ -81,7 +89,50 @@ class MealPreferenceSettingsStore internal constructor(
             preferences.remove(EXCLUDED_CATEGORIES)
             preferences.remove(VEGAN_ONLY)
             preferences.remove(EXCLUDED_INGREDIENT_TERMS)
+            preferences.remove(UPDATED_AT_EPOCH_MILLIS)
         }
+    }
+
+    /**
+     * Activates an account-scoped cache. Legacy v0.7 values are claimed once by the account
+     * that is signed in during the upgrade; switching accounts never exposes another owner's data.
+     */
+    suspend fun readForOwner(ownerUid: String): MealPreferenceSettings {
+        require(ownerUid.isNotBlank())
+        var result = MealPreferenceSettings()
+        dataStore.edit { preferences ->
+            val storedOwner = preferences[OWNER_UID]
+            val decoded = decode(preferences)
+            result = when {
+                storedOwner == ownerUid -> decoded
+                // Keep legacy values at revision zero. The repository promotes them only after
+                // a server-backed empty snapshot, so an existing cloud document always wins.
+                storedOwner == null && decoded.hasActiveSelections() -> decoded
+                else -> MealPreferenceSettings()
+            }
+            preferences[OWNER_UID] = ownerUid
+            encode(preferences, result)
+        }
+        return result
+    }
+
+    suspend fun replaceForOwner(
+        ownerUid: String,
+        settings: MealPreferenceSettings,
+    ): Boolean {
+        require(ownerUid.isNotBlank())
+        var replaced = false
+        dataStore.edit { preferences ->
+            val current = decode(preferences)
+            if (
+                preferences[OWNER_UID] == ownerUid &&
+                settings.updatedAtEpochMillis >= current.updatedAtEpochMillis
+            ) {
+                encode(preferences, settings)
+                replaced = true
+            }
+        }
+        return replaced
     }
 
     internal companion object {
@@ -90,6 +141,8 @@ class MealPreferenceSettingsStore internal constructor(
         private val EXCLUDED_CATEGORIES = stringSetPreferencesKey("excluded_categories")
         private val VEGAN_ONLY = booleanPreferencesKey("vegan_only")
         private val EXCLUDED_INGREDIENT_TERMS = stringSetPreferencesKey("excluded_ingredient_terms")
+        private val UPDATED_AT_EPOCH_MILLIS = longPreferencesKey("updated_at_epoch_millis")
+        private val OWNER_UID = stringPreferencesKey("owner_uid")
 
         fun decode(preferences: Preferences): MealPreferenceSettings = MealPreferenceSettings(
             excludedCategories = preferences[EXCLUDED_CATEGORIES].orEmpty().cleanedPreferenceValues(),
@@ -97,6 +150,8 @@ class MealPreferenceSettingsStore internal constructor(
             excludedIngredientTerms = preferences[EXCLUDED_INGREDIENT_TERMS]
                 .orEmpty()
                 .cleanedPreferenceValues(),
+            updatedAtEpochMillis = (preferences[UPDATED_AT_EPOCH_MILLIS] ?: 0L)
+                .coerceIn(0L, MAX_MEAL_PREFERENCE_EPOCH_MILLIS),
         )
 
         fun encode(
@@ -107,8 +162,23 @@ class MealPreferenceSettingsStore internal constructor(
             preferences[VEGAN_ONLY] = settings.veganOnly
             preferences[EXCLUDED_INGREDIENT_TERMS] = settings.excludedIngredientTerms
                 .cleanedPreferenceValues()
+            preferences[UPDATED_AT_EPOCH_MILLIS] = settings.updatedAtEpochMillis
+                .coerceIn(0L, MAX_MEAL_PREFERENCE_EPOCH_MILLIS)
         }
     }
+}
+
+internal fun nextMealPreferenceTimestamp(now: Long, current: Long): Long {
+    val boundedCurrent = current.coerceIn(0L, MAX_MEAL_PREFERENCE_EPOCH_MILLIS)
+    val incremented = if (boundedCurrent == MAX_MEAL_PREFERENCE_EPOCH_MILLIS) {
+        MAX_MEAL_PREFERENCE_EPOCH_MILLIS
+    } else {
+        boundedCurrent + 1L
+    }
+    return maxOf(
+        now.coerceIn(1L, MAX_MEAL_PREFERENCE_EPOCH_MILLIS),
+        incremented,
+    )
 }
 
 private fun Set<String>.cleanedPreferenceValues(): Set<String> = asSequence()

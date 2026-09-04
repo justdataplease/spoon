@@ -12,6 +12,8 @@ import com.justdataplease.spoon.data.model.RecipeFilters
 import com.justdataplease.spoon.data.model.RecipeNote
 import com.justdataplease.spoon.data.model.ShoppingListItem
 import com.justdataplease.spoon.data.preferences.MealPreferenceSettings
+import com.justdataplease.spoon.data.preferences.MealPreferenceSettingsStore
+import com.justdataplease.spoon.data.preferences.nextMealPreferenceTimestamp
 import com.justdataplease.spoon.data.model.isCustomRecipeId
 import com.justdataplease.spoon.data.model.matchesActiveCompletion
 import com.justdataplease.spoon.data.model.mergeCookedHistory
@@ -33,6 +35,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -46,9 +49,11 @@ class LocalSpoonRepository(
     private val preferences: SharedPreferences,
     private val json: Json,
     private val recipeCatalog: RecipeCatalog = InMemoryRecipeCatalog(DemoRecipeCatalog.recipes),
+    private val preferenceStore: MealPreferenceSettingsStore? = null,
 ) : SpoonRepository {
     private val mutationMutex = Mutex()
     private val _accountState = MutableStateFlow<AccountState>(AccountState.Unavailable)
+    private val fallbackMealPreferenceSettings = MutableStateFlow(MealPreferenceSettings())
 
     private val _mealPlans = MutableStateFlow(readPlans())
     private val _favoriteRecipeIds = MutableStateFlow(readFavoriteIds())
@@ -78,6 +83,8 @@ class LocalSpoonRepository(
     override val customRecipes: Flow<List<CustomRecipe>> = _customRecipes.asStateFlow()
     override val cookedHistory: Flow<List<CookedMeal>> =
         combine(_mealPlans, _cookedHistory, ::mergeCookedHistory)
+    override val mealPreferenceSettings: Flow<MealPreferenceSettings> =
+        preferenceStore?.settings ?: fallbackMealPreferenceSettings.asStateFlow()
 
     override suspend fun ensureReady() = recipeCatalog.ensureReady()
 
@@ -119,6 +126,19 @@ class LocalSpoonRepository(
         randomSeed = randomSeed,
         preferences = preferences,
     )
+
+    override suspend fun updateMealPreferenceSettings(settings: MealPreferenceSettings) {
+        val current = mealPreferenceSettings.first()
+        val stored = settings.copy(
+            updatedAtEpochMillis = nextMealPreferenceTimestamp(
+                now = System.currentTimeMillis(),
+                current = current.updatedAtEpochMillis,
+            ),
+        )
+        preferenceStore?.update { stored } ?: run {
+            fallbackMealPreferenceSettings.value = stored
+        }
+    }
 
     override suspend fun upsertMealPlan(plan: DayMealPlan) {
         require(plan.date.isNotBlank()) { "A meal plan needs an ISO date" }

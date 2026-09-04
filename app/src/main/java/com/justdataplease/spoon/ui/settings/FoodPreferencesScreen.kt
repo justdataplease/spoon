@@ -304,7 +304,7 @@ fun FoodPreferencesScreen(
                         ingredientInput = ""
                         ingredientError = null
                     },
-                    enabled = draft != MealPreferenceSettings() || ingredientInput.isNotBlank(),
+                    enabled = draft.hasActiveSelections() || ingredientInput.isNotBlank(),
                     modifier = Modifier.weight(1f).height(54.dp),
                 ) {
                     Text("Επαναφορά όλων")

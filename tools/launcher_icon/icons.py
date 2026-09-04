@@ -422,7 +422,59 @@ S4 = Concept(
     mono=MONO_CROSSED,
 )
 
-CONCEPTS = [S1, S3, P6, S2]
+# ---- the first place setting: stroked cutlery, hairline-rim plate, «?» ----
+# cutlery sits 27 units either side of the plate centre, leaving clear air around the plate
+FORK_HANDLE, FORK_TINES, FORK_MID = "M27,54 V68", "M22.6,41 V48 A4.4,4.4 0 0 0 31.4,48 V41", "M27,41 V49"
+SPOON_HANDLE = "M81,54 V68"
+SPOON_BOWL = ellipse(81, 45.5, 5.4, 8)
+
+
+def outline_cutlery(color):
+    return [
+        Shape(FORK_HANDLE, stroke=color, width=4.6),
+        Shape(FORK_TINES, stroke=color, width=3),
+        Shape(FORK_MID, stroke=color, width=3),
+        Shape(SPOON_HANDLE, stroke=color, width=4.6),
+        Shape(SPOON_BOWL, fill=color),
+    ]
+
+
+def first_plate(r=20.5):
+    return [
+        Shape(circle(54, 56, r), fill=PAPRIKA_DARK),
+        Shape(circle(54, 54, r), fill=CREAM),
+        Shape(circle(54, 54, r - 5), stroke=OAT, width=1.6),
+    ]
+
+
+FIRST_MARK = [Shape(qmark(54, 49.8, 6.6, 2.4, 168), stroke=PAPRIKA, width=5.7), Shape(circle(54, 65, 3.1), fill=PAPRIKA)]
+MONO_FIRST = outline_cutlery("#000") + [Shape(circle(54, 54, 20.5), fill="#000")]
+
+O1 = Concept(
+    "place_setting", "First setting, «?»",
+    "The very first place setting: outline fork and spoon, hairline-rim plate, question mark.",
+    PAPRIKA,
+    shapes=outline_cutlery(CREAM) + first_plate() + FIRST_MARK,
+    mono=MONO_FIRST,
+)
+
+O2 = Concept(
+    "place_setting_greek", "First setting, Greek «;»",
+    "The first cutlery and plate, with the smooth Greek question mark instead of «?».",
+    PAPRIKA,
+    shapes=outline_cutlery(CREAM) + first_plate() + greek_mark(PAPRIKA, r=4.6, cy_dot=45, cy_head=57),
+    mono=MONO_FIRST,
+)
+
+O3 = Concept(
+    "setting_question", "Current setting, «?»",
+    "The solid cutlery and two-tone plate from the current icon, with «?» instead of «;».",
+    PAPRIKA,
+    shapes=setting_flank([Shape(qmark(54, 49.5, 7.2, 2.5, 168), stroke=PAPRIKA, width=6.2), Shape(circle(54, 66, 3.5), fill=PAPRIKA)], plate_r=22),
+    mono=MONO_FLANK,
+)
+
+CONCEPTS = [O1, S1, O2, O3]
 
 MASKS = {
     "circle": '<circle cx="54" cy="54" r="36"/>',

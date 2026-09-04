@@ -32,15 +32,15 @@ class LauncherIconResourceTest {
     }
 
     @Test
-    fun `launcher is a place setting with the Greek question mark, drawn only in the app palette`() {
+    fun `launcher is a place setting with a question mark, drawn only in the app palette`() {
         val foreground = projectFile("app/src/main/res/drawable/ic_launcher_foreground.xml").readText()
         val palette = setOf("#FFF8F1", "#F3E7D8", "#B8442E", "#8D2E1E")
         val usedColors = Regex("#[0-9A-Fa-f]{6}").findAll(foreground).map(MatchResult::value).toSet()
 
         assertTrue("unexpected colours: ${usedColors - palette}", palette.containsAll(usedColors))
-        // fork (3 tines, neck, handle, cap), spoon (bowl, handle, cap), plate (shadow, disc, well),
-        // Greek «;» (dot, comma head, comma tail)
-        assertEquals(15, Regex("<path(?:\\s|>)").findAll(foreground).count())
+        // fork (handle, tines, middle tine), spoon (handle, bowl), plate (shadow, disc, rim),
+        // question mark (hook, dot)
+        assertEquals(10, Regex("<path(?:\\s|>)").findAll(foreground).count())
         assertFalse(foreground.contains("gradient"))
     }
 

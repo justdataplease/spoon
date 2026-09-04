@@ -43,7 +43,7 @@ internal fun ownerBootstrapMarkerName(ownerUid: String): String {
         .joinToString(separator = "") { byte ->
             (byte.toInt() and 0xff).toString(16).padStart(2, '0')
         }
-    return "owner_bootstrap_$digest"
+    return "owner_bootstrap_v2_$digest"
 }
 
 private fun markerFile(directory: File, ownerUid: String): File =

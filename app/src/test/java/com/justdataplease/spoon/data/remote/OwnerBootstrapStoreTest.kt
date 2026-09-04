@@ -12,10 +12,12 @@ class OwnerBootstrapStoreTest {
 
         assertEquals(marker, ownerBootstrapMarkerName(ownerUid))
         assertFalse(marker.contains(ownerUid))
-        assertEquals(64, marker.removePrefix("owner_bootstrap_").length)
+        assertEquals(64, marker.removePrefix("owner_bootstrap_v2_").length)
         assertEquals(
             setOf(true),
-            marker.removePrefix("owner_bootstrap_").map { it in '0'..'9' || it in 'a'..'f' }.toSet(),
+            marker.removePrefix("owner_bootstrap_v2_")
+                .map { it in '0'..'9' || it in 'a'..'f' }
+                .toSet(),
         )
     }
 }

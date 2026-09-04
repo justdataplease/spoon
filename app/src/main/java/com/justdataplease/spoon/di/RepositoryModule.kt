@@ -10,6 +10,7 @@ import com.justdataplease.spoon.data.local.RecipeCatalog
 import com.justdataplease.spoon.data.remote.FirestoreSpoonRepository
 import com.justdataplease.spoon.data.remote.NoBackupOwnerBootstrapStore
 import com.justdataplease.spoon.data.remote.configurePersistentPersonalCache
+import com.justdataplease.spoon.data.preferences.MealPreferenceSettingsStore
 import com.justdataplease.spoon.domain.repository.SpoonRepository
 import com.justdataplease.spoon.firebaseAppOrNull
 import dagger.Module
@@ -27,6 +28,7 @@ object RepositoryModule {
     @Singleton
     fun provideSpoonRepository(
         @ApplicationContext context: Context,
+        preferenceStore: MealPreferenceSettingsStore,
     ): SpoonRepository {
         val json = Json {
             ignoreUnknownKeys = true
@@ -34,11 +36,11 @@ object RepositoryModule {
         }
         val recipeCatalog = BundledRecipeCatalog(context, json)
         if (!BuildConfig.HAS_FIREBASE_CONFIG) {
-            return localRepository(context, json, recipeCatalog)
+            return localRepository(context, json, recipeCatalog, preferenceStore)
         }
 
         val firebaseApp = runCatching { firebaseAppOrNull(context) }.getOrNull()
-            ?: return localRepository(context, json, recipeCatalog)
+            ?: return localRepository(context, json, recipeCatalog, preferenceStore)
 
         return runCatching {
             val firestore = configurePersistentPersonalCache(
@@ -49,14 +51,16 @@ object RepositoryModule {
                 firestore = firestore,
                 recipeCatalog = recipeCatalog,
                 ownerBootstrapStore = NoBackupOwnerBootstrapStore(context),
+                preferenceStore = preferenceStore,
             )
-        }.getOrElse { localRepository(context, json, recipeCatalog) }
+        }.getOrElse { localRepository(context, json, recipeCatalog, preferenceStore) }
     }
 
     private fun localRepository(
         context: Context,
         json: Json,
         recipeCatalog: RecipeCatalog,
+        preferenceStore: MealPreferenceSettingsStore,
     ): SpoonRepository = LocalSpoonRepository(
         preferences = context.getSharedPreferences(
             LocalSpoonRepository.PREFERENCES_NAME,
@@ -64,5 +68,6 @@ object RepositoryModule {
         ),
         json = json,
         recipeCatalog = recipeCatalog,
+        preferenceStore = preferenceStore,
     )
 }

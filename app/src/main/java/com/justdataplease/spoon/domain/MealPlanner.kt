@@ -10,7 +10,6 @@ import com.justdataplease.spoon.data.model.RecipeNote
 import com.justdataplease.spoon.data.model.ShoppingListItem
 import com.justdataplease.spoon.data.model.newCustomRecipeId
 import com.justdataplease.spoon.data.preferences.MealPreferenceSettings
-import com.justdataplease.spoon.data.preferences.MealPreferenceSettingsStore
 import com.justdataplease.spoon.data.isSafeRecipeDocumentId
 import com.justdataplease.spoon.domain.repository.AccountState
 import com.justdataplease.spoon.domain.repository.CatalogFacetOptions
@@ -20,7 +19,6 @@ import java.time.LocalDate
 import javax.inject.Inject
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.flowOf
 import kotlin.random.Random
 
 sealed interface MealPlanSelection {
@@ -56,7 +54,6 @@ sealed interface FavoriteReplacementResult {
 class MealPlanner @Inject constructor(
     private val repository: SpoonRepository,
     private val selector: RecipeSelector,
-    private val preferenceStore: MealPreferenceSettingsStore? = null,
 ) {
     val backendState = repository.backendState
     val accountState: Flow<AccountState> = repository.accountState
@@ -67,8 +64,7 @@ class MealPlanner @Inject constructor(
     val recipeNotes: Flow<List<RecipeNote>> = repository.recipeNotes
     val customRecipes: Flow<List<CustomRecipe>> = repository.customRecipes
     val cookedHistory: Flow<List<CookedMeal>> = repository.cookedHistory
-    val mealPreferenceSettings: Flow<MealPreferenceSettings> =
-        preferenceStore?.settings ?: flowOf(MealPreferenceSettings())
+    val mealPreferenceSettings: Flow<MealPreferenceSettings> = repository.mealPreferenceSettings
 
     suspend fun getRecipeDetails(recipeId: String): Recipe? =
         repository.getRecipeDetails(recipeId)
@@ -85,11 +81,11 @@ class MealPlanner @Inject constructor(
     )
 
     suspend fun saveMealPreferenceSettings(settings: MealPreferenceSettings) {
-        preferenceStore?.update { settings }
+        repository.updateMealPreferenceSettings(settings)
     }
 
     suspend fun clearMealPreferenceSettings() {
-        preferenceStore?.clear()
+        repository.updateMealPreferenceSettings(MealPreferenceSettings())
     }
 
     suspend fun getCatalogFacetOptions(): CatalogFacetOptions =
@@ -146,7 +142,7 @@ class MealPlanner @Inject constructor(
         if (
             selected == null &&
             filters == null &&
-            preferences != MealPreferenceSettings() &&
+            preferences.hasActiveSelections() &&
             requestedFilters.category != MealCategory.ANY.key
         ) {
             effectiveFilters = requestedFilters.copy(category = MealCategory.ANY.key)
@@ -297,7 +293,7 @@ class MealPlanner @Inject constructor(
         )
         if (
             recipe == null &&
-            preferences != MealPreferenceSettings() &&
+            preferences.hasActiveSelections() &&
             filters.category != MealCategory.ANY.key
         ) {
             effectiveFilters = filters.copy(category = MealCategory.ANY.key)

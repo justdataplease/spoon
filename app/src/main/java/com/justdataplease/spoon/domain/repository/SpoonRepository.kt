@@ -55,6 +55,8 @@ interface SpoonRepository {
     val recipeNotes: Flow<List<RecipeNote>> get() = flowOf(emptyList())
     val customRecipes: Flow<List<CustomRecipe>> get() = flowOf(emptyList())
     val cookedHistory: Flow<List<CookedMeal>> get() = flowOf(emptyList())
+    val mealPreferenceSettings: Flow<MealPreferenceSettings>
+        get() = flowOf(MealPreferenceSettings())
 
     suspend fun ensureReady()
     suspend fun getRecipeDetails(recipeId: String): Recipe?
@@ -98,6 +100,8 @@ interface SpoonRepository {
     suspend fun upsertRecipeNote(note: RecipeNote): Unit = unsupported("recipe notes")
     suspend fun upsertCustomRecipe(recipe: CustomRecipe): Unit = unsupported("custom recipes")
     suspend fun deleteCustomRecipe(recipeId: String): Unit = unsupported("custom recipes")
+    suspend fun updateMealPreferenceSettings(settings: MealPreferenceSettings): Unit =
+        unsupported("meal preferences")
     suspend fun registerEmailAccount(email: String, password: String): Unit =
         unsupported("email accounts")
     suspend fun signInWithEmail(email: String, password: String): Unit =
