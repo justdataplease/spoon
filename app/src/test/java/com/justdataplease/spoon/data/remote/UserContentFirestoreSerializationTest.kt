@@ -2,6 +2,7 @@ package com.justdataplease.spoon.data.remote
 
 import com.justdataplease.spoon.data.model.CustomRecipe
 import com.justdataplease.spoon.data.model.DayMealPlan
+import com.justdataplease.spoon.data.model.FavoriteRecipe
 import com.justdataplease.spoon.data.model.RecipeIngredient
 import com.justdataplease.spoon.data.model.RecipeIngredientSection
 import com.justdataplease.spoon.data.model.RecipeMethodSection
@@ -12,6 +13,17 @@ import org.junit.Assert.assertFalse
 import org.junit.Test
 
 class UserContentFirestoreSerializationTest {
+    @Test
+    fun `favorite contains only fields accepted by offline upsert rules`() {
+        val document = FavoriteRecipe(
+            recipeId = "akis_1",
+            addedAtEpochMillis = 2_000,
+        ).toFirestoreDocument()
+
+        assertEquals(setOf("recipeId", "addedAtEpochMillis"), document.keys)
+        assertFalse(document.containsKey("id"))
+    }
+
     @Test
     fun shopping_item_contains_only_rules_approved_fields() {
         val document = ShoppingListItem(

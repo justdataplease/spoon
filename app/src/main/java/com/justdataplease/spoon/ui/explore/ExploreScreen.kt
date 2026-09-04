@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -33,6 +34,7 @@ import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -46,10 +48,12 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -69,26 +73,71 @@ import com.justdataplease.spoon.ui.model.EaseUi
 import com.justdataplease.spoon.ui.model.SelectableEaseOptions
 import java.util.Locale
 import kotlin.math.roundToInt
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filter
 
 private val GreekLocale = Locale.forLanguageTag("el-GR")
+private const val EXPLORE_PREFETCH_DISTANCE = 4
+
+internal fun shouldLoadNextExplorePage(
+    lastVisibleItemIndex: Int,
+    totalItemCount: Int,
+    recipeCount: Int,
+    hasMore: Boolean,
+    isLoadingPage: Boolean,
+): Boolean =
+    recipeCount > 0 &&
+        hasMore &&
+        !isLoadingPage &&
+        totalItemCount > 0 &&
+        lastVisibleItemIndex >= totalItemCount - 1 - EXPLORE_PREFETCH_DISTANCE
 
 @Composable
 fun ExploreScreen(
     query: String,
     recipes: List<ExploreRecipeUi>,
     totalRecipeCount: Int,
+    resultGeneration: Long,
+    isLoadingPage: Boolean,
+    hasMore: Boolean,
     filters: ExploreFiltersUi,
     options: ExploreFacetOptionsUi,
     onQueryChange: (String) -> Unit,
     onApplyFilters: (ExploreFiltersUi) -> Unit,
     onOpenRecipe: (String) -> Unit,
     onToggleFavorite: (String) -> Unit,
+    onLoadMore: () -> Unit,
     onCreateRecipe: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     var showFilters by remember { mutableStateOf(false) }
+    val listState = rememberLazyListState()
+
+    LaunchedEffect(resultGeneration) {
+        if (listState.firstVisibleItemIndex != 0 || listState.firstVisibleItemScrollOffset != 0) {
+            listState.scrollToItem(0)
+        }
+    }
+
+    LaunchedEffect(listState, recipes.size, hasMore, isLoadingPage) {
+        snapshotFlow {
+            val layoutInfo = listState.layoutInfo
+            shouldLoadNextExplorePage(
+                lastVisibleItemIndex = layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1,
+                totalItemCount = layoutInfo.totalItemsCount,
+                recipeCount = recipes.size,
+                hasMore = hasMore,
+                isLoadingPage = isLoadingPage,
+            )
+        }
+            .distinctUntilChanged()
+            .filter { it }
+            .collect { onLoadMore() }
+    }
 
     LazyColumn(
+        state = listState,
         modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(start = 18.dp, end = 18.dp, top = 18.dp, bottom = 112.dp),
         verticalArrangement = Arrangement.spacedBy(13.dp),
@@ -154,7 +203,11 @@ fun ExploreScreen(
                 )
             }
         }
-        if (recipes.isEmpty()) {
+        if (recipes.isEmpty() && isLoadingPage) {
+            item(key = "explore-initial-loading") {
+                ExploreLoadingState(text = "Φορτώνουμε νόστιμες συνταγές…")
+            }
+        } else if (recipes.isEmpty()) {
             item {
                 EmptyExploreState(onClear = {
                     onQueryChange("")
@@ -168,6 +221,14 @@ fun ExploreScreen(
                     onOpen = { onOpenRecipe(recipe.recipeId) },
                     onToggleFavorite = { onToggleFavorite(recipe.recipeId) },
                 )
+            }
+            when {
+                isLoadingPage -> item(key = "explore-page-loading") {
+                    ExploreLoadingState(text = "Φορτώνουμε κι άλλες συνταγές…")
+                }
+                !hasMore -> item(key = "explore-results-end") {
+                    ExploreResultsEnd()
+                }
             }
         }
     }
@@ -183,6 +244,29 @@ fun ExploreScreen(
             },
         )
     }
+}
+
+@Composable
+private fun ExploreLoadingState(text: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
+        Spacer(modifier = Modifier.width(10.dp))
+        Text(text, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@Composable
+private fun ExploreResultsEnd() {
+    Text(
+        text = "Έφτασες στο τέλος των αποτελεσμάτων.",
+        modifier = Modifier.fillMaxWidth().padding(vertical = 18.dp),
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
 }
 
 @Composable

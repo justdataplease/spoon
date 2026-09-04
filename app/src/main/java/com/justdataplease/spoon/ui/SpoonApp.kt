@@ -83,13 +83,20 @@ fun SpoonApp(
         enabled = selectedRecipe != null ||
             state.favoriteReplacementDate != null ||
             customRecipeEditor.isOpen ||
-            (Destinations[selectedDestination].key == PrimaryDestination.MORE && morePage != MorePage.HUB),
+            (Destinations[selectedDestination].key == PrimaryDestination.MORE && morePage != MorePage.HUB) ||
+            Destinations[selectedDestination].key != PrimaryDestination.WEEK,
     ) {
         when {
             customRecipeEditor.isOpen -> viewModel.dismissCustomRecipeEditor()
             selectedRecipe != null -> viewModel.dismissRecipeDetails()
             state.favoriteReplacementDate != null -> viewModel.dismissFavoriteReplacement()
-            else -> morePage = MorePage.HUB
+            Destinations[selectedDestination].key == PrimaryDestination.MORE && morePage != MorePage.HUB -> {
+                morePage = MorePage.HUB
+            }
+            else -> {
+                selectedDestination = Destinations.indexOfFirst { it.key == PrimaryDestination.WEEK }
+                morePage = MorePage.HUB
+            }
         }
     }
 
@@ -180,12 +187,16 @@ fun SpoonApp(
                     query = state.exploreQuery,
                     recipes = state.exploreRecipes,
                     totalRecipeCount = state.exploreTotalRecipeCount,
+                    resultGeneration = state.exploreResultGeneration,
+                    isLoadingPage = state.exploreIsLoadingPage,
+                    hasMore = state.exploreHasMore,
                     filters = state.exploreFilters,
                     options = state.exploreOptions,
                     onQueryChange = viewModel::updateExploreQuery,
                     onApplyFilters = viewModel::applyExploreFilters,
                     onOpenRecipe = viewModel::showRecipeDetails,
                     onToggleFavorite = viewModel::toggleFavorite,
+                    onLoadMore = viewModel::loadMoreExplore,
                     onCreateRecipe = viewModel::createCustomRecipe,
                     modifier = Modifier.padding(padding),
                 )

@@ -1,7 +1,8 @@
 # Permission-gated full Greek recipe catalog pipeline
 
-This directory contains the crawlers, normalizers, validators, and Firestore
-importer used by Spoon. It is designed to capture every currently published
+This directory contains the crawlers, normalizers, validators, deterministic
+local-catalog builder, and Firestore importer used by Spoon. It is designed to
+capture every currently published
 canonical Greek recipe exposed by `akispetretzikis.com`, `argiro.gr`, and
 `gastronomos.gr`, including the details and filter taxonomy needed by the app.
 
@@ -160,6 +161,34 @@ The JSONL and manifest are written atomically only after a zero-failure run. The
 failure report contains the stage or recipe ID for any incomplete run. Never
 import after a crawler exit code other than zero.
 
+## Build the bundled Android catalog
+
+After all three complete artifacts and manifests have been produced, build the
+indexed SQLite asset used by the app:
+
+```powershell
+python tools/recipe_importer/build_local_catalog.py
+```
+
+The builder deterministically combines all 20,861 active Greek recipes, including
+their summaries, ingredients, steps, filter facets, source links, and image/video
+URLs. It verifies the input counts and hashes against the manifests and records
+the resulting catalog count and content hashes in SQLite metadata. A missing,
+truncated, duplicate, or mismatched provider artifact fails the build.
+
+The app queries this database directly: Explore returns 24 rows per page and all
+catalog search, filters, random planning, and detail views generate zero Firestore
+recipe reads. Recipe media is not copied into SQLite; HTTPS images and videos are
+loaded and cached on demand. Consequently all recipe text and previously cached
+media work offline, while uncached media needs a connection.
+
+After the count/hash checks pass, build the optimized signed personal release and
+place it at `dist/spoon.apk`. The APK can be installed or upgraded with:
+
+```powershell
+adb install -r dist\spoon.apk
+```
+
 Useful controls:
 
 ```powershell
@@ -277,11 +306,18 @@ previous status remains in place. Some replacement batches may already have
 succeeded, so it is safe to rerun the same validated import. The catalog is not
 advertised as complete until the final status write succeeds.
 
-Mobile security rules permit signed-in clients to query summaries, fetch one
-active Greek details document by ID, and read the exact status document. Raw
-source payloads and all catalog writes are denied to mobile clients. The Admin SDK
+The Android app does not query the summary or detail collections; they remain a
+backend publication/archive and source for building future bundled catalogs.
+Mobile clients may read the exact status document for a tiny freshness check, but
+normal public-catalog browsing produces zero Firestore recipe reads. Raw source
+payloads and all catalog writes are denied to mobile clients. The Admin SDK
 identity used by this importer bypasses client rules and should have only the
 Firestore data access needed by this job.
+
+Firestore is still used for personal account data only: favorite IDs, plans,
+completion history, shopping items, notes, and custom recipes. Its persistent
+device cache accepts those changes offline and synchronizes them as an account
+backup when connectivity returns.
 
 ## Quarterly GitHub Actions refresh
 
@@ -397,3 +433,7 @@ setup and remove any unconditional or broader data role.
 The scheduled backend ingestion and Android freshness check are separate. The
 app's unique WorkManager task runs approximately every 90 days and reads only
 `spoon_catalog/status`; it never visits the recipe site or starts an import.
+That status change does not mutate an installed APK. After all provider refreshes
+succeed, rebuild the SQLite asset with
+`python tools/recipe_importer/build_local_catalog.py`, verify its counts/hashes,
+build the optimized signed release, and distribute the new `dist/spoon.apk`.

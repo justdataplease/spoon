@@ -10,6 +10,8 @@ import com.justdataplease.spoon.data.model.ShoppingListItem
 import com.justdataplease.spoon.data.model.newCustomRecipeId
 import com.justdataplease.spoon.data.isSafeRecipeDocumentId
 import com.justdataplease.spoon.domain.repository.AccountState
+import com.justdataplease.spoon.domain.repository.CatalogFacetOptions
+import com.justdataplease.spoon.domain.repository.RecipePage
 import com.justdataplease.spoon.domain.repository.SpoonRepository
 import java.time.LocalDate
 import java.util.UUID
@@ -69,6 +71,18 @@ class MealPlanner @Inject constructor(
     suspend fun getRecipeDetails(recipeId: String): Recipe? =
         repository.getRecipeDetails(recipeId)
 
+    suspend fun getRecipesByIds(recipeIds: Set<String>): List<Recipe> =
+        repository.getRecipesByIds(recipeIds)
+
+    suspend fun queryRecipes(
+        criteria: ExploreCriteria = ExploreCriteria(),
+        limit: Int = 24,
+        offset: Int = 0,
+    ): RecipePage = repository.queryRecipes(criteria, limit, offset)
+
+    suspend fun getCatalogFacetOptions(): CatalogFacetOptions =
+        repository.getCatalogFacetOptions()
+
     fun observeWeek(containingDate: LocalDate): Flow<List<DayMealPlan>> {
         val dates = WeeklyPlanDefaults.dates(containingDate).map(LocalDate::toString).toSet()
         return mealPlans.map { plans ->
@@ -76,19 +90,21 @@ class MealPlanner @Inject constructor(
         }
     }
 
-    fun observeFavorites(): Flow<List<Recipe>> =
-        combine(recipes, favoriteRecipeIds) { allRecipes, favoriteIds ->
-            allRecipes.filter { it.id in favoriteIds }
-        }.flowOn(Dispatchers.Default)
+    fun observeFavorites(): Flow<List<Recipe>> = favoriteRecipeIds
+        .map(repository::getRecipesByIds)
+        .flowOn(Dispatchers.IO)
 
     suspend fun ensureWeek(
         containingDate: LocalDate = LocalDate.now(),
         random: Random = Random.Default,
     ): List<DayMealPlan> {
         repository.ensureReady()
-        val recipes = repository.recipes.first().filter(Recipe::isActiveGreekRecipe)
-        val recipesById = recipes.associateBy(Recipe::id)
         val existing = repository.mealPlans.first().associateBy(DayMealPlan::date)
+        val recipesById = repository.getRecipesByIds(
+            existing.values.mapTo(mutableSetOf(), DayMealPlan::recipeId)
+                .filter(String::isNotBlank)
+                .toSet(),
+        ).associateBy(Recipe::id)
 
         return WeeklyPlanDefaults.dates(containingDate).map { date ->
             val current = existing[date.toString()]
@@ -97,7 +113,6 @@ class MealPlanner @Inject constructor(
             } else {
                 val replacement = createDay(
                     date = date,
-                    recipes = recipes,
                     random = random,
                     previous = current,
                 )
@@ -121,11 +136,10 @@ class MealPlanner @Inject constructor(
         val existing = repository.mealPlans.first().firstOrNull { it.date == date.toString() }
         val requestedFilters = filters ?: existing?.filters ?: WeeklyPlanDefaults.filtersFor(date)
         val excludedId = existing?.recipeId.orEmpty()
-        val selected = selector.select(
-            recipes = repository.recipes.first(),
+        val selected = repository.selectRandomRecipe(
             filters = requestedFilters,
             excludingRecipeId = excludedId.ifBlank { null },
-            random = random,
+            randomSeed = random.nextLong(),
         ) ?: return MealPlanSelection.NoMatch(date, requestedFilters, excludedId)
 
         val plan = DayMealPlan(
@@ -277,7 +291,7 @@ class MealPlanner @Inject constructor(
             return FavoriteReplacementResult.NotFavorite(date, recipeId)
         }
 
-        val recipe = repository.recipes.first()
+        val recipe = repository.getRecipesByIds(setOf(recipeId))
             .firstOrNull { it.id == recipeId && it.isActiveGreekRecipe() }
             ?: return FavoriteReplacementResult.RecipeUnavailable(date, recipeId)
         val existing = repository.mealPlans.first()
@@ -304,16 +318,18 @@ class MealPlanner @Inject constructor(
         return FavoriteReplacementResult.Selected(plan, recipe)
     }
 
-    private fun createDay(
+    private suspend fun createDay(
         date: LocalDate,
-        recipes: List<Recipe>,
         random: Random,
         previous: DayMealPlan? = null,
     ): DayMealPlan {
         val filters = previous?.filters
             ?.takeIf(RecipeFilters::isValid)
             ?: WeeklyPlanDefaults.filtersFor(date)
-        val recipe = selector.select(recipes, filters, random = random)
+        val recipe = repository.selectRandomRecipe(
+            filters = filters,
+            randomSeed = random.nextLong(),
+        )
         return DayMealPlan(
             id = date.toString(),
             date = date.toString(),

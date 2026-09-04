@@ -1,7 +1,7 @@
 package com.justdataplease.spoon.data
 
 import com.justdataplease.spoon.data.model.Recipe
-import com.justdataplease.spoon.data.remote.FirestoreSpoonRepository
+import com.justdataplease.spoon.data.local.BundledRecipeCatalog
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
@@ -85,10 +85,10 @@ class RecipeDetailsLookupTest {
     }
 
     @Test
-    fun `details collection contract matches importer`() {
+    fun `public details are bundled in the offline catalog`() {
         assertEquals(
-            "spoon_recipe_details",
-            FirestoreSpoonRepository.RECIPE_DETAILS_COLLECTION,
+            "recipe_catalog.db",
+            BundledRecipeCatalog.ASSET_DATABASE_NAME,
         )
     }
 }

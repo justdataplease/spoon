@@ -5,11 +5,12 @@ import com.google.firebase.FirebaseApp
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import com.justdataplease.spoon.BuildConfig
+import com.justdataplease.spoon.data.local.BundledRecipeCatalog
 import com.justdataplease.spoon.data.local.LocalSpoonRepository
+import com.justdataplease.spoon.data.local.RecipeCatalog
 import com.justdataplease.spoon.data.remote.FirestoreSpoonRepository
-import com.justdataplease.spoon.data.UnavailableSpoonRepository
-import com.justdataplease.spoon.domain.repository.BackendFailure
-import com.justdataplease.spoon.domain.repository.BackendFailureKind
+import com.justdataplease.spoon.data.remote.NoBackupOwnerBootstrapStore
+import com.justdataplease.spoon.data.remote.configurePersistentPersonalCache
 import com.justdataplease.spoon.domain.repository.SpoonRepository
 import dagger.Module
 import dagger.Provides
@@ -27,33 +28,42 @@ object RepositoryModule {
     fun provideSpoonRepository(
         @ApplicationContext context: Context,
     ): SpoonRepository {
+        val json = Json {
+            ignoreUnknownKeys = true
+            encodeDefaults = true
+        }
+        val recipeCatalog = BundledRecipeCatalog(context, json)
         if (!BuildConfig.HAS_FIREBASE_CONFIG) {
-            return LocalSpoonRepository(
-                preferences = context.getSharedPreferences(
-                    LocalSpoonRepository.PREFERENCES_NAME,
-                    Context.MODE_PRIVATE,
-                ),
-                json = Json {
-                    ignoreUnknownKeys = true
-                    encodeDefaults = true
-                },
-            )
+            return localRepository(context, json, recipeCatalog)
         }
 
-        val failure = BackendFailure(
-            BackendFailureKind.CONFIGURATION,
-            false,
-            "Firebase initialization failed",
-        )
         val firebaseApp = runCatching {
             FirebaseApp.getApps(context).firstOrNull() ?: FirebaseApp.initializeApp(context)
-        }.getOrNull() ?: return UnavailableSpoonRepository(failure)
+        }.getOrNull() ?: return localRepository(context, json, recipeCatalog)
 
         return runCatching {
+            val firestore = configurePersistentPersonalCache(
+                FirebaseFirestore.getInstance(firebaseApp),
+            )
             FirestoreSpoonRepository(
                 auth = FirebaseAuth.getInstance(firebaseApp),
-                firestore = FirebaseFirestore.getInstance(firebaseApp),
+                firestore = firestore,
+                recipeCatalog = recipeCatalog,
+                ownerBootstrapStore = NoBackupOwnerBootstrapStore(context),
             )
-        }.getOrElse { UnavailableSpoonRepository(failure) }
+        }.getOrElse { localRepository(context, json, recipeCatalog) }
     }
+
+    private fun localRepository(
+        context: Context,
+        json: Json,
+        recipeCatalog: RecipeCatalog,
+    ): SpoonRepository = LocalSpoonRepository(
+        preferences = context.getSharedPreferences(
+            LocalSpoonRepository.PREFERENCES_NAME,
+            Context.MODE_PRIVATE,
+        ),
+        json = json,
+        recipeCatalog = recipeCatalog,
+    )
 }

@@ -3,11 +3,13 @@ package com.justdataplease.spoon.data.local
 import android.content.SharedPreferences
 import com.justdataplease.spoon.data.DemoRecipeCatalog
 import com.justdataplease.spoon.data.eligibleRecipeDetails
+import com.justdataplease.spoon.data.isSafeRecipeDocumentId
 import com.justdataplease.spoon.data.model.CookedMeal
 import com.justdataplease.spoon.data.model.CustomRecipe
 import com.justdataplease.spoon.data.model.DayMealPlan
 import com.justdataplease.spoon.data.model.MAX_SHOPPING_ITEMS_PER_WRITE
 import com.justdataplease.spoon.data.model.Recipe
+import com.justdataplease.spoon.data.model.RecipeFilters
 import com.justdataplease.spoon.data.model.RecipeNote
 import com.justdataplease.spoon.data.model.ShoppingListItem
 import com.justdataplease.spoon.data.model.isCustomRecipeId
@@ -20,14 +22,19 @@ import com.justdataplease.spoon.data.requireSafeRecipeDocumentId
 import com.justdataplease.spoon.domain.repository.BackendState
 import com.justdataplease.spoon.domain.repository.AccountOperationException
 import com.justdataplease.spoon.domain.repository.AccountState
+import com.justdataplease.spoon.domain.repository.CatalogFacetOptions
+import com.justdataplease.spoon.domain.repository.RecipePage
 import com.justdataplease.spoon.domain.repository.SpoonRepository
 import com.justdataplease.spoon.domain.repository.unavailableAccountFailure
+import com.justdataplease.spoon.domain.ExploreCriteria
+import com.justdataplease.spoon.domain.ExploreRecipeFilter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -39,6 +46,7 @@ import kotlinx.serialization.json.Json
 class LocalSpoonRepository(
     private val preferences: SharedPreferences,
     private val json: Json,
+    private val recipeCatalog: RecipeCatalog = InMemoryRecipeCatalog(DemoRecipeCatalog.recipes),
 ) : SpoonRepository {
     private val mutationMutex = Mutex()
     private val _accountState = MutableStateFlow<AccountState>(AccountState.Unavailable)
@@ -49,12 +57,21 @@ class LocalSpoonRepository(
     private val _recipeNotes = MutableStateFlow(readList<RecipeNote>(KEY_RECIPE_NOTES))
     private val _customRecipes = MutableStateFlow(readList<CustomRecipe>(KEY_CUSTOM_RECIPES))
     private val _cookedHistory = MutableStateFlow(readList<CookedMeal>(KEY_COOKED_HISTORY))
+    private val referencedCatalogRecipes = combine(
+        _mealPlans,
+        _favoriteRecipeIds,
+        _cookedHistory,
+        ::boundedReferencedRecipeIds,
+    ).distinctUntilChanged().map(recipeCatalog::getRecipesByIds)
 
     override val backendState = MutableStateFlow<BackendState>(BackendState.Local).asStateFlow()
     override val accountState = _accountState.asStateFlow()
     override val recipes: Flow<List<Recipe>> =
-        combine(flowOf(DemoRecipeCatalog.recipes), _customRecipes) { catalog, custom ->
-            (catalog + custom.filter(CustomRecipe::active).map(CustomRecipe::toRecipe))
+        combine(recipeCatalog.cachedRecipes, referencedCatalogRecipes, _customRecipes) {
+                catalog, referenced, custom,
+            ->
+            (catalog + referenced + custom.filter(CustomRecipe::active).map(CustomRecipe::toRecipe))
+                .distinctBy(Recipe::id)
                 .sortedBy(Recipe::title)
         }
     override val mealPlans: Flow<List<DayMealPlan>> = _mealPlans.asStateFlow()
@@ -65,7 +82,7 @@ class LocalSpoonRepository(
     override val cookedHistory: Flow<List<CookedMeal>> =
         combine(_mealPlans, _cookedHistory, ::mergeCookedHistory)
 
-    override suspend fun ensureReady() = Unit
+    override suspend fun ensureReady() = recipeCatalog.ensureReady()
 
     override suspend fun getRecipeDetails(recipeId: String): Recipe? {
         val safeRecipeId = requireSafeRecipeDocumentId(recipeId)
@@ -74,9 +91,60 @@ class LocalSpoonRepository(
                 .firstOrNull { it.id == safeRecipeId && it.active }
                 ?.toRecipe()
         }
-        val recipe = DemoRecipeCatalog.recipes.firstOrNull { it.id == safeRecipeId }
+        val recipe = recipeCatalog.getRecipe(safeRecipeId)
         return eligibleRecipeDetails(recipe, safeRecipeId, safeRecipeId)
     }
+
+    override suspend fun getRecipesByIds(recipeIds: Set<String>): List<Recipe> {
+        if (recipeIds.isEmpty()) return emptyList()
+        val customById = _customRecipes.value.asSequence()
+            .filter(CustomRecipe::active)
+            .map(CustomRecipe::toRecipe)
+            .filter { it.id in recipeIds }
+            .associateBy(Recipe::id)
+        val public = recipeCatalog.getRecipesByIds(recipeIds - customById.keys)
+        val all = public.associateBy(Recipe::id) + customById
+        return recipeIds.mapNotNull(all::get)
+    }
+
+    override suspend fun queryRecipes(
+        criteria: ExploreCriteria,
+        limit: Int,
+        offset: Int,
+    ): RecipePage {
+        requirePageBounds(limit, offset)
+        val customMatches = ExploreRecipeFilter.filter(
+            _customRecipes.value.filter(CustomRecipe::active).map(CustomRecipe::toRecipe),
+            criteria,
+        )
+        val customPage = customMatches.drop(offset).take(limit)
+        val publicOffset = (offset - customMatches.size).coerceAtLeast(0)
+        val remaining = limit - customPage.size
+        val publicPage = recipeCatalog.queryRecipes(criteria, limit, publicOffset)
+        return RecipePage(
+            recipes = customPage + publicPage.recipes.take(remaining),
+            totalCount = customMatches.size + publicPage.totalCount,
+            offset = offset,
+            limit = limit,
+        )
+    }
+
+    override suspend fun getCatalogFacetOptions(): CatalogFacetOptions = mergeFacetOptions(
+        recipeCatalog.getFacetOptions(),
+        facetOptionsFrom(_customRecipes.value.filter(CustomRecipe::active).map(CustomRecipe::toRecipe)),
+    )
+
+    override suspend fun selectRandomRecipe(
+        filters: RecipeFilters,
+        excludingRecipeId: String?,
+        randomSeed: Long,
+    ): Recipe? = selectIncludingCustomRecipes(
+        recipeCatalog = recipeCatalog,
+        customRecipes = _customRecipes.value,
+        filters = filters,
+        excludingRecipeId = excludingRecipeId,
+        randomSeed = randomSeed,
+    )
 
     override suspend fun upsertMealPlan(plan: DayMealPlan) {
         require(plan.date.isNotBlank()) { "A meal plan needs an ISO date" }
@@ -353,3 +421,18 @@ class LocalSpoonRepository(
         private const val KEY_COOKED_HISTORY = "cooked_history_v1"
     }
 }
+
+internal fun boundedReferencedRecipeIds(
+    plans: List<DayMealPlan>,
+    favoriteIds: Set<String>,
+    history: List<CookedMeal>,
+): Set<String> = sequence {
+    plans.forEach { yield(it.recipeId) }
+    favoriteIds.forEach { yield(it) }
+    history.forEach { yield(it.recipeId) }
+}.filter(::isSafeRecipeDocumentId)
+    .distinct()
+    .take(MAX_LOCAL_REFERENCED_RECIPES)
+    .toCollection(LinkedHashSet())
+
+internal const val MAX_LOCAL_REFERENCED_RECIPES = 1_024

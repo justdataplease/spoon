@@ -17,7 +17,6 @@ import com.justdataplease.spoon.data.model.ShoppingListItem
 import com.justdataplease.spoon.domain.MealPlanSelection
 import com.justdataplease.spoon.domain.MealPlanner
 import com.justdataplease.spoon.domain.ExploreCriteria
-import com.justdataplease.spoon.domain.ExploreRecipeFilter
 import com.justdataplease.spoon.domain.FavoriteReplacementResult
 import com.justdataplease.spoon.domain.WeeklyPlanDefaults
 import com.justdataplease.spoon.domain.isActiveGreekRecipe
@@ -27,6 +26,7 @@ import com.justdataplease.spoon.domain.repository.BackendState
 import com.justdataplease.spoon.domain.repository.BackendUnavailableException
 import com.justdataplease.spoon.domain.repository.AccountOperationException
 import com.justdataplease.spoon.domain.repository.AccountState
+import com.justdataplease.spoon.domain.repository.CatalogFacetOptions
 import com.justdataplease.spoon.ui.account.AccountUiState
 import com.justdataplease.spoon.ui.model.CalendarMealUi
 import com.justdataplease.spoon.ui.model.DayPlanUi
@@ -39,6 +39,7 @@ import com.justdataplease.spoon.ui.explore.ExploreFacetOptionsUi
 import com.justdataplease.spoon.ui.explore.ExploreFiltersUi
 import com.justdataplease.spoon.ui.explore.ExploreRecipeUi
 import com.justdataplease.spoon.ui.explore.ExploreSearchState
+import com.justdataplease.spoon.ui.explore.ExploreSourceOptionUi
 import com.justdataplease.spoon.ui.explore.exploreFilterInputs
 import com.justdataplease.spoon.ui.explore.toExploreSourceOptionsUi
 import com.justdataplease.spoon.ui.custom.CustomRecipeEditorState
@@ -77,8 +78,28 @@ import kotlinx.coroutines.withTimeout
 
 private data class CatalogProjection(
     val recipesById: Map<String, Recipe> = emptyMap(),
-    val activeGreekRecipes: List<Recipe> = emptyList(),
-    val exploreOptions: ExploreFacetOptionsUi = ExploreFacetOptionsUi(),
+)
+
+private data class ExplorePageSnapshot(
+    val recipes: List<Recipe>,
+    val totalCount: Int,
+    val isLoading: Boolean,
+    val hasMore: Boolean,
+    val options: ExploreFacetOptionsUi,
+)
+
+private data class ExplorePresentation(
+    val recipes: List<ExploreRecipeUi>,
+    val totalCount: Int,
+    val isLoading: Boolean,
+    val hasMore: Boolean,
+    val options: ExploreFacetOptionsUi,
+)
+
+private data class CustomRecipeRevision(
+    val id: String,
+    val updatedAtEpochMillis: Long,
+    val active: Boolean,
 )
 
 private data class PlannerSnapshot(
@@ -125,6 +146,7 @@ private data class ExploreSelection(
     val query: String,
     val filters: ExploreFiltersUi,
     val favoriteReplacementDate: LocalDate?,
+    val resultGeneration: Long,
 )
 
 @HiltViewModel
@@ -158,6 +180,12 @@ class SpoonViewModel @Inject constructor(
     private val selectedRecipeDetails = MutableStateFlow<Recipe?>(null)
     private val recipeDetailsLoading = MutableStateFlow(false)
     private val exploreFilters = MutableStateFlow(ExploreFiltersUi())
+    private val exploreRecipeRows = MutableStateFlow<List<Recipe>>(emptyList())
+    private val exploreTotalCount = MutableStateFlow(0)
+    private val explorePageLoading = MutableStateFlow(false)
+    private val exploreHasMore = MutableStateFlow(true)
+    private val exploreFacetOptions = MutableStateFlow(ExploreFacetOptionsUi())
+    private val exploreResultGeneration = MutableStateFlow(0L)
     private val favoriteReplacementDate = MutableStateFlow<LocalDate?>(null)
     private val loading = MutableStateFlow(true)
     private val working = MutableStateFlow(false)
@@ -172,18 +200,16 @@ class SpoonViewModel @Inject constructor(
     private var weekEnsureJob: Job? = null
     private var weekEnsureGeneration = 0L
     private var ensuringWeekStart: LocalDate? = null
+    private var exploreLoadJob: Job? = null
+    private var exploreFacetLoadJob: Job? = null
+    private var exploreGeneration = 0L
+    private var exploreNextOffset = 0
+    private var activeExploreCriteria = ExploreCriteria()
 
     private val catalogProjection = mealPlanner.recipes
         .map { recipes ->
-            val activeGreekRecipes = recipes.filter { recipe ->
-                recipe.active && recipe.language.trim().lowercase().let { language ->
-                    language == "el" || language.startsWith("el-") || language.startsWith("el_")
-                }
-            }
             CatalogProjection(
                 recipesById = recipes.associateBy(Recipe::id),
-                activeGreekRecipes = activeGreekRecipes,
-                exploreOptions = activeGreekRecipes.toExploreOptionsUi(),
             )
         }
         .flowOn(Dispatchers.Default)
@@ -259,8 +285,9 @@ class SpoonViewModel @Inject constructor(
         exploreSearchState.visibleQuery,
         exploreFilters,
         favoriteReplacementDate,
-    ) { query, filters, replacementDate ->
-        ExploreSelection(query, filters, replacementDate)
+        exploreResultGeneration,
+    ) { query, filters, replacementDate, resultGeneration ->
+        ExploreSelection(query, filters, replacementDate, resultGeneration)
     }
 
     private val exploreFilterInput = exploreFilterInputs(
@@ -268,21 +295,40 @@ class SpoonViewModel @Inject constructor(
         exploreFilters,
     )
 
-    private val filteredExploreRecipes = combine(
-        catalogProjection,
-        exploreFilterInput,
-    ) { catalog, input ->
-        ExploreRecipeFilter.filter(
-            recipes = catalog.activeGreekRecipes,
-            criteria = input.filters.toDomain(input.query),
-        )
-    }.flowOn(Dispatchers.Default)
+    private val customRecipeRevisions = mealPlanner.customRecipes
+        .map { recipes ->
+            recipes.map { recipe ->
+                CustomRecipeRevision(
+                    id = recipe.id,
+                    updatedAtEpochMillis = recipe.updatedAtEpochMillis,
+                    active = recipe.active,
+                )
+            }
+        }
+        .distinctUntilChanged()
+
+    private val explorePageSnapshot = combine(
+        exploreRecipeRows,
+        exploreTotalCount,
+        explorePageLoading,
+        exploreHasMore,
+        exploreFacetOptions,
+        ::ExplorePageSnapshot,
+    )
 
     private val exploredRecipes = combine(
-        filteredExploreRecipes,
+        explorePageSnapshot,
         mealPlanner.favoriteRecipeIds,
-    ) { recipes, favoriteIds ->
-        recipes.map { recipe -> recipe.toExploreRecipeUi(recipe.id in favoriteIds) }
+    ) { page, favoriteIds ->
+        ExplorePresentation(
+            recipes = page.recipes.map { recipe ->
+                recipe.toExploreRecipeUi(recipe.id in favoriteIds)
+            },
+            totalCount = page.totalCount,
+            isLoading = page.isLoading,
+            hasMore = page.hasMore,
+            options = page.options,
+        )
     }.flowOn(Dispatchers.Default)
 
     val uiState = combine(
@@ -291,7 +337,7 @@ class SpoonViewModel @Inject constructor(
         workStatus,
         exploreSelection,
         exploredRecipes,
-    ) { snapshot, dates, status, explore, exploreRecipeItems ->
+    ) { snapshot, dates, status, explore, exploreResults ->
         val recipesById = snapshot.catalog.recipesById
         val plansByDate = snapshot.plans.associateBy(DayMealPlan::date)
         val weekPlans = WeeklyPlanDefaults.dates(dates.weekStart).map { date ->
@@ -393,10 +439,13 @@ class SpoonViewModel @Inject constructor(
             calendarMeals = calendarMeals,
             editingDate = dates.editingDate,
             exploreQuery = explore.query,
-            exploreRecipes = exploreRecipeItems,
-            exploreTotalRecipeCount = snapshot.catalog.activeGreekRecipes.size,
+            exploreRecipes = exploreResults.recipes,
+            exploreTotalRecipeCount = exploreResults.totalCount,
+            exploreResultGeneration = explore.resultGeneration,
+            exploreIsLoadingPage = exploreResults.isLoading,
+            exploreHasMore = exploreResults.hasMore,
             exploreFilters = explore.filters,
-            exploreOptions = snapshot.catalog.exploreOptions,
+            exploreOptions = exploreResults.options,
             favoriteReplacementDate = explore.favoriteReplacementDate,
             isRecipeDetailsLoading = dates.recipeSelection.isLoading,
             selectedRecipe = selectedRecipe
@@ -420,6 +469,7 @@ class SpoonViewModel @Inject constructor(
     init {
         observeAccountOwner()
         observeCatalogReadiness()
+        observeExploreFilters()
         ensureWeek(selectedWeekStart.value)
     }
 
@@ -505,6 +555,90 @@ class SpoonViewModel @Inject constructor(
 
     fun applyExploreFilters(filters: ExploreFiltersUi) {
         exploreFilters.value = filters
+    }
+
+    /**
+     * Loads one bounded page from the bundled SQLite catalog. The public catalog is never
+     * materialized in memory and this path performs no Firestore catalog reads.
+     */
+    fun loadMoreExplore() {
+        if (explorePageLoading.value || !exploreHasMore.value) return
+        val generation = exploreGeneration
+        val offset = exploreNextOffset
+        val criteria = activeExploreCriteria
+        explorePageLoading.value = true
+        val job = viewModelScope.launch(start = CoroutineStart.LAZY) {
+            try {
+                val page = withContext(Dispatchers.IO) {
+                    mealPlanner.queryRecipes(
+                        criteria = criteria,
+                        limit = EXPLORE_PAGE_SIZE,
+                        offset = offset,
+                    )
+                }
+                if (generation != exploreGeneration) return@launch
+                val existing = if (offset == 0) emptyList() else exploreRecipeRows.value
+                exploreRecipeRows.value = retainExploreWindow(existing, page.recipes)
+                exploreTotalCount.value = page.totalCount
+                exploreNextOffset = page.offset + page.recipes.size
+                exploreHasMore.value = page.hasMore && page.recipes.isNotEmpty()
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                if (generation == exploreGeneration) {
+                    exploreHasMore.value = false
+                    message.value = "Δεν φορτώθηκαν οι συνταγές. Δοκίμασε ξανά."
+                }
+            } finally {
+                if (generation == exploreGeneration) {
+                    explorePageLoading.value = false
+                    exploreLoadJob = null
+                }
+            }
+        }
+        exploreLoadJob = job
+        job.start()
+    }
+
+    private fun observeExploreFilters() {
+        viewModelScope.launch {
+            combine(exploreFilterInput, customRecipeRevisions) { input, _ -> input }
+                .collect { input ->
+                exploreLoadJob?.cancel()
+                exploreLoadJob = null
+                exploreFacetLoadJob?.cancel()
+                exploreFacetLoadJob = null
+                exploreGeneration++
+                exploreResultGeneration.value = exploreGeneration
+                activeExploreCriteria = input.filters.toDomain(input.query)
+                exploreNextOffset = 0
+                exploreRecipeRows.value = emptyList()
+                exploreTotalCount.value = 0
+                explorePageLoading.value = false
+                exploreHasMore.value = true
+                loadExploreFacetOptions(exploreGeneration)
+                loadMoreExplore()
+            }
+        }
+    }
+
+    private fun loadExploreFacetOptions(generation: Long) {
+        val job = viewModelScope.launch(start = CoroutineStart.LAZY) {
+            runCatching {
+                withContext(Dispatchers.IO) { mealPlanner.getCatalogFacetOptions() }
+            }.onSuccess { options ->
+                if (generation == exploreGeneration) {
+                    exploreFacetOptions.value = options.toUi()
+                }
+            }.onFailure { error ->
+                if (error is CancellationException) throw error
+                if (generation == exploreGeneration) {
+                    message.value = "Δεν φορτώθηκαν τα φίλτρα συνταγών."
+                }
+            }
+        }
+        exploreFacetLoadJob = job
+        job.start()
     }
 
     fun showFavoriteReplacement(date: LocalDate) {
@@ -994,6 +1128,19 @@ internal fun isCatalogReadyForPlanning(
     recipes.any(Recipe::isActiveGreekRecipe)
 
 internal const val USER_ACTION_TIMEOUT_MILLIS = 20_000L
+internal const val EXPLORE_PAGE_SIZE = 24
+internal const val EXPLORE_MAX_RETAINED_RECIPES = EXPLORE_PAGE_SIZE * 10
+
+internal fun retainExploreWindow(
+    existing: List<Recipe>,
+    incoming: List<Recipe>,
+    maxRetained: Int = EXPLORE_MAX_RETAINED_RECIPES,
+): List<Recipe> {
+    require(maxRetained > 0)
+    return (existing + incoming)
+        .distinctBy(Recipe::id)
+        .takeLast(maxRetained)
+}
 
 /**
  * Bounds Firestore-backed UI work so a pending listener or offline write cannot leave progress
@@ -1202,6 +1349,22 @@ private fun List<Recipe>.toExploreOptionsUi() = ExploreFacetOptionsUi(
     methods = flatMap(Recipe::methodLabels).cleanFacetOptions(),
     cuisines = flatMap(Recipe::cuisineLabels).cleanFacetOptions(),
     ingredients = flatMap(Recipe::ingredientLabels).cleanFacetOptions(),
+)
+
+private fun CatalogFacetOptions.toUi() = ExploreFacetOptionsUi(
+    sources = sources.map { source ->
+        ExploreSourceOptionUi(
+            key = source.key,
+            label = source.label,
+            recipeCount = source.recipeCount,
+        )
+    },
+    diets = diets.cleanFacetOptions(),
+    mealTypes = mealTypes.cleanFacetOptions(),
+    occasions = occasions.cleanFacetOptions(),
+    methods = methods.cleanFacetOptions(),
+    cuisines = cuisines.cleanFacetOptions(),
+    ingredients = ingredients.cleanFacetOptions(),
 )
 
 internal fun List<String>.cleanFacetOptions(): List<String> = asSequence()

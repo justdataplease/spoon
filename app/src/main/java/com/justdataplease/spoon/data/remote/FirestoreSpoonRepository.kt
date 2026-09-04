@@ -1,6 +1,7 @@
 package com.justdataplease.spoon.data.remote
 
 import android.util.Log
+import com.google.android.gms.tasks.Task
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseAuthException
 import com.google.firebase.auth.EmailAuthProvider
@@ -12,18 +13,22 @@ import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.FirebaseFirestoreException
 import com.google.firebase.firestore.Query
 import com.google.firebase.firestore.QuerySnapshot
-import com.google.firebase.firestore.Source
-import com.justdataplease.spoon.data.eligibleRemoteRecipes
 import com.justdataplease.spoon.data.eligibleRecipeDetails
+import com.justdataplease.spoon.data.isSafeRecipeDocumentId
+import com.justdataplease.spoon.data.local.RecipeCatalog
+import com.justdataplease.spoon.data.local.facetOptionsFrom
+import com.justdataplease.spoon.data.local.mergeFacetOptions
+import com.justdataplease.spoon.data.local.requirePageBounds
+import com.justdataplease.spoon.data.local.selectIncludingCustomRecipes
 import com.justdataplease.spoon.data.model.CookedMeal
 import com.justdataplease.spoon.data.model.CustomRecipe
 import com.justdataplease.spoon.data.model.DayMealPlan
 import com.justdataplease.spoon.data.model.FavoriteRecipe
 import com.justdataplease.spoon.data.model.MAX_SHOPPING_ITEMS_PER_WRITE
 import com.justdataplease.spoon.data.model.Recipe
+import com.justdataplease.spoon.data.model.RecipeFilters
 import com.justdataplease.spoon.data.model.RecipeNote
 import com.justdataplease.spoon.data.model.ShoppingListItem
-import com.justdataplease.spoon.data.model.cookedMealEventId
 import com.justdataplease.spoon.data.model.isCustomRecipeId
 import com.justdataplease.spoon.data.model.mergeCookedHistory
 import com.justdataplease.spoon.data.model.newCookedMealEventId
@@ -35,8 +40,12 @@ import com.justdataplease.spoon.domain.repository.BackendState
 import com.justdataplease.spoon.domain.repository.BackendUnavailableException
 import com.justdataplease.spoon.domain.repository.AccountOperationException
 import com.justdataplease.spoon.domain.repository.AccountState
+import com.justdataplease.spoon.domain.repository.CatalogFacetOptions
+import com.justdataplease.spoon.domain.repository.RecipePage
 import com.justdataplease.spoon.domain.repository.SpoonRepository
 import com.justdataplease.spoon.domain.repository.accountFailureForFirebaseCode
+import com.justdataplease.spoon.domain.ExploreCriteria
+import com.justdataplease.spoon.domain.ExploreRecipeFilter
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -58,12 +67,11 @@ import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.onEach
-import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.retryWhen
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
@@ -74,15 +82,19 @@ import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 
-/** Firestore implementation: public recipe metadata plus owner-scoped plans and favorites. */
+/** Offline-first personal-data repository; the public recipe catalog is bundled in SQLite. */
 @OptIn(ExperimentalCoroutinesApi::class)
-class FirestoreSpoonRepository(
+class FirestoreSpoonRepository internal constructor(
     private val auth: FirebaseAuth,
     private val firestore: FirebaseFirestore,
+    private val recipeCatalog: RecipeCatalog,
+    private val ownerBootstrapStore: OwnerBootstrapStore,
 ) : SpoonRepository {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val authMutex = Mutex()
+    private val personalMutationMutex = Mutex()
     private val authJobLock = Any()
+    private val ownerSnapshotLock = Any()
     private val uid = MutableStateFlow(auth.currentUser?.uid)
     private val _accountState = MutableStateFlow(auth.currentUser.toAccountState())
     private val authHealth = MutableStateFlow<CloudComponentState>(
@@ -95,13 +107,18 @@ class FirestoreSpoonRepository(
     private val notesHealth = MutableStateFlow<CloudComponentState>(CloudComponentState.Pending)
     private val customRecipesHealth = MutableStateFlow<CloudComponentState>(CloudComponentState.Pending)
     private val cookedHistoryHealth = MutableStateFlow<CloudComponentState>(CloudComponentState.Pending)
-    private val _catalogRecipes = MutableStateFlow<List<Recipe>>(emptyList())
+    private val _referencedCatalogRecipes = MutableStateFlow<List<Recipe>>(emptyList())
     private val _mealPlans = MutableStateFlow<List<DayMealPlan>>(emptyList())
     private val _favoriteRecipeIds = MutableStateFlow<Set<String>>(emptySet())
     private val _shoppingItems = MutableStateFlow<List<ShoppingListItem>>(emptyList())
     private val _recipeNotes = MutableStateFlow<List<RecipeNote>>(emptyList())
     private val _customRecipes = MutableStateFlow<List<CustomRecipe>>(emptyList())
     private val _cookedHistory = MutableStateFlow<List<CookedMeal>>(emptyList())
+    private val serverBackedOwnerComponents = MutableStateFlow<Set<String>>(emptySet())
+    private val establishedCachedPersonalData = MutableStateFlow(false)
+    private val ownerBootstrapComplete = MutableStateFlow(
+        auth.currentUser?.uid?.let(ownerBootstrapStore::isComplete) == true,
+    )
 
     @Volatile
     private var authJob: Job? = null
@@ -124,8 +141,13 @@ class FirestoreSpoonRepository(
     }.stateIn(scope, SharingStarted.Eagerly, BackendState.Connecting)
 
     override val accountState = _accountState.asStateFlow()
-    override val recipes = combine(_catalogRecipes, _customRecipes) { catalog, custom ->
-        (catalog + custom.filter(CustomRecipe::active).map(CustomRecipe::toRecipe))
+    override val recipes = combine(
+        recipeCatalog.cachedRecipes,
+        _referencedCatalogRecipes,
+        _customRecipes,
+    ) { recent, referenced, custom ->
+        (recent + referenced + custom.filter(CustomRecipe::active).map(CustomRecipe::toRecipe))
+            .distinctBy(Recipe::id)
             .sortedBy(Recipe::title)
     }.stateIn(scope, SharingStarted.Eagerly, emptyList())
     override val mealPlans = _mealPlans.asStateFlow()
@@ -145,27 +167,53 @@ class FirestoreSpoonRepository(
     }
 
     init {
-        observeQuery(
-            recipesHealth,
-            Recipe::class.java,
-            {
-                firestore.collection(RECIPES_COLLECTION)
-                    .whereEqualTo(ACTIVE_FIELD, true)
-                    .whereEqualTo(LANGUAGE_FIELD, GREEK_LANGUAGE)
-            },
-        ) { remote -> _catalogRecipes.value = eligibleRemoteRecipes(remote).sortedBy(Recipe::title) }
+        startLocalCatalog()
         observeUserQueries()
         auth.addAuthStateListener(authListener)
         startAuthentication()
     }
 
+    private fun startLocalCatalog() {
+        scope.launch {
+            try {
+                recipeCatalog.ensureReady()
+                recipesHealth.value = CloudComponentState.Ready
+                combine(
+                    _mealPlans,
+                    _favoriteRecipeIds,
+                    _cookedHistory,
+                ) { plans, favoriteIds, history ->
+                    buildSet {
+                        plans.mapTo(this, DayMealPlan::recipeId)
+                        addAll(favoriteIds)
+                        history.mapTo(this, CookedMeal::recipeId)
+                    }.filter(::isSafeRecipeDocumentId).take(MAX_REFERENCED_RECIPES).toSet()
+                }.distinctUntilChanged().collect { referencedIds ->
+                    _referencedCatalogRecipes.value = recipeCatalog.getRecipesByIds(referencedIds)
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                recipesHealth.value = CloudComponentState.Failed(
+                    BackendFailure(
+                        BackendFailureKind.CONFIGURATION,
+                        false,
+                        "Bundled recipe catalog is unavailable",
+                    ),
+                )
+            }
+        }
+    }
+
     private fun observeUserQueries() {
         observeQuery(
+            MEAL_PLANS_COMPONENT,
             mealPlansHealth,
             DayMealPlan::class.java,
             { currentUid -> mealPlans(currentUid).orderBy(DATE_FIELD, Query.Direction.ASCENDING) },
         ) { _mealPlans.value = it }
         observeQuery(
+            FAVORITES_COMPONENT,
             favoritesHealth,
             FavoriteRecipe::class.java,
             { currentUid -> favorites(currentUid) },
@@ -175,6 +223,7 @@ class FirestoreSpoonRepository(
             }.toSet()
         }
         observeQuery(
+            SHOPPING_COMPONENT,
             shoppingHealth,
             ShoppingListItem::class.java,
             { currentUid ->
@@ -182,11 +231,13 @@ class FirestoreSpoonRepository(
             },
         ) { _shoppingItems.value = it }
         observeQuery(
+            NOTES_COMPONENT,
             notesHealth,
             RecipeNote::class.java,
             { currentUid -> recipeNotes(currentUid) },
         ) { _recipeNotes.value = it.sortedBy(RecipeNote::recipeId) }
         observeQuery(
+            CUSTOM_RECIPES_COMPONENT,
             customRecipesHealth,
             CustomRecipe::class.java,
             { currentUid ->
@@ -195,6 +246,7 @@ class FirestoreSpoonRepository(
             },
         ) { _customRecipes.value = it }
         observeQuery(
+            COOKED_HISTORY_COMPONENT,
             cookedHistoryHealth,
             CookedMeal::class.java,
             { currentUid ->
@@ -205,206 +257,184 @@ class FirestoreSpoonRepository(
     }
 
     override suspend fun ensureReady() {
-        val state = backendState.first { candidate -> candidate is BackendState.Cloud || candidate is BackendState.Error }
-        if (state is BackendState.Error) throw BackendUnavailableException(state.failure)
+        recipeCatalog.ensureReady()
+        val currentUid = awaitAuthenticatedUid()
+        awaitInitialOwnerCache(currentUid)
     }
 
     override suspend fun getRecipeDetails(recipeId: String): Recipe? {
         val safeRecipeId = requireSafeRecipeDocumentId(recipeId)
-        val currentUid = awaitUid()
         if (safeRecipeId.isCustomRecipeId()) {
+            ensureReady()
             val cached = _customRecipes.value.firstOrNull { it.id == safeRecipeId }
-            if (cached != null) return cached.takeIf(CustomRecipe::active)?.toRecipe()
-
-            val snapshot = customRecipeDocuments(currentUid)
-                .document(safeRecipeId)
-                .get(Source.SERVER)
-                .await()
-            if (!snapshot.exists()) return null
-            val custom = snapshot.toObjectOrLog(CustomRecipe::class.java) ?: return null
-            if (custom.id.isNotBlank() && custom.id != safeRecipeId) return null
-            return custom.copy(id = safeRecipeId).takeIf(CustomRecipe::active)?.toRecipe()
+            return cached?.takeIf(CustomRecipe::active)?.toRecipe()
         }
 
-        var attempt = 0L
-        while (true) {
-            try {
-                val snapshot = withTimeout(DETAIL_READ_TIMEOUT_MILLIS) {
-                    firestore.collection(RECIPE_DETAILS_COLLECTION)
-                        .document(safeRecipeId)
-                        .get(Source.SERVER)
-                        .await()
-                }
-                if (!snapshot.exists()) return null
-                return eligibleRecipeDetails(
-                    recipe = snapshot.toObjectOrLog(Recipe::class.java),
-                    documentId = snapshot.id,
-                    requestedId = safeRecipeId,
-                )
-            } catch (error: CancellationException) {
-                if (error !is TimeoutCancellationException) throw error
-                val failure = classifyFirebaseFailure(error)
-                if (attempt >= DETAIL_READ_MAX_RETRIES || failure.isRetryable == false) {
-                    throw BackendUnavailableException(failure)
-                }
-                Log.w(FIRESTORE_TAG, "Recipe details $safeRecipeId", error)
-                delay(retryDelayMillis(attempt++))
-            } catch (error: Exception) {
-                val failure = classifyFirebaseFailure(error)
-                if (attempt >= DETAIL_READ_MAX_RETRIES || failure.isRetryable == false) {
-                    throw BackendUnavailableException(failure)
-                }
-                Log.w(FIRESTORE_TAG, "Recipe details $safeRecipeId", error)
-                delay(retryDelayMillis(attempt++))
-            }
-        }
+        val recipe = recipeCatalog.getRecipe(safeRecipeId)
+        return eligibleRecipeDetails(recipe, safeRecipeId, safeRecipeId)
     }
+
+    override suspend fun getRecipesByIds(recipeIds: Set<String>): List<Recipe> {
+        if (recipeIds.isEmpty()) return emptyList()
+        val customById = _customRecipes.value.asSequence()
+            .filter(CustomRecipe::active)
+            .map(CustomRecipe::toRecipe)
+            .filter { it.id in recipeIds }
+            .associateBy(Recipe::id)
+        val public = recipeCatalog.getRecipesByIds(recipeIds - customById.keys)
+        val all = public.associateBy(Recipe::id) + customById
+        return recipeIds.mapNotNull(all::get)
+    }
+
+    override suspend fun queryRecipes(
+        criteria: ExploreCriteria,
+        limit: Int,
+        offset: Int,
+    ): RecipePage {
+        requirePageBounds(limit, offset)
+        val customMatches = ExploreRecipeFilter.filter(
+            _customRecipes.value.filter(CustomRecipe::active).map(CustomRecipe::toRecipe),
+            criteria,
+        )
+        val customPage = customMatches.drop(offset).take(limit)
+        val publicOffset = (offset - customMatches.size).coerceAtLeast(0)
+        val remaining = limit - customPage.size
+        val publicPage = recipeCatalog.queryRecipes(criteria, limit, publicOffset)
+        return RecipePage(
+            recipes = customPage + publicPage.recipes.take(remaining),
+            totalCount = customMatches.size + publicPage.totalCount,
+            offset = offset,
+            limit = limit,
+        )
+    }
+
+    override suspend fun getCatalogFacetOptions(): CatalogFacetOptions = mergeFacetOptions(
+        recipeCatalog.getFacetOptions(),
+        facetOptionsFrom(_customRecipes.value.filter(CustomRecipe::active).map(CustomRecipe::toRecipe)),
+    )
+
+    override suspend fun selectRandomRecipe(
+        filters: RecipeFilters,
+        excludingRecipeId: String?,
+        randomSeed: Long,
+    ): Recipe? = selectIncludingCustomRecipes(
+        recipeCatalog = recipeCatalog,
+        customRecipes = _customRecipes.value,
+        filters = filters,
+        excludingRecipeId = excludingRecipeId,
+        randomSeed = randomSeed,
+    )
 
     override suspend fun upsertMealPlan(plan: DayMealPlan) {
         require(plan.date.isNotBlank())
         val currentUid = awaitUid()
-        mealPlans(currentUid).document(plan.date)
-            .set(plan.toFirestoreDocument())
-            .await()
+        withPersonalMutation(currentUid) {
+            val stored = plan.copy(id = plan.date)
+            val task = mealPlans(currentUid).document(plan.date).set(stored.toFirestoreDocument())
+            _mealPlans.value = (_mealPlans.value.filterNot { it.date == stored.date } + stored)
+                .sortedBy(DayMealPlan::date)
+            trackQueuedWrite(currentUid, "meal plan " + plan.date, mealPlansHealth, task)
+        }
     }
 
     override suspend fun setMealCompleted(date: String, completed: Boolean) {
         require(date.isNotBlank())
         val currentUid = awaitUid()
-        val planDocument = mealPlans(currentUid).document(date)
-        val now = System.currentTimeMillis()
-        val newCompletionEventId = newCookedMealEventId()
-        firestore.runTransaction { transaction ->
-            val plan = transaction.get(planDocument)
-            check(plan.exists()) { "Cannot complete a meal plan that does not exist: $date" }
-            val recipeId = checkNotNull(plan.getString(RECIPE_ID_FIELD))
-            val recipeTitle = checkNotNull(plan.getString(RECIPE_TITLE_FIELD))
-            val wasCompleted = plan.getBoolean(COMPLETED_FIELD) == true
-            if (wasCompleted != completed) {
-                val storedCompletionEventId = plan.getString(COMPLETION_EVENT_ID_FIELD).orEmpty()
-                val previousUpdatedAt = plan.getLong(UPDATED_AT_FIELD) ?: 0L
-                val historyDocumentsToDelete = when {
-                    completed -> emptyList()
-                    storedCompletionEventId.isNotBlank() -> listOf(
-                        cookedHistoryDocuments(currentUid).document(storedCompletionEventId),
-                    )
-                    else -> buildList {
-                        add(cookedHistoryDocuments(currentUid).document(date))
-                        if (previousUpdatedAt > 0L) {
-                            add(
-                                cookedHistoryDocuments(currentUid)
-                                    .document(cookedMealEventId(date, previousUpdatedAt)),
-                            )
-                        }
-                    }
-                }
-                // Firestore evaluates delete rules for a missing document with a null resource,
-                // so resolve both legacy candidates before issuing any transaction writes.
-                val existingHistoryDocuments = historyDocumentsToDelete.filter { document ->
-                    transaction.get(document).exists()
-                }
-                transaction.update(
-                    planDocument,
-                    mapOf(
-                        COMPLETED_FIELD to completed,
-                        COMPLETION_EVENT_ID_FIELD to if (completed) newCompletionEventId else "",
-                        UPDATED_AT_FIELD to now,
+        withPersonalMutation(currentUid) {
+            val projection = projectMealCompletion(
+                plans = _mealPlans.value,
+                storedHistory = _cookedHistory.value,
+                date = date,
+                completed = completed,
+                nowEpochMillis = System.currentTimeMillis(),
+                newCompletionEventId = newCookedMealEventId(),
+            )
+            val changedPlan = projection.changedPlan ?: return@withPersonalMutation
+            val batch = firestore.batch()
+            batch.set(
+                mealPlans(currentUid).document(changedPlan.date),
+                changedPlan.toFirestoreDocument(),
+            )
+            projection.historyToCreate?.let { history ->
+                batch.set(
+                    cookedHistoryDocuments(currentUid).document(history.id),
+                    cookedMealDocument(
+                        date = history.date,
+                        recipeId = history.recipeId,
+                        recipeTitle = history.recipeTitle,
+                        completedAtEpochMillis = history.completedAtEpochMillis,
                     ),
                 )
-                if (completed) {
-                    transaction.set(
-                        cookedHistoryDocuments(currentUid).document(newCompletionEventId),
-                        cookedMealDocument(
-                            date = date,
-                            recipeId = recipeId,
-                            recipeTitle = recipeTitle,
-                            completedAtEpochMillis = now,
-                        ),
-                    )
-                } else {
-                    // Covers the original date id and the later cooked_<date>_<timestamp> id,
-                    // before plans stored an explicit completion event id.
-                    existingHistoryDocuments.forEach { document ->
-                        transaction.delete(document)
-                    }
-                }
             }
-        }.await()
+            projection.historyIdsToDelete.forEach { historyId ->
+                batch.delete(cookedHistoryDocuments(currentUid).document(historyId))
+            }
+            val task = batch.commit()
+            _mealPlans.value = projection.plans
+            _cookedHistory.value = projection.storedHistory
+            trackQueuedWrite(currentUid, "meal completion " + date, cookedHistoryHealth, task)
+        }
     }
 
     override suspend fun deleteCookedHistoryEntry(historyId: String) {
         val safeHistoryId = requireSafeRecipeDocumentId(historyId)
         val currentUid = awaitUid()
-        val historyDocument = cookedHistoryDocuments(currentUid).document(safeHistoryId)
-        val now = System.currentTimeMillis()
-        firestore.runTransaction { transaction ->
-            val history = transaction.get(historyDocument)
-            if (history.exists()) {
-                val date = checkNotNull(history.getString(DATE_FIELD))
-                val recipeId = checkNotNull(history.getString(RECIPE_ID_FIELD))
-                val completedAt = checkNotNull(history.getLong(COMPLETED_AT_FIELD))
-                val planDocument = mealPlans(currentUid).document(date)
-                val plan = transaction.get(planDocument)
-                val eventIsCurrentPlanCompletion = plan.exists() &&
-                    plan.getBoolean(COMPLETED_FIELD) == true &&
-                    (
-                        plan.getString(COMPLETION_EVENT_ID_FIELD).orEmpty() == safeHistoryId ||
-                            plan.getString(COMPLETION_EVENT_ID_FIELD).orEmpty().isBlank()
-                        ) &&
-                    plan.getString(RECIPE_ID_FIELD) == recipeId &&
-                    plan.getLong(UPDATED_AT_FIELD) == completedAt
-                if (eventIsCurrentPlanCompletion) {
-                    transaction.update(
-                        planDocument,
-                        mapOf(
-                            COMPLETED_FIELD to false,
-                            COMPLETION_EVENT_ID_FIELD to "",
-                            UPDATED_AT_FIELD to now,
-                        ),
-                    )
-                }
-                transaction.delete(historyDocument)
-            } else if (runCatching { java.time.LocalDate.parse(safeHistoryId) }.isSuccess) {
-                // A very old completed plan may predate the dedicated history collection.
-                // Its projected history row uses the date id, so explicit undo still clears it.
-                val planDocument = mealPlans(currentUid).document(safeHistoryId)
-                val plan = transaction.get(planDocument)
-                if (plan.exists() &&
-                    plan.getBoolean(COMPLETED_FIELD) == true &&
-                    plan.getString(COMPLETION_EVENT_ID_FIELD).orEmpty().isBlank()
-                ) {
-                    transaction.update(
-                        planDocument,
-                        mapOf(
-                            COMPLETED_FIELD to false,
-                            COMPLETION_EVENT_ID_FIELD to "",
-                            UPDATED_AT_FIELD to now,
-                        ),
-                    )
-                }
+        withPersonalMutation(currentUid) {
+            val projection = projectHistoryDeletion(
+                plans = _mealPlans.value,
+                storedHistory = _cookedHistory.value,
+                historyId = safeHistoryId,
+                nowEpochMillis = System.currentTimeMillis(),
+            )
+            if (projection.changedPlan == null && projection.historyIdToDelete == null) {
+                return@withPersonalMutation
             }
-        }.await()
+            val batch = firestore.batch()
+            projection.changedPlan?.let { changedPlan ->
+                batch.set(
+                    mealPlans(currentUid).document(changedPlan.date),
+                    changedPlan.toFirestoreDocument(),
+                )
+            }
+            projection.historyIdToDelete?.let { id ->
+                batch.delete(cookedHistoryDocuments(currentUid).document(id))
+            }
+            val task = batch.commit()
+            _mealPlans.value = projection.plans
+            _cookedHistory.value = projection.storedHistory
+            trackQueuedWrite(
+                currentUid,
+                "history deletion " + safeHistoryId,
+                cookedHistoryHealth,
+                task,
+            )
+        }
     }
 
     override suspend fun toggleFavorite(recipeId: String): Boolean {
         requireSafeRecipeDocumentId(recipeId)
         val currentUid = awaitUid()
-        val document = favorites(currentUid).document(recipeId)
-        return firestore.runTransaction { transaction ->
-            if (transaction.get(document).exists()) {
-                transaction.delete(document)
-                false
-            } else {
-                transaction.set(
-                    document,
+        return withPersonalMutation(currentUid) {
+            val document = favorites(currentUid).document(recipeId)
+            val updated = _favoriteRecipeIds.value.toMutableSet()
+            val isFavorite = if (updated.remove(recipeId)) false else {
+                updated.add(recipeId)
+                true
+            }
+            val task = if (isFavorite) {
+                document.set(
                     FavoriteRecipe(
                         recipeId = recipeId,
                         addedAtEpochMillis = System.currentTimeMillis(),
-                    ),
+                    ).toFirestoreDocument(),
                 )
-                true
+            } else {
+                document.delete()
             }
-        }.await()
+            _favoriteRecipeIds.value = updated.toSet()
+            trackQueuedWrite(currentUid, "favorite " + recipeId, favoritesHealth, task)
+            isFavorite
+        }
     }
 
     override suspend fun upsertShoppingItems(items: List<ShoppingListItem>) {
@@ -412,44 +442,68 @@ class FirestoreSpoonRepository(
         require(items.size <= MAX_SHOPPING_ITEMS_PER_WRITE)
         items.forEach(ShoppingListItem::requireValid)
         val currentUid = awaitUid()
-        val batch = firestore.batch()
-        items.forEach { item ->
-            batch.set(
-                shoppingItems(currentUid).document(item.id),
-                item.toFirestoreDocument(),
-            )
+        withPersonalMutation(currentUid) {
+            val batch = firestore.batch()
+            items.forEach { item ->
+                batch.set(
+                    shoppingItems(currentUid).document(item.id),
+                    item.toFirestoreDocument(),
+                )
+            }
+            val task = batch.commit()
+            val incomingIds = items.mapTo(mutableSetOf(), ShoppingListItem::id)
+            _shoppingItems.value = (_shoppingItems.value.filterNot { it.id in incomingIds } + items)
+                .sortedBy(ShoppingListItem::createdAtEpochMillis)
+            trackQueuedWrite(currentUid, "shopping items", shoppingHealth, task)
         }
-        batch.commit().await()
     }
 
     override suspend fun setShoppingItemChecked(itemId: String, checked: Boolean) {
         val safeItemId = requireSafeRecipeDocumentId(itemId)
         val currentUid = awaitUid()
-        shoppingItems(currentUid).document(safeItemId).update(
-            mapOf(
-                CHECKED_FIELD to checked,
-                UPDATED_AT_FIELD to System.currentTimeMillis(),
-            ),
-        ).await()
+        withPersonalMutation(currentUid) {
+            val current = checkNotNull(_shoppingItems.value.firstOrNull { it.id == safeItemId })
+            val changed = current.copy(
+                checked = checked,
+                updatedAtEpochMillis = System.currentTimeMillis(),
+            )
+            val task = shoppingItems(currentUid).document(safeItemId)
+                .set(changed.toFirestoreDocument())
+            _shoppingItems.value = _shoppingItems.value.map { item ->
+                if (item.id == safeItemId) changed else item
+            }
+            trackQueuedWrite(currentUid, "shopping item " + safeItemId, shoppingHealth, task)
+        }
     }
 
     override suspend fun deleteShoppingItem(itemId: String) {
         val safeItemId = requireSafeRecipeDocumentId(itemId)
         val currentUid = awaitUid()
-        shoppingItems(currentUid).document(safeItemId).delete().await()
+        withPersonalMutation(currentUid) {
+            val task = shoppingItems(currentUid).document(safeItemId).delete()
+            _shoppingItems.value = _shoppingItems.value.filterNot { it.id == safeItemId }
+            trackQueuedWrite(currentUid, "shopping deletion " + safeItemId, shoppingHealth, task)
+        }
     }
 
     override suspend fun clearCheckedShoppingItems() {
         val currentUid = awaitUid()
-        val checkedDocuments = shoppingItems(currentUid)
-            .whereEqualTo(CHECKED_FIELD, true)
-            .get()
-            .await()
-            .documents
-        checkedDocuments.chunked(FIRESTORE_BATCH_LIMIT).forEach { chunk ->
-            val batch = firestore.batch()
-            chunk.forEach { batch.delete(it.reference) }
-            batch.commit().await()
+        withPersonalMutation(currentUid) {
+            val checkedIds = _shoppingItems.value.asSequence()
+                .filter(ShoppingListItem::checked)
+                .map(ShoppingListItem::id)
+                .toList()
+            checkedIds.chunked(FIRESTORE_BATCH_LIMIT).forEach { chunk ->
+                val batch = firestore.batch()
+                chunk.forEach { id -> batch.delete(shoppingItems(currentUid).document(id)) }
+                trackQueuedWrite(
+                    currentUid,
+                    "checked shopping items",
+                    shoppingHealth,
+                    batch.commit(),
+                )
+            }
+            _shoppingItems.value = _shoppingItems.value.filterNot(ShoppingListItem::checked)
         }
     }
 
@@ -457,31 +511,60 @@ class FirestoreSpoonRepository(
         val recipeId = requireSafeRecipeDocumentId(note.recipeId.ifBlank { note.id })
         require(note.id.isBlank() || note.id == recipeId)
         val currentUid = awaitUid()
-        val document = recipeNotes(currentUid).document(recipeId)
-        if (note.text.isBlank()) {
-            document.delete().await()
-        } else {
-            document.set(note.copy(id = recipeId, recipeId = recipeId).requireValid().toFirestoreDocument())
-                .await()
+        withPersonalMutation(currentUid) {
+            val document = recipeNotes(currentUid).document(recipeId)
+            val stored = note.copy(id = recipeId, recipeId = recipeId)
+            val task = if (note.text.isBlank()) {
+                document.delete()
+            } else {
+                document.set(stored.requireValid().toFirestoreDocument())
+            }
+            _recipeNotes.value = if (note.text.isBlank()) {
+                _recipeNotes.value.filterNot { it.recipeId == recipeId }
+            } else {
+                (_recipeNotes.value.filterNot { it.recipeId == recipeId } + stored)
+                    .sortedBy(RecipeNote::recipeId)
+            }
+            trackQueuedWrite(currentUid, "recipe note " + recipeId, notesHealth, task)
         }
     }
 
     override suspend fun upsertCustomRecipe(recipe: CustomRecipe) {
         recipe.requireValid()
         val currentUid = awaitUid()
-        customRecipeDocuments(currentUid).document(recipe.id)
-            .set(recipe.toFirestoreDocument())
-            .await()
+        withPersonalMutation(currentUid) {
+            val task = customRecipeDocuments(currentUid).document(recipe.id)
+                .set(recipe.toFirestoreDocument())
+            _customRecipes.value = (_customRecipes.value.filterNot { it.id == recipe.id } + recipe)
+                .sortedByDescending(CustomRecipe::updatedAtEpochMillis)
+            trackQueuedWrite(
+                currentUid,
+                "custom recipe " + recipe.id,
+                customRecipesHealth,
+                task,
+            )
+        }
     }
 
     override suspend fun deleteCustomRecipe(recipeId: String) {
         require(recipeId.isCustomRecipeId())
         val currentUid = awaitUid()
-        val batch = firestore.batch()
-        batch.delete(customRecipeDocuments(currentUid).document(recipeId))
-        batch.delete(recipeNotes(currentUid).document(recipeId))
-        batch.delete(favorites(currentUid).document(recipeId))
-        batch.commit().await()
+        withPersonalMutation(currentUid) {
+            val batch = firestore.batch()
+            batch.delete(customRecipeDocuments(currentUid).document(recipeId))
+            batch.delete(recipeNotes(currentUid).document(recipeId))
+            batch.delete(favorites(currentUid).document(recipeId))
+            val task = batch.commit()
+            _customRecipes.value = _customRecipes.value.filterNot { it.id == recipeId }
+            _recipeNotes.value = _recipeNotes.value.filterNot { it.recipeId == recipeId }
+            _favoriteRecipeIds.value = _favoriteRecipeIds.value - recipeId
+            trackQueuedWrite(
+                currentUid,
+                "custom recipe deletion " + recipeId,
+                customRecipesHealth,
+                task,
+            )
+        }
     }
 
     override suspend fun registerEmailAccount(email: String, password: String) {
@@ -583,7 +666,89 @@ class FirestoreSpoonRepository(
         }
     }
 
+    /**
+     * A listener's first emission is produced from Firestore's persistent local cache, including
+     * pending writes. Established devices can initialize entirely from it. A new empty device
+     * waits for one complete server bootstrap so it cannot overwrite an existing remote week.
+     */
+    private suspend fun awaitInitialOwnerCache(expectedUid: String) {
+        val readiness = try {
+            withTimeout(PERSONAL_CACHE_WARMUP_TIMEOUT_MILLIS) {
+                combine(
+                    combine(
+                        listOf(
+                            mealPlansHealth,
+                            favoritesHealth,
+                            shoppingHealth,
+                            notesHealth,
+                            customRecipesHealth,
+                            cookedHistoryHealth,
+                        ),
+                    ) { states -> states.toList() },
+                    ownerBootstrapComplete,
+                    establishedCachedPersonalData,
+                ) { states, bootstrapComplete, establishedCache ->
+                    Triple(states, bootstrapComplete, establishedCache)
+                }.first { (states, bootstrapComplete, establishedCache) ->
+                    personalCacheCanInitialize(
+                        allLocalSnapshotsReady = states.all {
+                            it is CloudComponentState.Ready
+                        },
+                        ownerBootstrapComplete = bootstrapComplete,
+                        establishedCachedPersonalData = establishedCache,
+                        ) ||
+                        states.any { state ->
+                            state is CloudComponentState.Failed &&
+                                state.failure.isRetryable == false
+                        }
+                }
+            }
+        } catch (_: TimeoutCancellationException) {
+            throw BackendUnavailableException(timeoutFailure())
+        }
+        if (uid.value != expectedUid) {
+            awaitInitialOwnerCache(awaitAuthenticatedUid())
+            return
+        }
+        val healthStates = readiness.first
+        healthStates.firstNotNullOfOrNull { state ->
+            (state as? CloudComponentState.Failed)
+                ?.failure
+                ?.takeIf { it.isRetryable == false }
+        }?.let { failure -> throw BackendUnavailableException(failure) }
+    }
+
+    private fun recordOwnerSnapshot(
+        sourceUid: String,
+        component: String,
+        fromCache: Boolean,
+        hasValues: Boolean,
+    ) {
+        synchronized(ownerSnapshotLock) {
+            if (uid.value != sourceUid) return
+            if (fromCache) {
+                if (hasValues) establishedCachedPersonalData.value = true
+                return
+            }
+            val updated = serverBackedOwnerComponents.value + component
+            serverBackedOwnerComponents.value = updated
+            if (
+                ownerBootstrapCanBeMarked(updated, ALL_OWNER_COMPONENTS) &&
+                !ownerBootstrapComplete.value
+            ) {
+                val persisted = ownerBootstrapStore.markComplete(sourceUid)
+                if (!persisted) {
+                    Log.w(FIRESTORE_TAG, "Could not persist personal cache bootstrap marker")
+                }
+                // The current process is safe once all server snapshots arrived, even if the
+                // no-backup marker store was temporarily unable to persist it.
+                ownerBootstrapComplete.value = true
+            }
+        }
+    }
+
     private fun <T : Any> observeQuery(
+        component: String,
         health: MutableStateFlow<CloudComponentState>,
         type: Class<T>,
         queryFactory: (String) -> Query,
@@ -593,36 +758,61 @@ class FirestoreSpoonRepository(
             uid.flatMapLatest { currentUid ->
                 if (currentUid == null) {
                     health.value = CloudComponentState.Pending
-                    flowOf(currentUid to emptyList<T>())
+                    flowOf<Pair<String?, ObservedObjects<T>?>>(currentUid to null)
                 } else {
                     health.value = CloudComponentState.Pending
-                    resilientObjectsFlow(health, type, queryFactory(currentUid))
-                        .onStart { emit(emptyList()) }
-                        .map { values -> currentUid to values }
+                    resilientObjectsFlow(
+                        ownerUid = currentUid,
+                        health = health,
+                        type = type,
+                        query = queryFactory(currentUid),
+                    )
+                        .map { snapshot -> currentUid to snapshot }
                 }
-            }.collect { (sourceUid, values) ->
+            }.collect { (sourceUid, snapshot) ->
                 // Cancellation and UID updates happen on different threads. An already-converting
                 // snapshot from the previous account must never repopulate owner state after the
                 // synchronous clear in publishAuthenticatedUser().
-                if (uid.value == sourceUid) publish(values)
+                synchronized(ownerSnapshotLock) {
+                    if (uid.value == sourceUid && snapshot != null) {
+                        // Publish decoded values before declaring this component cache-ready. This
+                        // ordering prevents ensureWeek from observing a ready flag with an old
+                        // empty meal-plan flow. The shared lock also prevents an old account's
+                        // in-flight conversion from publishing after an account switch.
+                        publish(snapshot.values)
+                        health.value = CloudComponentState.Ready
+                        recordOwnerSnapshot(
+                            sourceUid = requireNotNull(sourceUid),
+                            component = component,
+                            fromCache = snapshot.fromCache,
+                            hasValues = snapshot.hasValues,
+                        )
+                    }
+                }
             }
         }
     }
 
     private fun <T : Any> resilientObjectsFlow(
+        ownerUid: String,
         health: MutableStateFlow<CloudComponentState>,
         type: Class<T>,
         query: Query,
-    ): Flow<List<T>> = query.objectsFlow(type)
-        .onEach { health.value = CloudComponentState.Ready }
-        .retryWhen { error, attempt -> retryQuery(health, type, error, attempt) }
+    ): Flow<ObservedObjects<T>> = query.objectsFlow(type)
+        .retryWhen { error, attempt ->
+            retryQuery(ownerUid, health, type, error, attempt)
+        }
         .catch { error ->
             if (error is CancellationException) throw error
-            health.value = CloudComponentState.Failed(classifyFirebaseFailure(error))
-            emit(emptyList())
+            synchronized(ownerSnapshotLock) {
+                if (uid.value == ownerUid) {
+                    health.value = CloudComponentState.Failed(classifyFirebaseFailure(error))
+                }
+            }
         }
 
     private suspend fun retryQuery(
+        ownerUid: String,
         health: MutableStateFlow<CloudComponentState>,
         type: Class<*>,
         error: Throwable,
@@ -630,11 +820,20 @@ class FirestoreSpoonRepository(
     ): Boolean {
         if (error is CancellationException) return false
         val failure = classifyFirebaseFailure(error)
-        health.value = CloudComponentState.Failed(failure)
-        return finishRetry(health, type, error, failure, attempt)
+        val belongsToCurrentOwner = synchronized(ownerSnapshotLock) {
+            if (uid.value == ownerUid) {
+                health.value = CloudComponentState.Failed(failure)
+                true
+            } else {
+                false
+            }
+        }
+        if (!belongsToCurrentOwner) return false
+        return finishRetry(ownerUid, health, type, error, failure, attempt)
     }
 
     private suspend fun finishRetry(
+        ownerUid: String,
         health: MutableStateFlow<CloudComponentState>,
         type: Class<*>,
         error: Throwable,
@@ -644,8 +843,14 @@ class FirestoreSpoonRepository(
         Log.w(FIRESTORE_TAG, type.simpleName, error)
         if (failure.isRetryable == false) return false
         delay(retryDelayMillis(attempt))
-        health.value = CloudComponentState.Pending
-        return true
+        return synchronized(ownerSnapshotLock) {
+            if (uid.value == ownerUid) {
+                health.value = CloudComponentState.Pending
+                true
+            } else {
+                false
+            }
+        }
     }
 
     private suspend fun awaitUid(): String {
@@ -653,16 +858,71 @@ class FirestoreSpoonRepository(
         return requireNotNull(auth.currentUser?.uid ?: uid.value)
     }
 
-    private fun publishAuthenticatedUser(user: FirebaseUser?) {
-        val previousUid = uid.value
-        val nextUid = user?.uid
-        if (previousUid != nextUid) {
-            clearOwnerState()
-            markOwnerComponentsPending()
+    private suspend fun awaitAuthenticatedUid(): String {
+        auth.currentUser?.let { user ->
+            if (uid.value != user.uid) publishAuthenticatedUser(user)
+            return user.uid
         }
-        uid.value = nextUid
-        _accountState.value = user.toAccountState()
-        authHealth.value = if (user == null) CloudComponentState.Pending else CloudComponentState.Ready
+        startAuthentication()
+        val state = authHealth.first { candidate ->
+            candidate is CloudComponentState.Ready || candidate is CloudComponentState.Failed
+        }
+        if (state is CloudComponentState.Failed) {
+            throw BackendUnavailableException(state.failure)
+        }
+        return requireNotNull(auth.currentUser?.uid ?: uid.value)
+    }
+
+    private suspend fun <T> withPersonalMutation(
+        ownerUid: String,
+        mutation: () -> T,
+    ): T = personalMutationMutex.withLock {
+        synchronized(ownerSnapshotLock) {
+            check(
+                uid.value == ownerUid &&
+                    auth.currentUser?.uid == ownerUid,
+            ) { "The signed-in account changed before the personal change was queued" }
+            mutation()
+        }
+    }
+
+    /**
+     * Firestore persists this mutation locally before syncing it in the background. Deliberately
+     * do not await the returned task: that task completes only after server acknowledgement and
+     * would otherwise leave every personal action spinning while the phone is offline.
+     */
+    private fun trackQueuedWrite(
+        ownerUid: String,
+        description: String,
+        health: MutableStateFlow<CloudComponentState>,
+        task: Task<*>,
+    ) {
+        task.addOnFailureListener { error ->
+            Log.e(FIRESTORE_TAG, "Queued $description rejected during sync", error)
+            synchronized(ownerSnapshotLock) {
+                if (uid.value == ownerUid) {
+                    health.value = CloudComponentState.Failed(classifyFirebaseFailure(error))
+                }
+            }
+        }
+    }
+
+    private fun publishAuthenticatedUser(user: FirebaseUser?) {
+        val nextUid = user?.uid
+        synchronized(ownerSnapshotLock) {
+            if (uid.value != nextUid) {
+                clearOwnerState()
+                markOwnerComponentsPending()
+                serverBackedOwnerComponents.value = emptySet()
+                establishedCachedPersonalData.value = false
+                ownerBootstrapComplete.value =
+                    nextUid?.let(ownerBootstrapStore::isComplete) == true
+            }
+            uid.value = nextUid
+            _accountState.value = user.toAccountState()
+            authHealth.value =
+                if (user == null) CloudComponentState.Pending else CloudComponentState.Ready
+        }
     }
 
     private fun clearOwnerState() {
@@ -726,8 +986,6 @@ class FirestoreSpoonRepository(
         firestore.collection(USER_ROOT_COLLECTION).document(uid).collection(COOKED_HISTORY_COLLECTION)
 
     companion object {
-        const val RECIPES_COLLECTION = "spoon_recipes"
-        const val RECIPE_DETAILS_COLLECTION = "spoon_recipe_details"
         const val USER_ROOT_COLLECTION = "spoon"
         const val MEAL_PLANS_COLLECTION = "mealPlans"
         const val FAVORITES_COLLECTION = "favorites"
@@ -735,24 +993,43 @@ class FirestoreSpoonRepository(
         const val RECIPE_NOTES_COLLECTION = "recipeNotes"
         const val CUSTOM_RECIPES_COLLECTION = "customRecipes"
         const val COOKED_HISTORY_COLLECTION = "cookedHistory"
-        private const val ACTIVE_FIELD = "active"
-        private const val LANGUAGE_FIELD = "language"
         private const val DATE_FIELD = "date"
         private const val CREATED_AT_FIELD = "createdAtEpochMillis"
         private const val UPDATED_AT_FIELD = "updatedAtEpochMillis"
         private const val COMPLETED_AT_FIELD = "completedAtEpochMillis"
-        private const val COMPLETED_FIELD = "completed"
-        private const val COMPLETION_EVENT_ID_FIELD = "completionEventId"
-        private const val CHECKED_FIELD = "checked"
-        private const val RECIPE_ID_FIELD = "recipeId"
-        private const val RECIPE_TITLE_FIELD = "recipeTitle"
-        private const val GREEK_LANGUAGE = "el"
         private const val FIRESTORE_BATCH_LIMIT = 450
         private const val AUTH_ATTEMPT_TIMEOUT_MILLIS = 20_000L
-        private const val DETAIL_READ_TIMEOUT_MILLIS = 20_000L
-        private const val DETAIL_READ_MAX_RETRIES = 2L
+        private const val PERSONAL_CACHE_WARMUP_TIMEOUT_MILLIS = 15_000L
+        private const val MAX_REFERENCED_RECIPES = 1_024
+        private const val MEAL_PLANS_COMPONENT = "mealPlans"
+        private const val FAVORITES_COMPONENT = "favorites"
+        private const val SHOPPING_COMPONENT = "shopping"
+        private const val NOTES_COMPONENT = "notes"
+        private const val CUSTOM_RECIPES_COMPONENT = "customRecipes"
+        private const val COOKED_HISTORY_COMPONENT = "cookedHistory"
+        private val ALL_OWNER_COMPONENTS = setOf(
+            MEAL_PLANS_COMPONENT,
+            FAVORITES_COMPONENT,
+            SHOPPING_COMPONENT,
+            NOTES_COMPONENT,
+            CUSTOM_RECIPES_COMPONENT,
+            COOKED_HISTORY_COMPONENT,
+        )
     }
 }
+
+internal fun personalCacheCanInitialize(
+    allLocalSnapshotsReady: Boolean,
+    ownerBootstrapComplete: Boolean,
+    establishedCachedPersonalData: Boolean,
+): Boolean = allLocalSnapshotsReady &&
+    (ownerBootstrapComplete || establishedCachedPersonalData)
+
+internal fun ownerBootstrapCanBeMarked(
+    serverBackedComponents: Set<String>,
+    requiredComponents: Set<String>,
+): Boolean = requiredComponents.isNotEmpty() &&
+    serverBackedComponents.containsAll(requiredComponents)
 
 /**
  * Builds the strict Firestore representation explicitly instead of relying on Java-bean
@@ -772,6 +1049,11 @@ internal fun DayMealPlan.toFirestoreDocument(): Map<String, Any> = mapOf(
     "completed" to completed,
     "completionEventId" to completionEventId,
     "updatedAtEpochMillis" to updatedAtEpochMillis,
+)
+
+internal fun FavoriteRecipe.toFirestoreDocument(): Map<String, Any> = mapOf(
+    "recipeId" to recipeId,
+    "addedAtEpochMillis" to addedAtEpochMillis,
 )
 
 internal fun ShoppingListItem.toFirestoreDocument(): Map<String, Any> = mapOf(
@@ -939,7 +1221,13 @@ private fun authFailure(code: String): BackendFailure = when (code) {
 internal fun retryDelayMillis(attempt: Long): Long =
     (1_000L shl attempt.coerceAtMost(5).toInt()).coerceAtMost(30_000L)
 
-private fun <T : Any> Query.objectsFlow(type: Class<T>): Flow<List<T>> =
+private data class ObservedObjects<T : Any>(
+    val values: List<T>,
+    val fromCache: Boolean,
+    val hasValues: Boolean,
+)
+
+private fun <T : Any> Query.objectsFlow(type: Class<T>): Flow<ObservedObjects<T>> =
     callbackFlow<QuerySnapshot> {
         val registration = addSnapshotListener { snapshot, error ->
             when {
@@ -953,9 +1241,16 @@ private fun <T : Any> Query.objectsFlow(type: Class<T>): Flow<List<T>> =
         // always completes first, so emitted results remain chronological without building a queue.
         .buffer(Channel.CONFLATED)
         .map { snapshot ->
-            convertFirestoreSnapshotOffMain(
+            val values = convertFirestoreSnapshotOffMain(
                 source = { snapshot.documents },
                 convert = { document -> document.toObjectOrLog(type) },
+            )
+            ObservedObjects(
+                values = values,
+                fromCache = snapshot.metadata.isFromCache,
+                // Upgrade compatibility should only trust locally cached data that decoded into a
+                // valid owner model, never a malformed document that happened to exist on disk.
+                hasValues = values.isNotEmpty(),
             )
         }
 

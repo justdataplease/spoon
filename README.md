@@ -5,14 +5,18 @@ user interface is Greek. It builds a weekly food plan, proposes a matching recip
 for each day, and makes it easy to reroll, filter, save, replace, and mark meals as
 cooked.
 
-The production catalog is backed by Firebase project `spoontheplanner`; the
-Android application ID is `com.spoon.app`.
+The Android application ID is `com.spoon.app`. Its complete public catalog of
+20,861 Greek recipes is bundled as an indexed SQLite database, while Firebase
+project `spoontheplanner` provides account-backed synchronization for personal
+data.
 
 ## App features
 
 - Monday-to-Sunday planning with default main-food groups such as όσπρια, κοτόπουλο,
   λαχανικά, κρέας, ψάρι, βρώμικο, and ζυμαρικά/ρύζι.
-- Independent random reroll for one day or the whole week.
+- Independent random reroll for one day or the whole week. Every matching recipe
+  has the same selection probability across Akis, Argiro, Gastronomos, and custom
+  recipes; no provider receives priority.
 - Per-day constraints for category, difficulty, minimum rating on a 0–10 scale,
   and maximum hands-on preparation time.
 - A clear «Ευκολάκι» effort index based on preparation sections and method steps:
@@ -36,7 +40,9 @@ Android application ID is `com.spoon.app`.
 - User-initiated inline video for YouTube, Vimeo, and direct HTTPS video files.
   Nothing autoplays, unsafe URLs/navigation are blocked, loading failures are shown
   instead of a blank player, and an external fallback remains available.
-- A persistent local Greek demo catalog when no Firebase configuration is present.
+- The complete 20,861-recipe Greek catalog works offline from indexed local
+  SQLite. Explore loads 24 rows at a time, so opening and filtering the catalog
+  does not download every recipe or issue Firestore recipe reads.
 - Anonymous Firebase Authentication plus optional email/password account linking,
   sign-in, sign-out, and password reset. Linking upgrades the same UID so the
   owner's plans, favorites, history, notes, shopping list, and custom recipes remain
@@ -47,9 +53,19 @@ is preserved and the app explains that no alternative was found.
 
 ## Architecture
 
-The app streams lean, active Greek recipe summaries for planning and Explore, then
-fetches the rich details document only when a recipe is opened. This keeps the
-normal catalog read small while retaining full detail pages.
+All public recipe summaries and full details are read from the bundled indexed
+SQLite catalog. Search, filters, 24-row Explore pages, random planning, favorites
+lookup, and recipe details therefore remain available without a network
+connection and produce zero reads from the Firestore recipe collections. Images
+and videos keep their publisher HTTPS URLs and are fetched and cached only when
+needed, so media that has not already been cached still requires connectivity.
+
+Personal state is offline-first: plans, favorite IDs, cooked history, shopping
+items, notes, and custom recipes are written to Firestore's persistent local
+cache immediately. Firebase synchronizes that queued state as a backup and makes
+it available on another signed-in phone when connectivity returns. A new phone
+needs one initial online sign-in/bootstrap before its personal cache can be used
+offline; the bundled public catalog does not.
 
 ```text
 app/src/main/java/com/justdataplease/spoon/
@@ -64,13 +80,15 @@ tools/recipe_importer/
   crawl_catalog.py    complete permission-gated Akis Greek crawler
   crawl_argiro.py     complete permission-gated Argiro Greek crawler
   crawl_gastronomos.py complete permission-gated Gastronomos Greek crawler
+  build_local_catalog.py deterministic indexed SQLite catalog builder
   full_schema.py      rich normalization and Firestore projections
   import_catalog.py   dry-run-first validator and Admin SDK importer
   inspect_recipe.py   one-URL metadata inspector
 ```
 
 The main libraries are Jetpack Compose/Material 3, Hilt, Navigation Compose,
-Firebase Auth/Firestore, WorkManager, DataStore, Coil, and Kotlin coroutines.
+Android SQLite, Firebase Auth/Firestore, WorkManager, DataStore, Coil, and Kotlin
+coroutines.
 
 ## Build and install
 
@@ -83,25 +101,24 @@ $env:ANDROID_HOME="$env:LOCALAPPDATA\Android\Sdk"
 $env:ANDROID_SDK_ROOT=$env:ANDROID_HOME
 
 .\gradlew.bat testDebugUnitTest
-.\gradlew.bat assembleDebug
+.\gradlew.bat assembleRelease
 ```
 
-The installable debug APK is generated at
-`app/build/outputs/apk/debug/app-debug.apk` and the delivered copy is kept at
-`dist/spoon-debug.apk`. To install it over USB:
+The optimized, signed personal release APK is delivered at `dist/spoon.apk`. To
+install or upgrade it over USB:
 
 ```powershell
 adb devices
-adb install -r app\build\outputs\apk\debug\app-debug.apk
+adb install -r dist\spoon.apk
 ```
 
 Alternatively, copy the APK to the phone, open it, and approve Android's
-per-app “install unknown apps” prompt. A production release still needs a private
-release signing identity or Play App Signing; neither is stored in this repository.
+per-app “install unknown apps” prompt.
 
-Without `app/google-services.json`, the build automatically selects the local
-repository. With a Firebase configuration present, connection/configuration
-failures are shown explicitly and do not silently fall back to demo data.
+The public catalog remains available offline regardless of Firebase state.
+Without `app/google-services.json`, account backup and cross-phone sync are
+unavailable. With a valid Firebase configuration, queued personal changes sync
+automatically after connectivity returns.
 
 ## Firebase configuration
 
@@ -130,8 +147,8 @@ Firebase project setting and is separate from the checked-in authorization rules
 ## Firestore layout
 
 ```text
-spoon_recipes/{recipeId}                 lean summary; signed-in catalog reads
-spoon_recipe_details/{recipeId}          rich detail; exact active Greek get only
+spoon_recipes/{recipeId}                 backend catalog summary/archive
+spoon_recipe_details/{recipeId}          backend normalized detail/archive
 spoon_recipe_payloads/{recipeId}         source audit envelope; backend only
 spoon_catalog/status                     last complete backend import checkpoint
 spoon/{uid}/mealPlans/{yyyy-MM-dd}       owner-only daily plan/filter/completion
@@ -143,14 +160,11 @@ spoon/{uid}/cookedHistory/{eventId}      owner-only immutable cooked event (lega
 ```
 
 Catalog writes are denied to mobile clients. Raw source payload reads are also
-denied; only trusted Admin SDK tooling can access them. All user data is isolated
-by the Firebase UID and validated by field/type/range allowlists in
-`firestore.rules`.
-
-Every Firestore model has safe defaults. The repository queries only
-`active == true` and `language == "el"` summaries and validates those values
-again after decoding. Rich details are fetched server-side by a validated document
-ID and must also be active Greek content.
+denied; only trusted Admin SDK tooling can access them. The Android app does not
+query `spoon_recipes` or `spoon_recipe_details`; those collections remain the
+backend publication/archive. All personal data is isolated by Firebase UID,
+cached persistently on-device, and validated by field/type/range allowlists in
+`firestore.rules` before synchronization.
 
 ## Complete Greek recipe catalog
 
@@ -210,7 +224,14 @@ python tools/recipe_importer/import_catalog.py `
   --manifest tools/recipe_importer/output/gastronomos-greek-full.manifest.json `
   --i-have-permission --i-have-gastronomos-permission --commit `
   --project-id spoontheplanner
+
+python tools/recipe_importer/build_local_catalog.py
 ```
+
+The catalog builder validates all three complete artifacts and their manifests,
+then deterministically writes the indexed Android asset. It records recipe counts
+and content hashes so a truncated, stale, or mismatched input cannot silently
+become an APK catalog.
 
 The crawlers identify themselves exactly as
 `PeltesSpoonRecipeImporter/1.0 (+mailto:hey@spoon.gr)`, read `robots.txt`, restrict
@@ -229,7 +250,8 @@ Two independent mechanisms handle freshness:
 
 - Android enqueues `spoon-quarterly-catalog-freshness` with WorkManager about
   every 90 days. It authenticates and reads only `spoon_catalog/status`; it never
-  crawls the publisher or triggers an import.
+  crawls the publisher or triggers an import. This metadata check is separate
+  from normal catalog browsing, which performs zero Firestore recipe reads.
 - [The quarterly GitHub Actions workflow](.github/workflows/quarterly-catalog-refresh.yml)
   refreshes Akis at 03:17 UTC on January 1, April 1, July 1, and October 1, then
   Argiro at the same time on day 2 and Gastronomos on day 3. Splitting providers
@@ -263,12 +285,18 @@ Firestore IAM cannot scope this binding to particular collections, so during tha
 window these permissions apply across every Firestore document in the project.
 Outside the window, the binding grants no catalog data access.
 
+A quarterly backend import does not replace the catalog already inside an
+installed app. After a successful three-provider refresh, run
+`python tools/recipe_importer/build_local_catalog.py`, verify the recorded counts
+and hashes, build the optimized release, and distribute a new `dist/spoon.apk`.
+
 ## Privacy and operating notes
 
 - The app contains no advertising profile. Anonymous Firebase IDs exist only to
   isolate each user's data before an optional email account is linked.
-- Firestore provides offline caching in cloud mode; local mode persists its state
-  in app-private storage.
+- Personal changes are accepted offline through Firestore's persistent local
+  cache and synchronize/backup on reconnect. Public recipe text and metadata are
+  always served from the bundled SQLite database.
 - Unknown ratings do not pass a positive rating filter. Unknown preparation time
   does not pass a positive time cap.
 - Recipe pages preserve source attribution and a link to the canonical publisher

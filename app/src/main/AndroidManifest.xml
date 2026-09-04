@@ -6,9 +6,9 @@
     <application
         android:name=".SpoonApplication"
         android:allowBackup="true"
-        android:icon="@mipmap/ic_launcher_v5"
+        android:icon="@mipmap/ic_launcher_v6"
         android:label="@string/app_name"
-        android:roundIcon="@mipmap/ic_launcher_round_v5"
+        android:roundIcon="@mipmap/ic_launcher_round_v6"
         android:supportsRtl="true"
         android:theme="@style/Theme.Spoon">
         <provider
@@ -23,8 +23,8 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:icon="@mipmap/ic_launcher_v5"
-            android:roundIcon="@mipmap/ic_launcher_round_v5"
+            android:icon="@mipmap/ic_launcher_v6"
+            android:roundIcon="@mipmap/ic_launcher_round_v6"
             android:label="@string/app_name">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
