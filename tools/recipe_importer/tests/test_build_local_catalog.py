@@ -14,6 +14,7 @@ from tools.recipe_importer.build_local_catalog import (
     SourceArtifact,
     build_catalog,
     normalize_search_token,
+    prepare_recipe,
 )
 
 
@@ -128,6 +129,131 @@ def _open_read_only(path: Path) -> sqlite3.Connection:
     return sqlite3.connect(f"file:{path.as_posix()}?mode=ro&immutable=1", uri=True)
 
 
+def _prepared_for_vegan_test(
+    *,
+    title: str = "Φακές",
+    info: str = "",
+    diet_labels: list[str] | None = None,
+    category: str = "legumes",
+):
+    record = _record("fixture_vegan", "fixture", title="Δοκιμή")
+    record["dietLabels"] = ["Vegan"] if diet_labels is None else diet_labels
+    record["category"] = category
+    record["ingredientSections"] = [{
+        "title": "Υλικά",
+        "ingredients": [{"title": title, "info": info}],
+    }]
+    return prepare_recipe(record)[0]
+
+
+@pytest.mark.parametrize(
+    "ingredient",
+    [
+        "κοτόπουλο",
+        "κρέας",
+        "σολομός",
+        "ψάρι",
+        "αυγό",
+        "γάλα",
+        "παρμεζάνα",
+        "βούτυρο",
+        "γιαούρτι",
+        "μέλι",
+        "ζελατίνη",
+        "gelatine",
+        "λαρδί",
+        "lard",
+        "ρέγγα",
+        "σάλτσα Worcestershire",
+        "μαγιονέζα",
+        "mayo",
+        "aioli",
+        "ζωμός",
+        "stock",
+        "πέστο βασιλικού",
+    ],
+)
+def test_strict_vegan_eligibility_rejects_animal_ingredients(ingredient):
+    assert _prepared_for_vegan_test(title=ingredient).vegan_eligible == 0
+
+
+@pytest.mark.parametrize(
+    "ingredient",
+    [
+        "γάλα καρύδας",
+        "γάλα σόγιας",
+        "γάλα βρώμης",
+        "φυτικό τυρί",
+        "peanut butter",
+        "βούτυρο κακάο",
+        "μαγιονέζα χωρίς αυγό",
+        "vegan mayonnaise",
+        "φυτική μαγιονέζα",
+        "ζωμός λαχανικών",
+        "mushroom broth",
+        "vegan pesto",
+        "πέστο χωρίς τυρί",
+    ],
+)
+def test_strict_vegan_eligibility_keeps_explicit_plant_alternatives(ingredient):
+    assert _prepared_for_vegan_test(title=ingredient).vegan_eligible == 1
+
+
+def test_strict_vegan_eligibility_uses_info_only_as_a_local_qualifier():
+    assert (
+        _prepared_for_vegan_test(title="τυρί", info="φυτικό προϊόν").vegan_eligible
+        == 1
+    )
+    assert (
+        _prepared_for_vegan_test(
+            title="λαχανικά", info="σερβίρονται με κοτόπουλο"
+        ).vegan_eligible
+        == 0
+    )
+    assert _prepared_for_vegan_test(title="", info="κοτόπουλο").vegan_eligible == 0
+
+
+@pytest.mark.parametrize(
+    ("title", "info"),
+    [
+        ("γλυκόζη", "ή μέλι"),
+        ("ζωμός", "κοτόπουλου"),
+        ("ζωμός λαχανικών (ή κότας)", ""),
+        ("λάδι", "ή βούτυρο"),
+        ("γάλα", "φρέσκο ή φυτικό"),
+        ("κατσικίσιο τυρί — ή νηστίσιμο", ""),
+    ],
+)
+def test_strict_vegan_eligibility_rejects_animal_info_and_alternatives(
+    title, info
+):
+    assert _prepared_for_vegan_test(title=title, info=info).vegan_eligible == 0
+
+
+@pytest.mark.parametrize(
+    ("diet_labels", "expected"),
+    [
+        (["Vegan"], 1),
+        (["Αυστηρά χορτοφαγική (vegan)"], 1),
+        (["Vegan επιλογή"], 0),
+        (["όχι vegan"], 0),
+        (["Αυστηρά χορτοφαγική vegan επιλογή"], 0),
+    ],
+)
+def test_strict_vegan_eligibility_requires_an_exact_diet_alias(
+    diet_labels, expected
+):
+    assert (
+        _prepared_for_vegan_test(diet_labels=diet_labels).vegan_eligible
+        == expected
+    )
+
+
+@pytest.mark.parametrize("category", ["meat", "poultry", "fish"])
+def test_strict_vegan_eligibility_vetoes_animal_categories(category):
+    assert _prepared_for_vegan_test(category=category).vegan_eligible == 0
+
+
 def test_builds_exact_rows_metadata_query_columns_and_omits_import_payload(tmp_path):
     artifact = _artifact(
         tmp_path,
@@ -145,6 +271,7 @@ def test_builds_exact_rows_metadata_query_columns_and_omits_import_payload(tmp_p
     assert result.file_size == output.stat().st_size
     assert result.file_sha256 == hashlib.sha256(output.read_bytes()).hexdigest()
     with _open_read_only(output) as database:
+        assert SCHEMA_VERSION == 3
         assert database.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
         assert database.execute("PRAGMA application_id").fetchone()[0] == APPLICATION_ID
         assert database.execute("PRAGMA page_size").fetchone()[0] == PAGE_SIZE
@@ -160,12 +287,12 @@ def test_builds_exact_rows_metadata_query_columns_and_omits_import_payload(tmp_p
         row = database.execute(
             """
             SELECT title_normalized, search_text, category, ease, rating,
-                   prep_minutes, quick_recipe, source_key, random_key,
+                   prep_minutes, quick_recipe, vegan_eligible, source_key, random_key,
                    recipe_json
             FROM recipes WHERE id = 'fixture_1'
             """
         ).fetchone()
-        assert row[:9] == (
+        assert row[:10] == (
             "φακεσ σαλατα",
             row[1],
             "legumes",
@@ -173,6 +300,7 @@ def test_builds_exact_rows_metadata_query_columns_and_omits_import_payload(tmp_p
             8.4,
             15,
             0,
+            1,
             "fixture",
             0.125,
         )
@@ -182,7 +310,7 @@ def test_builds_exact_rows_metadata_query_columns_and_omits_import_payload(tmp_p
         assert "δοκιμαστικη πηγη" in row[1]
         assert "example test" in row[1]
         assert "fixture" in row[1]
-        recipe = json.loads(zlib.decompress(row[9]).decode("utf-8"))
+        recipe = json.loads(zlib.decompress(row[10]).decode("utf-8"))
         assert recipe["id"] == "fixture_1"
         assert recipe["ingredientSections"][0]["ingredients"][0]["title"] == "φακές"
         assert "sourcePayload" not in recipe
@@ -211,6 +339,15 @@ def test_builds_exact_rows_metadata_query_columns_and_omits_import_payload(tmp_p
             "καροτο",
             "φακεσ",
         }
+        index_columns = database.execute(
+            "PRAGMA index_info(recipes_vegan_plan_idx)"
+        ).fetchall()
+        assert [column[2] for column in index_columns] == [
+            "vegan_eligible",
+            "category",
+            "random_key",
+            "id",
+        ]
 
 
 def test_indexes_normalized_raw_ingredient_phrases_without_crossing_rows(tmp_path):

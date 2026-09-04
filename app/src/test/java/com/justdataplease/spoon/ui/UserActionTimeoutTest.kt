@@ -1,7 +1,5 @@
 package com.justdataplease.spoon.ui
 
-import com.justdataplease.spoon.domain.repository.BackendFailureKind
-import com.justdataplease.spoon.domain.repository.BackendUnavailableException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
@@ -17,14 +15,15 @@ class UserActionTimeoutTest {
     }
 
     @Test
-    fun `pending user action becomes a retryable network failure`() = runBlocking {
+    fun `pending user action becomes a dedicated timeout failure`() = runBlocking {
         val thrown = runCatching {
             withUserActionTimeout(timeoutMillis = 20L) { delay(5_000L) }
         }.exceptionOrNull()
 
-        assertTrue(thrown is BackendUnavailableException)
-        thrown as BackendUnavailableException
-        assertEquals(BackendFailureKind.NETWORK, thrown.failure.kind)
-        assertTrue(thrown.failure.isRetryable)
+        assertTrue(thrown is UserActionTimeoutException)
+        assertEquals(
+            "Η ενέργεια άργησε περισσότερο από το αναμενόμενο. Δοκίμασε ξανά.",
+            thrown?.userMessage(),
+        )
     }
 }

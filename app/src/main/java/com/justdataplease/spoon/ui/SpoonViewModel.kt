@@ -21,7 +21,6 @@ import com.justdataplease.spoon.domain.ExploreCriteria
 import com.justdataplease.spoon.domain.FavoriteReplacementResult
 import com.justdataplease.spoon.domain.WeeklyPlanDefaults
 import com.justdataplease.spoon.domain.isActiveGreekRecipe
-import com.justdataplease.spoon.domain.repository.BackendFailure
 import com.justdataplease.spoon.domain.repository.BackendFailureKind
 import com.justdataplease.spoon.domain.repository.BackendState
 import com.justdataplease.spoon.domain.repository.BackendUnavailableException
@@ -1125,10 +1124,9 @@ internal fun retainExploreWindow(
         .takeLast(maxRetained)
 }
 
-/**
- * Bounds Firestore-backed UI work so a pending listener or offline write cannot leave progress
- * chrome on screen forever. The classified exception keeps the existing Greek network feedback.
- */
+internal class UserActionTimeoutException : Exception()
+
+/** Bounds user-triggered work so a stalled operation cannot leave progress chrome forever. */
 internal suspend fun <T> withUserActionTimeout(
     timeoutMillis: Long = USER_ACTION_TIMEOUT_MILLIS,
     block: suspend () -> T,
@@ -1137,13 +1135,7 @@ internal suspend fun <T> withUserActionTimeout(
     return try {
         withTimeout(timeoutMillis) { block() }
     } catch (_: TimeoutCancellationException) {
-        throw BackendUnavailableException(
-            BackendFailure(
-                kind = BackendFailureKind.NETWORK,
-                isRetryable = true,
-                message = "Timeout",
-            ),
-        )
+        throw UserActionTimeoutException()
     }
 }
 
@@ -1433,6 +1425,9 @@ internal fun resolvedUiCategoryKey(
     ).toUiCategoryKey()
 
 internal fun Throwable.userMessage(): String {
+    if (this is UserActionTimeoutException) {
+        return "Η ενέργεια άργησε περισσότερο από το αναμενόμενο. Δοκίμασε ξανά."
+    }
     if (this is BackendUnavailableException) {
         return when (failure.kind) {
             BackendFailureKind.PERMISSION -> "Το Firestore απέρριψε την πρόσβαση. Έλεγξε τους κανόνες ασφαλείας."

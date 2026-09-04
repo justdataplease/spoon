@@ -74,9 +74,9 @@ fun FoodPreferencesScreen(
     var ingredientError by rememberSaveable { mutableStateOf<String?>(null) }
     val keyboardController = LocalSoftwareKeyboardController.current
 
-    fun addIngredient() {
+    fun addIngredient(): MealPreferenceSettings? {
         val ingredient = ingredientInput.trim().replace(Whitespace, " ")
-        ingredientError = when {
+        val validationError = when {
             ingredient.length < MIN_INGREDIENT_LENGTH -> "Γράψε τουλάχιστον 2 χαρακτήρες."
             ingredient.length > MAX_INGREDIENT_LENGTH -> "Το υλικό μπορεί να έχει έως 60 χαρακτήρες."
             draft.excludedIngredientTerms.size >= MAX_EXCLUDED_INGREDIENTS ->
@@ -85,11 +85,14 @@ fun FoodPreferencesScreen(
                 "Αυτό το υλικό υπάρχει ήδη."
             else -> null
         }
-        if (ingredientError == null) {
-            draft = draft.copy(excludedIngredientTerms = draft.excludedIngredientTerms + ingredient)
-            ingredientInput = ""
-            keyboardController?.hide()
-        }
+        ingredientError = validationError
+        if (validationError != null) return null
+
+        val updatedDraft = draft.copy(excludedIngredientTerms = draft.excludedIngredientTerms + ingredient)
+        draft = updatedDraft
+        ingredientInput = ""
+        keyboardController?.hide()
+        return updatedDraft
     }
 
     Column(modifier = modifier.fillMaxSize()) {
@@ -310,8 +313,14 @@ fun FoodPreferencesScreen(
                     Text("Επαναφορά όλων")
                 }
                 Button(
-                    onClick = { onSave(draft) },
-                    enabled = draft != settings,
+                    onClick = {
+                        if (ingredientInput.isBlank()) {
+                            onSave(draft)
+                        } else {
+                            addIngredient()?.let(onSave)
+                        }
+                    },
+                    enabled = draft != settings || ingredientInput.isNotBlank(),
                     modifier = Modifier.weight(1f).height(54.dp),
                 ) {
                     Text("Αποθήκευση")

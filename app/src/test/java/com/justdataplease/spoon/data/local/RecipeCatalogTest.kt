@@ -88,10 +88,18 @@ class RecipeCatalogTest {
 
         listOf(explore, planner).forEach { sql ->
             assertTrue(sql.whereSql.contains("r.category NOT IN (?)"))
+            assertTrue(sql.whereSql.contains("r.vegan_eligible = 1"))
             assertTrue(sql.whereSql.contains("recipe_ingredient_texts"))
             assertTrue(sql.whereSql.contains("instr(ingredient.normalized_text, ?)"))
-            assertTrue(sql.whereSql.contains("recipe_facets vegan"))
-            assertTrue(sql.arguments.containsAll(listOf("meat", "vegan", "γαλα καρυδασ")))
+            assertTrue(sql.whereSql.contains("r.id NOT IN ("))
+            assertTrue(
+                sql.whereSql.contains(
+                    "SELECT ingredient_facet.recipe_id FROM recipe_facets ingredient_facet",
+                ),
+            )
+            assertFalse(sql.whereSql.contains("recipe_facets vegan"))
+            assertFalse(sql.whereSql.contains("ingredient_facet.recipe_id = r.id"))
+            assertEquals(listOf("meat", "γαλα καρυδασ", "ingredient", "γαλα καρυδασ"), sql.arguments)
         }
     }
 

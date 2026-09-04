@@ -328,7 +328,8 @@ class BundledRecipeCatalog(
             database.rawQuery(
                 """
                     SELECT id, title_normalized, search_text, category, ease, rating,
-                           prep_minutes, quick_recipe, source_key, random_key, recipe_json
+                           prep_minutes, quick_recipe, vegan_eligible, source_key, random_key,
+                           recipe_json
                     FROM recipes LIMIT 0
                 """.trimIndent(),
                 null,
@@ -365,7 +366,7 @@ class BundledRecipeCatalog(
         private const val INSTALL_PREFERENCES = "spoon_catalog_install"
         private const val INSTALL_STAMP_KEY = "apk_install_stamp_v1"
         private const val EXPECTED_APPLICATION_ID = 0x53504F4E
-        private const val EXPECTED_SCHEMA_VERSION = 2
+        private const val EXPECTED_SCHEMA_VERSION = 3
         private const val CACHE_LIMIT = 256
         private const val SQLITE_MAX_BOUND_IDS = 800
         private const val META_SCHEMA_VERSION = "schema_version"
@@ -496,16 +497,7 @@ internal object CatalogSqlBuilder {
             arguments += excludedCategories
         }
         if (preferences.veganOnly) {
-            predicates += """
-                EXISTS (
-                    SELECT 1 FROM recipe_facets vegan
-                    WHERE vegan.recipe_id = r.id
-                      AND vegan.facet_type = ?
-                      AND instr(vegan.token, ?) > 0
-                )
-            """.trimIndent()
-            arguments += FACET_DIET
-            arguments += VEGAN_TOKEN
+            predicates += "r.vegan_eligible = 1"
         }
         preferences.excludedIngredientTerms.normalizedTokens().forEach { term ->
             predicates += """
@@ -517,10 +509,9 @@ internal object CatalogSqlBuilder {
             """.trimIndent()
             arguments += term
             predicates += """
-                NOT EXISTS (
-                    SELECT 1 FROM recipe_facets ingredient_facet
-                    WHERE ingredient_facet.recipe_id = r.id
-                      AND ingredient_facet.facet_type = ?
+                r.id NOT IN (
+                    SELECT ingredient_facet.recipe_id FROM recipe_facets ingredient_facet
+                    WHERE ingredient_facet.facet_type = ?
                       AND instr(ingredient_facet.token, ?) > 0
                 )
             """.trimIndent()
@@ -570,5 +561,4 @@ internal object CatalogSqlBuilder {
     private const val FACET_METHOD = "method"
     private const val FACET_CUISINE = "cuisine"
     private const val FACET_INGREDIENT = "ingredient"
-    private const val VEGAN_TOKEN = "vegan"
 }

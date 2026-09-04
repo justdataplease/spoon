@@ -33,7 +33,7 @@ except ImportError:  # pragma: no cover - direct script execution
     from helpers import classify_ease
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 APPLICATION_ID = 0x53504F4E  # ``SPON``; SQLite application_id is signed 32-bit.
 PAGE_SIZE = 16_384  # Avoid overflow-page waste for independently compressed recipes.
 MAX_GIT_BLOB_BYTES = 100_000_000
@@ -211,6 +211,88 @@ REQUIRED_FULL_FIELDS = {
 
 _SPACE_RE = re.compile(r"\s+")
 _HEX_64_RE = re.compile(r"[0-9a-f]{64}")
+_ALTERNATIVE_RE = re.compile(r"\b(?:ή|or)\b", re.IGNORECASE)
+
+VEGAN_DIET_TOKENS = frozenset({"vegan", "αυστηρα χορτοφαγικη vegan"})
+VEGAN_VETO_CATEGORIES = frozenset({"meat", "poultry", "fish"})
+
+# Token matching avoids false positives such as ``μελιτζανα`` containing
+# ``μελι``. Inflected food names use bounded stems; ambiguous words stay exact.
+_ANIMAL_EXACT_TOKENS: Mapping[str, frozenset[str]] = {
+    "meat": frozenset({
+        "κρεασ", "κρεατα", "κρεατοσ", "κοτα", "κοτασ", "κοτεσ", "κοτων",
+        "meat", "chicken", "turkey",
+        "beef", "pork", "lamb", "bacon", "ham",
+    }),
+    "fish": frozenset({
+        "ψαρι", "ψαρια", "ψαριου", "ψαριων", "τονοσ", "τονο", "τονου",
+        "μυδι", "μυδια", "μυδιων", "καβουρι", "καβουρια", "καβουριου",
+        "σουπια", "τσιπουρα", "fish", "salmon", "anchovy", "anchovies",
+        "sardine", "sardines", "shrimp", "shrimps", "prawn", "prawns",
+        "octopus", "squid", "mussel", "mussels", "crab", "lobster",
+        "seafood",
+    }),
+    "egg": frozenset({"αυγο", "αυγα", "αυγου", "αυγων", "egg", "eggs"}),
+    "milk": frozenset({
+        "γαλα", "γαλακτοσ", "γαλατα", "milk", "dairy", "whey", "casein",
+    }),
+    "cheese": frozenset({
+        "τυρι", "τυρια", "τυριου", "τυριων", "φετα", "φετασ", "cheese",
+        "cheeses", "feta", "brie", "cheddar", "gouda", "ricotta",
+        "mozzarella", "parmesan", "halloumi", "mascarpone",
+    }),
+    "butter": frozenset({"βουτυρο", "βουτυρου", "βουτυρα", "butter"}),
+    "yogurt": frozenset({"yogurt", "yoghurt"}),
+    "dairy": frozenset({
+        "σαντιγι", "ξινοκρεμα", "smetana", "cream", "creme", "κεφιρ",
+    }),
+    "honey": frozenset({"μελι", "μελιου", "honey"}),
+    "broth": frozenset({"broth", "stock", "bouillon"}),
+    "pesto": frozenset({"πεστο", "pesto"}),
+    "other_animal_product": frozenset({"gelatin", "gelatine", "lard"}),
+}
+
+_ANIMAL_TOKEN_STEMS: Mapping[str, tuple[str, ...]] = {
+    "meat": (
+        "κοτοπουλ", "γαλοπουλ", "κοκορ", "παπι", "μοσχαρ", "βοδιν",
+        "χοιριν", "αρνι", "κατσικ", "κουνελ", "πανσετ", "προσιουτ",
+        "προσουτ", "ζαμπον", "μορταδελ", "λαρδι", "σαλαμι", "λουκανικ",
+    ),
+    "fish": (
+        "σολομ", "αντζουγ", "σαρδελ", "γαριδ", "χταποδ", "καλαμαρ",
+        "στρειδ", "αστακ", "καραβιδ", "μπακαλιαρ", "γαυρ", "πεστροφ",
+        "λαβρακ", "σκουμπρ", "παλαμιδ", "κουτσομουρ", "αθεριν",
+        "συναγριδ", "ρεγγ", "ταραμ", "αυγοταραχ", "χαβιαρ", "σουριμ",
+        "worcester",
+    ),
+    "egg": ("μαγιονεζ", "mayonnaise", "mayo", "αγιολι", "aioli"),
+    "cheese": (
+        "ανθοτυρ", "γαλοτυρ", "κεφαλοτυρ", "παρμεζ", "γραβιερ", "κασσερ",
+        "κασερ", "μοτσαρελ", "ρικοτ", "μανουρ", "γκουντ", "χαλουμ",
+        "μασκαρπον", "πεκοριν", "ροκφορ", "μυζηθρ", "ξινομυζηθρ",
+    ),
+    "yogurt": ("γιαουρτ",),
+    "broth": ("ζωμ",),
+    "other_animal_product": ("ζελατιν", "λαρδι"),
+}
+
+_UNIVERSAL_VEGAN_QUALIFIER_STEMS = (
+    "φυτικ", "vegan", "νηστισιμ", "νηστει",
+)
+_NEGATION_STEMS = ("χωρισ", "διχωσ", "without", "no")
+_PLANT_DAIRY_BASE_STEMS = (
+    "καρυδ", "σογι", "αμυγδαλ", "βρωμη", "ρυζ", "κασι", "φουντουκ",
+    "μακανταμ", "κανναβ", "μπιζελ", "coconut", "soy", "soya", "almond",
+    "oat", "rice", "cashew", "hazelnut", "macadamia", "hemp", "pea",
+)
+_PLANT_BUTTER_BASE_STEMS = (
+    "καρυδ", "κακαο", "φιστικ", "φυστικ", "αμυγδαλ", "φουντουκ", "κασι",
+    "σησαμ", "ταχιν", "ελαιολ", "ξηρων", "peanut", "cocoa", "coconut",
+    "almond", "hazelnut", "cashew", "sesame", "tahini",
+)
+_PLANT_BROTH_BASE_STEMS = (
+    "λαχανικ", "μανιταρ", "vegetable", "veggie", "mushroom",
+)
 
 
 class CatalogBuildError(ValueError):
@@ -233,6 +315,7 @@ class PreparedRecipe:
     rating: float
     prep_minutes: int
     quick_recipe: int
+    vegan_eligible: int
     source_key: str
     random_key: float
     facet_tokens: Mapping[str, tuple[str, ...]]
@@ -351,6 +434,30 @@ def _facet_values(
     return facets, labels
 
 
+def _ingredient_title_and_info(
+    record: Mapping[str, Any],
+) -> Iterable[tuple[str, str]]:
+    sections = record.get("ingredientSections")
+    if not isinstance(sections, list):
+        raise CatalogBuildError("ingredientSections must be a list")
+    for section in sections:
+        if not isinstance(section, Mapping):
+            raise CatalogBuildError("ingredientSections must contain objects")
+        ingredients = section.get("ingredients")
+        if not isinstance(ingredients, list):
+            raise CatalogBuildError("ingredientSections ingredients must be a list")
+        for ingredient in ingredients:
+            if not isinstance(ingredient, Mapping):
+                raise CatalogBuildError("ingredients must contain objects")
+            title = ingredient.get("title", "")
+            info = ingredient.get("info", "")
+            if not isinstance(title, str):
+                raise CatalogBuildError("ingredient title must be a string")
+            if not isinstance(info, str):
+                raise CatalogBuildError("ingredient info must be a string")
+            yield title, info
+
+
 def _normalized_ingredient_texts(record: Mapping[str, Any]) -> tuple[str, ...]:
     """Return one searchable title/info row for each distinct raw ingredient.
 
@@ -361,30 +468,100 @@ def _normalized_ingredient_texts(record: Mapping[str, Any]) -> tuple[str, ...]:
     are preparation data rather than ingredient identity.
     """
 
-    sections = record.get("ingredientSections")
-    if not isinstance(sections, list):
-        raise CatalogBuildError("ingredientSections must be a list")
     normalized_texts: set[str] = set()
-    for section in sections:
-        if not isinstance(section, Mapping):
-            raise CatalogBuildError("ingredientSections must contain objects")
-        ingredients = section.get("ingredients")
-        if not isinstance(ingredients, list):
-            raise CatalogBuildError("ingredientSections ingredients must be a list")
-        for ingredient in ingredients:
-            if not isinstance(ingredient, Mapping):
-                raise CatalogBuildError("ingredients must contain objects")
-            chunks: list[str] = []
-            for field in ("title", "info"):
-                value = ingredient.get(field, "")
-                if not isinstance(value, str):
-                    raise CatalogBuildError(f"ingredient {field} must be a string")
-                if value.strip():
-                    chunks.append(value)
-            normalized = normalize_search_token(" ".join(chunks))
-            if normalized:
-                normalized_texts.add(normalized)
+    for title, info in _ingredient_title_and_info(record):
+        normalized = normalize_search_token(" ".join((title, info)))
+        if normalized:
+            normalized_texts.add(normalized)
     return tuple(sorted(normalized_texts))
+
+
+def _has_stem(token: str, stems: Sequence[str]) -> bool:
+    return any(token.startswith(stem) for stem in stems)
+
+
+def _animal_kind(token: str, *, previous_token: str | None) -> str | None:
+    for kind, exact_tokens in _ANIMAL_EXACT_TOKENS.items():
+        # In recipe prose, "σε φέτα" means "in a slice". A standalone feta or
+        # "τυρί φέτα" still triggers through this token or the preceding one.
+        if (
+            kind == "cheese"
+            and token in {"φετα", "φετασ"}
+            and previous_token == "σε"
+        ):
+            continue
+        if token in exact_tokens or _has_stem(
+            token, _ANIMAL_TOKEN_STEMS.get(kind, ())
+        ):
+            return kind
+    return None
+
+
+def _ingredient_has_unqualified_animal_product(title: str, info: str) -> bool:
+    # Ingredient identity and qualifiers can live in either field depending on
+    # the provider. Alternatives are separate clauses: a vegan option after
+    # "ή/or" must not sanitize an animal-derived option before it.
+    local_text = " ".join(part for part in (title, info) if part.strip())
+    for clause in _ALTERNATIVE_RE.split(local_text):
+        trigger_tokens = normalize_search_token(clause).split()
+        for index, token in enumerate(trigger_tokens):
+            previous = trigger_tokens[index - 1] if index else None
+            kind = _animal_kind(token, previous_token=previous)
+            if kind is None:
+                continue
+
+            nearby = trigger_tokens[max(0, index - 3):index + 4]
+            directly_negated = index > 0 and _has_stem(
+                trigger_tokens[index - 1], _NEGATION_STEMS
+            )
+            negated_kind = "cheese" if kind == "pesto" else kind
+            relevant_kind_directly_negated = any(
+                item_index > 0
+                and _has_stem(trigger_tokens[item_index - 1], _NEGATION_STEMS)
+                and _animal_kind(
+                    item,
+                    previous_token=trigger_tokens[item_index - 1],
+                ) == negated_kind
+                for item_index, item in enumerate(trigger_tokens)
+            )
+            explicitly_vegan = any(
+                _has_stem(item, _UNIVERSAL_VEGAN_QUALIFIER_STEMS)
+                for item in nearby
+            )
+            plant_base_stems: Sequence[str] = ()
+            if kind in {"milk", "cheese", "yogurt", "dairy"}:
+                plant_base_stems = _PLANT_DAIRY_BASE_STEMS
+            elif kind == "butter":
+                plant_base_stems = _PLANT_BUTTER_BASE_STEMS
+            elif kind == "broth":
+                plant_base_stems = _PLANT_BROTH_BASE_STEMS
+            has_plant_base = any(
+                _has_stem(item, plant_base_stems) for item in nearby
+            )
+            if not (
+                directly_negated
+                or relevant_kind_directly_negated
+                or explicitly_vegan
+                or has_plant_base
+            ):
+                return True
+    return False
+
+
+def _is_vegan_eligible(
+    record: Mapping[str, Any],
+    *,
+    category: str,
+    facet_tokens: Mapping[str, tuple[str, ...]],
+) -> bool:
+    if VEGAN_DIET_TOKENS.isdisjoint(facet_tokens["diet"]):
+        return False
+    if normalize_search_token(category) in VEGAN_VETO_CATEGORIES:
+        return False
+    return not any(
+        _ingredient_has_unqualified_animal_product(title, info)
+        for title, info in _ingredient_title_and_info(record)
+    )
 
 
 def prepare_recipe(
@@ -435,6 +612,9 @@ def prepare_recipe(
 
     facets, labels = _facet_values(record)
     ingredient_texts = _normalized_ingredient_texts(record)
+    vegan_eligible = int(
+        _is_vegan_eligible(record, category=category, facet_tokens=facets)
+    )
     kotlin_recipe = {
         field: record[field]
         for field in KOTLIN_RECIPE_FIELDS
@@ -452,6 +632,7 @@ def prepare_recipe(
         rating=rating,
         prep_minutes=prep_minutes,
         quick_recipe=int(quick_recipe),
+        vegan_eligible=vegan_eligible,
         source_key=source_key,
         random_key=random_key,
         facet_tokens=facets,
@@ -622,6 +803,7 @@ def _content_hash(
             "rating": recipe.rating,
             "prepMinutes": recipe.prep_minutes,
             "quickRecipe": recipe.quick_recipe,
+            "veganEligible": recipe.vegan_eligible,
             "sourceKey": recipe.source_key,
             "randomKey": recipe.random_key,
             "facets": recipe.facet_tokens,
@@ -648,6 +830,7 @@ CREATE TABLE recipes (
     rating REAL NOT NULL CHECK (rating >= 0 AND rating <= 10),
     prep_minutes INTEGER NOT NULL CHECK (prep_minutes >= 0),
     quick_recipe INTEGER NOT NULL CHECK (quick_recipe IN (0, 1)),
+    vegan_eligible INTEGER NOT NULL CHECK (vegan_eligible IN (0, 1)),
     source_key TEXT NOT NULL,
     random_key REAL NOT NULL CHECK (random_key >= 0 AND random_key < 1),
     recipe_json BLOB NOT NULL
@@ -673,6 +856,9 @@ CREATE TABLE recipe_ingredient_texts (
 CREATE INDEX recipes_title_idx ON recipes(title_normalized, id);
 CREATE INDEX recipes_plan_idx ON recipes(
     category, ease, quick_recipe, prep_minutes, rating, random_key, id
+);
+CREATE INDEX recipes_vegan_plan_idx ON recipes(
+    vegan_eligible, category, random_key, id
 );
 CREATE INDEX recipes_source_idx ON recipes(source_key, id);
 CREATE INDEX recipes_random_idx ON recipes(random_key, id);
@@ -715,6 +901,7 @@ def _write_database(
                     recipe.rating,
                     recipe.prep_minutes,
                     recipe.quick_recipe,
+                    recipe.vegan_eligible,
                     recipe.source_key,
                     recipe.random_key,
                     sqlite3.Binary(recipe.recipe_json),
@@ -734,8 +921,9 @@ def _write_database(
             """
             INSERT INTO recipes (
                 id, title_normalized, search_text, category, ease, rating,
-                prep_minutes, quick_recipe, source_key, random_key, recipe_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                prep_minutes, quick_recipe, vegan_eligible, source_key,
+                random_key, recipe_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             recipe_rows,
         )
