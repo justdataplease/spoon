@@ -213,6 +213,85 @@ def test_builds_exact_rows_metadata_query_columns_and_omits_import_payload(tmp_p
         }
 
 
+def test_indexes_normalized_raw_ingredient_phrases_without_crossing_rows(tmp_path):
+    coconut_milk = _record("fixture_1", "fixture", title="Κάρυ με λαχανικά")
+    coconut_milk["ingredientSections"] = [{
+        "title": "Υλικά",
+        "ingredients": [
+            {
+                "title": "Γάλα καρύδας",
+                "info": "ΠΛΗΡΕΣ, χωρίς ζάχαρη",
+                "quantity": "400",
+                "unit": "ml",
+            },
+            # Repeated normalized text is deliberately stored only once.
+            {
+                "title": "γάλα καρύδας",
+                "info": "πλήρες χωρίς ζάχαρη",
+                "quantity": "1",
+                "unit": "κονσέρβα",
+            },
+        ],
+    }]
+    separate_words = _record("fixture_2", "fixture", title="Δοκιμή")
+    separate_words["ingredientSections"] = [{
+        "title": "Υλικά",
+        "ingredients": [
+            {"title": "Γάλα", "quantity": "1", "unit": "καρύδα"},
+            {"title": "Καρύδας", "quantity": "2", "unit": "κ.σ."},
+        ],
+    }]
+    artifact = _artifact(tmp_path, "fixture", [coconut_milk, separate_words])
+    output = tmp_path / "recipe_catalog.db"
+
+    build_catalog([artifact], output)
+
+    with _open_read_only(output) as database:
+        assert database.execute(
+            "SELECT recipe_id, normalized_text FROM recipe_ingredient_texts "
+            "ORDER BY recipe_id, normalized_text"
+        ).fetchall() == [
+            ("fixture_1", "γαλα καρυδασ πληρεσ χωρισ ζαχαρη"),
+            ("fixture_2", "γαλα"),
+            ("fixture_2", "καρυδασ"),
+        ]
+        phrase = normalize_search_token("Γάλα καρύδας")
+        matching = database.execute(
+            """
+            SELECT r.id
+            FROM recipes r
+            WHERE EXISTS (
+                SELECT 1 FROM recipe_ingredient_texts i
+                WHERE i.recipe_id = r.id
+                  AND instr(i.normalized_text, ?) > 0
+            )
+            ORDER BY r.id
+            """,
+            (phrase,),
+        ).fetchall()
+        assert matching == [("fixture_1",)]
+        allowed = database.execute(
+            """
+            SELECT r.id
+            FROM recipes r
+            WHERE NOT EXISTS (
+                SELECT 1 FROM recipe_ingredient_texts i
+                WHERE i.recipe_id = r.id
+                  AND instr(i.normalized_text, ?) > 0
+            )
+            ORDER BY r.id
+            """,
+            (phrase,),
+        ).fetchall()
+        assert allowed == [("fixture_2",)]
+        metadata = dict(database.execute("SELECT key, value FROM catalog_meta"))
+        assert (
+            metadata["ingredient_text_index"]
+            == "recipe_ingredient_texts-title-info-instr-v1"
+        )
+        assert metadata["ingredient_text_normalization"] == "nfkd-casefold-alnum-v1"
+
+
 def test_build_is_byte_deterministic_and_source_order_independent(tmp_path):
     first = _artifact(
         tmp_path,

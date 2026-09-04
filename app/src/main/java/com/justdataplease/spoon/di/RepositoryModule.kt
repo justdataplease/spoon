@@ -1,7 +1,6 @@
 package com.justdataplease.spoon.di
 
 import android.content.Context
-import com.google.firebase.FirebaseApp
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import com.justdataplease.spoon.BuildConfig
@@ -12,6 +11,7 @@ import com.justdataplease.spoon.data.remote.FirestoreSpoonRepository
 import com.justdataplease.spoon.data.remote.NoBackupOwnerBootstrapStore
 import com.justdataplease.spoon.data.remote.configurePersistentPersonalCache
 import com.justdataplease.spoon.domain.repository.SpoonRepository
+import com.justdataplease.spoon.firebaseAppOrNull
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -37,9 +37,8 @@ object RepositoryModule {
             return localRepository(context, json, recipeCatalog)
         }
 
-        val firebaseApp = runCatching {
-            FirebaseApp.getApps(context).firstOrNull() ?: FirebaseApp.initializeApp(context)
-        }.getOrNull() ?: return localRepository(context, json, recipeCatalog)
+        val firebaseApp = runCatching { firebaseAppOrNull(context) }.getOrNull()
+            ?: return localRepository(context, json, recipeCatalog)
 
         return runCatching {
             val firestore = configurePersistentPersonalCache(

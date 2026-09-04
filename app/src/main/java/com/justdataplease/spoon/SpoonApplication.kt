@@ -1,6 +1,7 @@
 package com.justdataplease.spoon
 
 import android.app.Application
+import android.content.Context
 import android.util.Log
 import com.google.firebase.FirebaseApp
 import com.google.firebase.firestore.FirebaseFirestore
@@ -14,8 +15,7 @@ class SpoonApplication : Application() {
         super.onCreate()
         if (BuildConfig.HAS_FIREBASE_CONFIG) {
             runCatching {
-                val firebaseApp = FirebaseApp.getApps(this).firstOrNull()
-                    ?: requireNotNull(FirebaseApp.initializeApp(this))
+                val firebaseApp = requireNotNull(firebaseAppOrNull(this))
                 configurePersistentPersonalCache(FirebaseFirestore.getInstance(firebaseApp))
             }.onFailure { error ->
                 Log.e("SpoonApplication", "Could not configure the offline personal cache", error)
@@ -24,3 +24,7 @@ class SpoonApplication : Application() {
         CatalogFreshnessScheduler.schedule(this)
     }
 }
+
+/** Reuses the default app when one exists; initialization yields null without a config. */
+internal fun firebaseAppOrNull(context: Context): FirebaseApp? =
+    FirebaseApp.getApps(context).firstOrNull() ?: FirebaseApp.initializeApp(context)

@@ -2,7 +2,6 @@ package com.justdataplease.spoon.data.local
 
 import android.content.SharedPreferences
 import com.justdataplease.spoon.data.DemoRecipeCatalog
-import com.justdataplease.spoon.data.eligibleRecipeDetails
 import com.justdataplease.spoon.data.isSafeRecipeDocumentId
 import com.justdataplease.spoon.data.model.CookedMeal
 import com.justdataplease.spoon.data.model.CustomRecipe
@@ -12,6 +11,7 @@ import com.justdataplease.spoon.data.model.Recipe
 import com.justdataplease.spoon.data.model.RecipeFilters
 import com.justdataplease.spoon.data.model.RecipeNote
 import com.justdataplease.spoon.data.model.ShoppingListItem
+import com.justdataplease.spoon.data.preferences.MealPreferenceSettings
 import com.justdataplease.spoon.data.model.isCustomRecipeId
 import com.justdataplease.spoon.data.model.matchesActiveCompletion
 import com.justdataplease.spoon.data.model.mergeCookedHistory
@@ -27,7 +27,6 @@ import com.justdataplease.spoon.domain.repository.RecipePage
 import com.justdataplease.spoon.domain.repository.SpoonRepository
 import com.justdataplease.spoon.domain.repository.unavailableAccountFailure
 import com.justdataplease.spoon.domain.ExploreCriteria
-import com.justdataplease.spoon.domain.ExploreRecipeFilter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -66,14 +65,12 @@ class LocalSpoonRepository(
 
     override val backendState = MutableStateFlow<BackendState>(BackendState.Local).asStateFlow()
     override val accountState = _accountState.asStateFlow()
-    override val recipes: Flow<List<Recipe>> =
-        combine(recipeCatalog.cachedRecipes, referencedCatalogRecipes, _customRecipes) {
-                catalog, referenced, custom,
-            ->
-            (catalog + referenced + custom.filter(CustomRecipe::active).map(CustomRecipe::toRecipe))
-                .distinctBy(Recipe::id)
-                .sortedBy(Recipe::title)
-        }
+    override val recipes: Flow<List<Recipe>> = combine(
+        recipeCatalog.cachedRecipes,
+        referencedCatalogRecipes,
+        _customRecipes,
+        ::mergeCatalogRecipes,
+    )
     override val mealPlans: Flow<List<DayMealPlan>> = _mealPlans.asStateFlow()
     override val favoriteRecipeIds: Flow<Set<String>> = _favoriteRecipeIds.asStateFlow()
     override val shoppingItems: Flow<List<ShoppingListItem>> = _shoppingItems.asStateFlow()
@@ -84,66 +81,43 @@ class LocalSpoonRepository(
 
     override suspend fun ensureReady() = recipeCatalog.ensureReady()
 
-    override suspend fun getRecipeDetails(recipeId: String): Recipe? {
-        val safeRecipeId = requireSafeRecipeDocumentId(recipeId)
-        if (safeRecipeId.isCustomRecipeId()) {
-            return _customRecipes.value
-                .firstOrNull { it.id == safeRecipeId && it.active }
-                ?.toRecipe()
-        }
-        val recipe = recipeCatalog.getRecipe(safeRecipeId)
-        return eligibleRecipeDetails(recipe, safeRecipeId, safeRecipeId)
-    }
+    override suspend fun getRecipeDetails(recipeId: String): Recipe? =
+        recipeCatalog.getRecipeDetailsIncludingCustom(
+            requireSafeRecipeDocumentId(recipeId),
+            _customRecipes.value,
+        )
 
-    override suspend fun getRecipesByIds(recipeIds: Set<String>): List<Recipe> {
-        if (recipeIds.isEmpty()) return emptyList()
-        val customById = _customRecipes.value.asSequence()
-            .filter(CustomRecipe::active)
-            .map(CustomRecipe::toRecipe)
-            .filter { it.id in recipeIds }
-            .associateBy(Recipe::id)
-        val public = recipeCatalog.getRecipesByIds(recipeIds - customById.keys)
-        val all = public.associateBy(Recipe::id) + customById
-        return recipeIds.mapNotNull(all::get)
-    }
+    override suspend fun getRecipesByIds(recipeIds: Set<String>): List<Recipe> =
+        recipeCatalog.getRecipesByIdsIncludingCustom(recipeIds, _customRecipes.value)
 
     override suspend fun queryRecipes(
         criteria: ExploreCriteria,
         limit: Int,
         offset: Int,
-    ): RecipePage {
-        requirePageBounds(limit, offset)
-        val customMatches = ExploreRecipeFilter.filter(
-            _customRecipes.value.filter(CustomRecipe::active).map(CustomRecipe::toRecipe),
-            criteria,
-        )
-        val customPage = customMatches.drop(offset).take(limit)
-        val publicOffset = (offset - customMatches.size).coerceAtLeast(0)
-        val remaining = limit - customPage.size
-        val publicPage = recipeCatalog.queryRecipes(criteria, limit, publicOffset)
-        return RecipePage(
-            recipes = customPage + publicPage.recipes.take(remaining),
-            totalCount = customMatches.size + publicPage.totalCount,
-            offset = offset,
-            limit = limit,
-        )
-    }
-
-    override suspend fun getCatalogFacetOptions(): CatalogFacetOptions = mergeFacetOptions(
-        recipeCatalog.getFacetOptions(),
-        facetOptionsFrom(_customRecipes.value.filter(CustomRecipe::active).map(CustomRecipe::toRecipe)),
+        preferences: MealPreferenceSettings,
+    ): RecipePage = recipeCatalog.queryIncludingCustomRecipes(
+        _customRecipes.value,
+        criteria,
+        limit,
+        offset,
+        preferences,
     )
+
+    override suspend fun getCatalogFacetOptions(): CatalogFacetOptions =
+        recipeCatalog.facetOptionsIncludingCustom(_customRecipes.value)
 
     override suspend fun selectRandomRecipe(
         filters: RecipeFilters,
         excludingRecipeId: String?,
         randomSeed: Long,
+        preferences: MealPreferenceSettings,
     ): Recipe? = selectIncludingCustomRecipes(
         recipeCatalog = recipeCatalog,
         customRecipes = _customRecipes.value,
         filters = filters,
         excludingRecipeId = excludingRecipeId,
         randomSeed = randomSeed,
+        preferences = preferences,
     )
 
     override suspend fun upsertMealPlan(plan: DayMealPlan) {
@@ -388,16 +362,13 @@ class LocalSpoonRepository(
         return runCatching { json.decodeFromString<List<T>>(stored) }.getOrDefault(emptyList())
     }
 
-    private fun <T> persistList(key: String, values: List<T>, serializer: (List<T>) -> String) {
+    private inline fun <reified T> persistList(key: String, values: List<T>) {
         check(
             preferences.edit()
-                .putString(key, serializer(values))
+                .putString(key, json.encodeToString(values))
                 .commit(),
         ) { "Could not persist $key" }
     }
-
-    private inline fun <reified T> persistList(key: String, values: List<T>) =
-        persistList(key, values) { json.encodeToString(it) }
 
     private fun persistPlansAndHistory(
         plans: List<DayMealPlan>,

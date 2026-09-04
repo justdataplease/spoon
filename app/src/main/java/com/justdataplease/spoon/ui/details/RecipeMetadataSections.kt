@@ -46,32 +46,28 @@ internal fun EquipmentSection(recipe: RecipeDetailUi) {
 private data class TaxonomyGroup(
     val label: String,
     val values: List<String>,
-    val kind: ProviderLabelKind,
 )
+
+private fun taxonomyGroup(label: String, raw: List<String>, kind: ProviderLabelKind): TaxonomyGroup? =
+    raw.filter(String::isNotBlank)
+        .map { greekProviderLabel(it, kind) }
+        .filter(String::isNotBlank)
+        .distinct()
+        .takeIf { it.isNotEmpty() }
+        ?.let { TaxonomyGroup(label, it) }
 
 @Composable
 internal fun TaxonomySection(recipe: RecipeDetailUi) {
-    val groups = buildList {
-        add(TaxonomyGroup("Ειδική διατροφή", recipe.dietLabels, ProviderLabelKind.DIET))
-        add(TaxonomyGroup("Είδος γεύματος", recipe.mealTypeLabels, ProviderLabelKind.MEAL_TYPE))
-        add(TaxonomyGroup("Περίσταση", recipe.occasionLabels, ProviderLabelKind.OCCASION))
-        add(TaxonomyGroup("Τρόπος μαγειρέματος", recipe.methodLabels, ProviderLabelKind.METHOD))
-        add(TaxonomyGroup("Κουζίνα / χώρα", recipe.cuisineLabels, ProviderLabelKind.CUISINE))
-        add(TaxonomyGroup("Κύριο υλικό", recipe.ingredientLabels, ProviderLabelKind.INGREDIENT))
-        add(TaxonomyGroup("Ετικέτες", recipe.tags.filterNot { it == "demo" }, ProviderLabelKind.TAG))
-        if (recipe.quickRecipe) {
-            add(TaxonomyGroup("Χρόνος", listOf("Γρήγορη συνταγή"), ProviderLabelKind.TAG))
-        }
-    }.map { group ->
-        group.copy(
-            values = group.values
-                .filter(String::isNotBlank)
-                .map { greekProviderLabel(it, group.kind) }
-                .filter(String::isNotBlank)
-                .distinct(),
-        )
-    }
-        .filter { it.values.isNotEmpty() }
+    val groups = listOfNotNull(
+        taxonomyGroup("Ειδική διατροφή", recipe.dietLabels, ProviderLabelKind.DIET),
+        taxonomyGroup("Είδος γεύματος", recipe.mealTypeLabels, ProviderLabelKind.MEAL_TYPE),
+        taxonomyGroup("Περίσταση", recipe.occasionLabels, ProviderLabelKind.OCCASION),
+        taxonomyGroup("Τρόπος μαγειρέματος", recipe.methodLabels, ProviderLabelKind.METHOD),
+        taxonomyGroup("Κουζίνα / χώρα", recipe.cuisineLabels, ProviderLabelKind.CUISINE),
+        taxonomyGroup("Κύριο υλικό", recipe.ingredientLabels, ProviderLabelKind.INGREDIENT),
+        taxonomyGroup("Ετικέτες", recipe.tags.filterNot { it == "demo" }, ProviderLabelKind.TAG),
+        if (recipe.quickRecipe) taxonomyGroup("Χρόνος", listOf("Γρήγορη συνταγή"), ProviderLabelKind.TAG) else null,
+    )
     if (groups.isEmpty()) return
 
     DetailSectionCard("Κατηγορίες & φίλτρα", Icons.Outlined.Public) {
@@ -182,11 +178,7 @@ internal fun SourceSection(
             Spacer(Modifier.size(8.dp))
             Icon(Icons.AutoMirrored.Outlined.OpenInNew, contentDescription = null)
         }
-        if (
-            recipe.shortUrl.isNotBlank() &&
-            recipe.shortUrl != recipe.sourceUrl &&
-            normalizeRecipeLink(recipe.shortUrl) != null
-        ) {
+        if (recipe.shortUrl != recipe.sourceUrl && normalizeRecipeLink(recipe.shortUrl) != null) {
             TextButton(
                 onClick = { onOpenExternal(recipe.shortUrl) },
                 modifier = Modifier.align(Alignment.CenterHorizontally),

@@ -1,5 +1,6 @@
 package com.justdataplease.spoon.ui.week
 
+import com.justdataplease.spoon.ui.components.formatRating10
 import org.junit.Assert.assertEquals
 import org.junit.Test
 

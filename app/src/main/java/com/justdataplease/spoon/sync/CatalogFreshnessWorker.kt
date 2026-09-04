@@ -4,7 +4,6 @@ import android.content.Context
 import android.util.Log
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
-import com.google.firebase.FirebaseApp
 import com.google.firebase.FirebaseNetworkException
 import com.google.firebase.Timestamp
 import com.google.firebase.auth.FirebaseAuth
@@ -14,6 +13,7 @@ import com.google.firebase.firestore.FirebaseFirestoreException
 import com.google.firebase.firestore.Source
 import com.justdataplease.spoon.BuildConfig
 import com.justdataplease.spoon.data.DemoRecipeCatalog
+import com.justdataplease.spoon.firebaseAppOrNull
 import java.util.concurrent.CancellationException
 import kotlinx.coroutines.tasks.await
 
@@ -39,10 +39,9 @@ class CatalogFreshnessWorker(
         }
 
         return try {
-            val app = requireNotNull(
-                FirebaseApp.getApps(applicationContext).firstOrNull()
-                    ?: FirebaseApp.initializeApp(applicationContext),
-            ) { "Firebase could not be initialized" }
+            val app = requireNotNull(firebaseAppOrNull(applicationContext)) {
+                "Firebase could not be initialized"
+            }
             val auth = FirebaseAuth.getInstance(app)
             if (auth.currentUser == null) {
                 requireNotNull(auth.signInAnonymously().await().user) {

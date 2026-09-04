@@ -1,8 +1,8 @@
 package com.justdataplease.spoon.ui.explore
 
 import com.justdataplease.spoon.data.model.Recipe
+import com.justdataplease.spoon.ui.components.GreekLocale
 import com.justdataplease.spoon.ui.model.EaseUi
-import java.util.Locale
 
 data class ExploreRecipeUi(
     val recipeId: String,
@@ -101,5 +101,3 @@ internal fun Iterable<Recipe>.toExploreSourceOptionsUi(): List<ExploreSourceOpti
     )
 
 private data class SourceOptionCandidate(val key: String, val label: String)
-
-private val GreekLocale: Locale = Locale.forLanguageTag("el-GR")

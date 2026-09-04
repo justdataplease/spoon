@@ -3,6 +3,7 @@ package com.justdataplease.spoon.domain
 import com.justdataplease.spoon.data.model.EaseLevel
 import com.justdataplease.spoon.data.model.MealCategory
 import com.justdataplease.spoon.data.model.Recipe
+import com.justdataplease.spoon.data.preferences.MealPreferenceSettings
 import java.text.Normalizer
 import java.util.Locale
 
@@ -35,6 +36,7 @@ object ExploreRecipeFilter {
     fun filter(
         recipes: List<Recipe>,
         criteria: ExploreCriteria = ExploreCriteria(),
+        preferences: MealPreferenceSettings = MealPreferenceSettings(),
     ): List<Recipe> {
         if (!criteria.isValid()) return emptyList()
 
@@ -57,6 +59,7 @@ object ExploreRecipeFilter {
 
         return recipes.asSequence()
             .filter(Recipe::isActiveGreekRecipe)
+            .filter { recipe -> recipe.matchesMealPreferences(preferences) }
             .filter { recipe ->
                 requestedCategory == null ||
                     requestedCategory == recipe.category.normalizedSearchText() ||

@@ -1,8 +1,10 @@
 package com.justdataplease.spoon.ui.components
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -29,27 +31,77 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.justdataplease.spoon.ui.model.DayPlanUi
 import com.justdataplease.spoon.ui.model.EaseUi
 import com.justdataplease.spoon.domain.repository.BackendFailureKind
 import com.justdataplease.spoon.domain.repository.BackendState
 import com.justdataplease.spoon.ui.theme.Mint
+import com.justdataplease.spoon.ui.theme.PaprikaDark
 import com.justdataplease.spoon.ui.theme.Peach
 import com.justdataplease.spoon.ui.theme.Sage
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
-private val GreekLocale = Locale.forLanguageTag("el-GR")
+internal val GreekLocale = Locale.forLanguageTag("el-GR")
 
 fun LocalDate.greekDayLabel(): String =
     format(DateTimeFormatter.ofPattern("EEEE", GreekLocale)).replaceFirstChar { it.titlecase(GreekLocale) }
 
 fun LocalDate.greekShortDate(): String =
     format(DateTimeFormatter.ofPattern("d MMM", GreekLocale))
+
+internal fun formatRating10(rating10: Double): String =
+    "%.1f".format(GreekLocale, rating10)
+
+@Composable
+fun DayDateHeader(date: LocalDate) {
+    Column {
+        Text(date.greekDayLabel(), style = MaterialTheme.typography.titleLarge)
+        Text(date.greekShortDate(), color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@Composable
+fun GradientHeroCard(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    gradient: List<Color>,
+    modifier: Modifier = Modifier,
+    spacing: Dp = 8.dp,
+    fillMaxWidth: Boolean = true,
+    subtitleStyle: TextStyle = MaterialTheme.typography.bodyLarge,
+    content: @Composable ColumnScope.() -> Unit = {},
+) {
+    Card(
+        modifier = modifier,
+        colors = CardDefaults.cardColors(containerColor = Color.Transparent),
+        shape = RoundedCornerShape(30.dp),
+    ) {
+        Column(
+            modifier = Modifier
+                .background(Brush.linearGradient(gradient))
+                .then(if (fillMaxWidth) Modifier.fillMaxWidth() else Modifier)
+                .padding(22.dp),
+            verticalArrangement = Arrangement.spacedBy(spacing),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                Text(title, style = MaterialTheme.typography.displaySmall)
+            }
+            Text(subtitle, style = subtitleStyle, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            content()
+        }
+    }
+}
 
 @Composable
 fun CategoryPill(emoji: String, label: String, modifier: Modifier = Modifier) {
@@ -87,7 +139,7 @@ fun EasePill(ease: EaseUi, preparationCount: Int, modifier: Modifier = Modifier)
     val (background, foreground) = when (ease) {
         EaseUi.EASY -> Mint to Sage
         EaseUi.MEDIUM -> Color(0xFFFFE3AD) to Color(0xFF755500)
-        EaseUi.HARD -> Peach to Color(0xFF8D2E1E)
+        EaseUi.HARD -> Peach to PaprikaDark
         EaseUi.ANY,
         EaseUi.UNKNOWN,
         -> MaterialTheme.colorScheme.surfaceVariant to MaterialTheme.colorScheme.onSurfaceVariant
@@ -121,10 +173,7 @@ fun EmptyRecipeCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Column {
-                    Text(plan.date.greekDayLabel(), style = MaterialTheme.typography.titleLarge)
-                    Text(plan.date.greekShortDate(), color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
+                DayDateHeader(plan.date)
                 CategoryPill(plan.category.emoji, plan.category.label)
             }
             Text(
@@ -187,7 +236,7 @@ fun CompactFavoriteCard(
                 )
                 Spacer(Modifier.height(5.dp))
                 Text(
-                    "$category  ·  ★ ${"%.1f".format(GreekLocale, rating10)}/10  ·  $prepMinutes′",
+                    "$category  ·  ★ ${formatRating10(rating10)}/10  ·  $prepMinutes′",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

@@ -7,6 +7,7 @@ import com.justdataplease.spoon.data.model.RecipeIngredientSection
 import com.justdataplease.spoon.data.model.RecipeMethodSection
 import com.justdataplease.spoon.ui.model.AvailableCategories
 import com.justdataplease.spoon.ui.model.RecipeDetailUi
+import com.justdataplease.spoon.ui.model.toDomainCategoryKey
 import kotlinx.serialization.Serializable
 
 @Serializable
@@ -43,7 +44,7 @@ internal fun CustomRecipeDraftUi.validationMessage(): String? = when {
 /** Converts the editable UI aliases to the canonical keys persisted locally and in Firestore. */
 internal fun CustomRecipeDraftUi.toDomainCustomRecipe(): CustomRecipe {
     require(validationMessage() == null) { validationMessage().orEmpty() }
-    val domainCategory = categoryKey.toDomainCustomRecipeCategory()
+    val domainCategory = categoryKey.toDomainCategoryKey()
     require(domainCategory != MealCategory.ANY.key && MealCategory.fromKey(domainCategory) != null)
     val cleanIngredients = ingredients.asSequence()
         .filter { it.title.isNotBlank() }
@@ -97,11 +98,3 @@ internal fun RecipeDetailUi.toCustomRecipeDraftUi(): CustomRecipeDraftUi = Custo
     steps = methodSections.flatMap(RecipeMethodSection::steps),
     imageDataUrl = imageUrl,
 )
-
-private fun String.toDomainCustomRecipeCategory(): String = when (this) {
-    "chicken" -> MealCategory.POULTRY.key
-    "vegetarian" -> MealCategory.VEGETABLES.key
-    "dirty" -> MealCategory.STREET_FOOD.key
-    "pasta" -> MealCategory.PASTA_RICE.key
-    else -> this
-}

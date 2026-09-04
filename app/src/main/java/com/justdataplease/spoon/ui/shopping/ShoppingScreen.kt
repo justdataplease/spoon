@@ -1,6 +1,5 @@
 package com.justdataplease.spoon.ui.shopping
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -39,12 +38,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.justdataplease.spoon.ui.components.GradientHeroCard
 
 @Composable
 fun ShoppingScreen(
@@ -145,34 +143,17 @@ fun ShoppingScreen(
 
 @Composable
 private fun ShoppingHero(pending: Int, total: Int) {
-    Card(colors = CardDefaults.cardColors(containerColor = Color.Transparent), shape = RoundedCornerShape(30.dp)) {
-        Column(
-            modifier = Modifier
-                .background(
-                    Brush.linearGradient(
-                        listOf(MaterialTheme.colorScheme.secondaryContainer, MaterialTheme.colorScheme.primaryContainer),
-                    ),
-                )
-                .fillMaxWidth()
-                .padding(22.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Icon(Icons.Outlined.ShoppingBasket, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                Text("Λίστα αγορών", style = MaterialTheme.typography.displaySmall)
-            }
-            Text(
-                when {
-                    total == 0 -> "Πρόσθεσε υλικά από μια συνταγή ή γράψε κάτι δικό σου."
-                    pending == 0 -> "Τα πήρες όλα — μπράβο!"
-                    pending == 1 -> "Απομένει 1 προϊόν."
-                    else -> "Απομένουν $pending προϊόντα."
-                },
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
+    GradientHeroCard(
+        icon = Icons.Outlined.ShoppingBasket,
+        title = "Λίστα αγορών",
+        subtitle = when {
+            total == 0 -> "Πρόσθεσε υλικά από μια συνταγή ή γράψε κάτι δικό σου."
+            pending == 0 -> "Τα πήρες όλα — μπράβο!"
+            pending == 1 -> "Απομένει 1 προϊόν."
+            else -> "Απομένουν $pending προϊόντα."
+        },
+        gradient = listOf(MaterialTheme.colorScheme.secondaryContainer, MaterialTheme.colorScheme.primaryContainer),
+    )
 }
 
 @Composable

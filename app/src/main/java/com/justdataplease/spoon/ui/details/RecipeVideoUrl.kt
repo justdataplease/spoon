@@ -116,12 +116,7 @@ private fun String.isLocalNetworkHost(): Boolean {
         val address = runCatching { InetAddress.getByName(host) }.getOrNull() ?: return true
         val bytes = address.address
         val isUniqueLocalIpv6 = bytes.size == 16 && (bytes[0].toInt() and 0xfe) == 0xfc
-        return address.isAnyLocalAddress ||
-            address.isLoopbackAddress ||
-            address.isLinkLocalAddress ||
-            address.isSiteLocalAddress ||
-            address.isMulticastAddress ||
-            isUniqueLocalIpv6
+        return address.isNonPublic() || isUniqueLocalIpv6
     }
 
     val looksNumeric = host.all { it.isDigit() || it == '.' }
@@ -137,13 +132,11 @@ private fun String.isLocalNetworkHost(): Boolean {
         return true
     }
     val bytes = octets.map { it.toInt().toByte() }.toByteArray()
-    val address = InetAddress.getByAddress(bytes)
-    return address.isAnyLocalAddress ||
-        address.isLoopbackAddress ||
-        address.isLinkLocalAddress ||
-        address.isSiteLocalAddress ||
-        address.isMulticastAddress
+    return InetAddress.getByAddress(bytes).isNonPublic()
 }
+
+private fun InetAddress.isNonPublic(): Boolean =
+    isAnyLocalAddress || isLoopbackAddress || isLinkLocalAddress || isSiteLocalAddress || isMulticastAddress
 
 internal fun isAllowedVideoNavigation(url: String, source: InlineVideoSource): Boolean {
     if (url == "about:blank") return source is InlineVideoSource.Direct

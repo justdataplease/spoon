@@ -14,6 +14,7 @@ import com.justdataplease.spoon.data.model.Recipe
 import com.justdataplease.spoon.data.model.RecipeFilters
 import com.justdataplease.spoon.data.model.RecipeNote
 import com.justdataplease.spoon.data.model.ShoppingListItem
+import com.justdataplease.spoon.data.preferences.MealPreferenceSettings
 import com.justdataplease.spoon.domain.MealPlanSelection
 import com.justdataplease.spoon.domain.MealPlanner
 import com.justdataplease.spoon.domain.ExploreCriteria
@@ -35,13 +36,14 @@ import com.justdataplease.spoon.ui.model.FavoriteUi
 import com.justdataplease.spoon.ui.model.FiltersUi
 import com.justdataplease.spoon.ui.model.RecipeDetailUi
 import com.justdataplease.spoon.ui.model.SpoonUiState
+import com.justdataplease.spoon.ui.model.categoryUiOrNull
+import com.justdataplease.spoon.ui.model.toDomainCategoryKey
 import com.justdataplease.spoon.ui.explore.ExploreFacetOptionsUi
 import com.justdataplease.spoon.ui.explore.ExploreFiltersUi
 import com.justdataplease.spoon.ui.explore.ExploreRecipeUi
 import com.justdataplease.spoon.ui.explore.ExploreSearchState
 import com.justdataplease.spoon.ui.explore.ExploreSourceOptionUi
 import com.justdataplease.spoon.ui.explore.exploreFilterInputs
-import com.justdataplease.spoon.ui.explore.toExploreSourceOptionsUi
 import com.justdataplease.spoon.ui.custom.CustomRecipeEditorState
 import com.justdataplease.spoon.ui.custom.CustomRecipeEditorStore
 import com.justdataplease.spoon.ui.custom.deleteDraftPhoto
@@ -159,6 +161,11 @@ class SpoonViewModel @Inject constructor(
     private val exploreSearchState = ExploreSearchState(computationScope)
     private val customRecipeEditorStore = CustomRecipeEditorStore(savedStateHandle)
     val customRecipeEditor = customRecipeEditorStore.state
+    val mealPreferenceSettings = mealPlanner.mealPreferenceSettings.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.Eagerly,
+        initialValue = MealPreferenceSettings(),
+    )
     val customRecipeEditorRetainedPhoto = combine(
         customRecipeEditor,
         mealPlanner.recipes,
@@ -368,7 +375,6 @@ class SpoonViewModel @Inject constructor(
                 isFavorite = stored?.recipeId?.let(snapshot.favoriteIds::contains) == true,
                 isCompleted = stored?.completed == true,
                 filters = filters.toUi(),
-                isDemo = recipe?.tags?.contains("demo") == true,
             )
         }
         val favoriteRecipes = snapshot.favoriteIds.mapNotNull(recipesById::get).map(Recipe::toFavoriteUi)
@@ -394,8 +400,7 @@ class SpoonViewModel @Inject constructor(
             val recipe = recipesById[cookedMeal.recipeId]
             val categoryKey = (recipe?.category ?: plansByDate[cookedMeal.date]?.category.orEmpty())
                 .toUiCategoryKey()
-            val category = com.justdataplease.spoon.ui.model.AvailableCategories
-                .firstOrNull { it.key == categoryKey }
+            val category = categoryUiOrNull(categoryKey)
             HistoryEntryUi(
                 id = cookedMeal.id.ifBlank { cookedMeal.date },
                 date = date,
@@ -534,10 +539,6 @@ class SpoonViewModel @Inject constructor(
     }
 
     fun dismissRecipeDetails() {
-        clearRecipeSelection()
-    }
-
-    private fun clearRecipeSelection() {
         recipeDetailsGeneration++
         recipeDetailsJob?.cancel()
         recipeDetailsJob = null
@@ -555,6 +556,14 @@ class SpoonViewModel @Inject constructor(
 
     fun applyExploreFilters(filters: ExploreFiltersUi) {
         exploreFilters.value = filters
+    }
+
+    fun saveMealPreferenceSettings(settings: MealPreferenceSettings) {
+        launchWorking(
+            work = { mealPlanner.saveMealPreferenceSettings(settings) },
+        ) {
+            message.value = "Οι προτιμήσεις φαγητού αποθηκεύτηκαν."
+        }
     }
 
     /**
@@ -602,7 +611,11 @@ class SpoonViewModel @Inject constructor(
 
     private fun observeExploreFilters() {
         viewModelScope.launch {
-            combine(exploreFilterInput, customRecipeRevisions) { input, _ -> input }
+            combine(
+                exploreFilterInput,
+                customRecipeRevisions,
+                mealPreferenceSettings,
+            ) { input, _, _ -> input }
                 .collect { input ->
                 exploreLoadJob?.cancel()
                 exploreLoadJob = null
@@ -652,29 +665,20 @@ class SpoonViewModel @Inject constructor(
     fun replaceWithFavorite(recipeId: String) {
         val date = favoriteReplacementDate.value ?: return
         if (recipeId.isBlank()) return
-        viewModelScope.launch {
-            working.value = true
-            try {
-                when (withUserActionTimeout {
-                    withContext(Dispatchers.Default) {
-                        mealPlanner.replaceWithFavorite(date, recipeId)
-                    }
-                }) {
-                    is FavoriteReplacementResult.Selected -> {
-                        favoriteReplacementDate.value = null
-                        message.value = "Η αγαπημένη συνταγή μπήκε στο πρόγραμμα."
-                    }
-                    is FavoriteReplacementResult.NotFavorite -> {
-                        message.value = "Η συνταγή δεν βρίσκεται πια στα αγαπημένα σου."
-                    }
-                    is FavoriteReplacementResult.RecipeUnavailable -> {
-                        message.value = "Η συνταγή δεν είναι πλέον διαθέσιμη στον κατάλογο."
-                    }
+        launchWorking(
+            work = { mealPlanner.replaceWithFavorite(date, recipeId) },
+        ) { result ->
+            when (result) {
+                is FavoriteReplacementResult.Selected -> {
+                    favoriteReplacementDate.value = null
+                    message.value = "Η αγαπημένη συνταγή μπήκε στο πρόγραμμα."
                 }
-            } catch (error: Exception) {
-                message.value = error.userMessage()
-            } finally {
-                working.value = false
+                is FavoriteReplacementResult.NotFavorite -> {
+                    message.value = "Η συνταγή δεν βρίσκεται πια στα αγαπημένα σου."
+                }
+                is FavoriteReplacementResult.RecipeUnavailable -> {
+                    message.value = "Η συνταγή δεν είναι πλέον διαθέσιμη στον κατάλογο."
+                }
             }
         }
     }
@@ -687,61 +691,42 @@ class SpoonViewModel @Inject constructor(
     }
 
     fun shuffleWeek() {
-        viewModelScope.launch {
-            working.value = true
-            try {
-                val misses = withUserActionTimeout {
-                    withContext(Dispatchers.Default) {
-                        var misses = 0
-                        WeeklyPlanDefaults.dates(selectedWeekStart.value).forEach { date ->
-                            if (mealPlanner.reroll(date) is MealPlanSelection.NoMatch) misses++
-                        }
-                        misses
-                    }
+        launchWorking(
+            work = {
+                var misses = 0
+                WeeklyPlanDefaults.dates(selectedWeekStart.value).forEach { date ->
+                    if (mealPlanner.reroll(date) is MealPlanSelection.NoMatch) misses++
                 }
-                message.value = when {
-                    misses == 0 -> "Έτοιμη η νέα εβδομάδα!"
-                    misses == 1 -> "Μία μέρα δεν είχε άλλη πρόταση με αυτά τα φίλτρα."
-                    else -> "$misses μέρες δεν είχαν άλλη πρόταση με αυτά τα φίλτρα."
-                }
-            } catch (error: Exception) {
-                message.value = error.userMessage()
-            } finally {
-                working.value = false
+                misses
+            },
+        ) { misses ->
+            message.value = when {
+                misses == 0 -> "Έτοιμη η νέα εβδομάδα!"
+                misses == 1 -> "Μία μέρα δεν είχε άλλη πρόταση με αυτά τα φίλτρα."
+                else -> "$misses μέρες δεν είχαν άλλη πρόταση με αυτά τα φίλτρα."
             }
         }
     }
 
     fun toggleFavorite(recipeId: String) {
         if (recipeId.isBlank()) return
-        viewModelScope.launch {
-            runCatching { mealPlanner.toggleFavorite(recipeId) }
-                .onFailure { message.value = it.userMessage() }
-        }
+        launchReporting { mealPlanner.toggleFavorite(recipeId) }
     }
 
     fun addIngredientsToShopping(drafts: List<ShoppingIngredientDraftUi>) {
         val items = drafts.toShoppingItems()
         if (items.isEmpty()) return
-        viewModelScope.launch {
-            working.value = true
-            try {
-                withUserActionTimeout {
-                    withContext(Dispatchers.Default) {
-                        items.chunked(MAX_SHOPPING_ITEMS_PER_WRITE).forEach { chunk ->
-                            mealPlanner.upsertShoppingItems(chunk)
-                        }
-                    }
+        launchWorking(
+            work = {
+                items.chunked(MAX_SHOPPING_ITEMS_PER_WRITE).forEach { chunk ->
+                    mealPlanner.upsertShoppingItems(chunk)
                 }
-                message.value = if (items.size == 1) {
-                    "Το υλικό προστέθηκε στη λίστα αγορών."
-                } else {
-                    "Προστέθηκαν ${items.size} υλικά στη λίστα αγορών."
-                }
-            } catch (error: Exception) {
-                message.value = error.userMessage()
-            } finally {
-                working.value = false
+            },
+        ) {
+            message.value = if (items.size == 1) {
+                "Το υλικό προστέθηκε στη λίστα αγορών."
+            } else {
+                "Προστέθηκαν ${items.size} υλικά στη λίστα αγορών."
             }
         }
     }
@@ -750,50 +735,37 @@ class SpoonViewModel @Inject constructor(
         val cleanTitle = title.trim().take(200)
         if (cleanTitle.isBlank()) return
         val now = System.currentTimeMillis()
-        viewModelScope.launch {
-            runCatching {
-                mealPlanner.upsertShoppingItems(
-                    listOf(
-                        ShoppingListItem(
-                            id = "shopping_${UUID.randomUUID()}",
-                            name = cleanTitle,
-                            createdAtEpochMillis = now,
-                            updatedAtEpochMillis = now,
-                        ),
+        launchReporting {
+            mealPlanner.upsertShoppingItems(
+                listOf(
+                    ShoppingListItem(
+                        id = "shopping_${UUID.randomUUID()}",
+                        name = cleanTitle,
+                        createdAtEpochMillis = now,
+                        updatedAtEpochMillis = now,
                     ),
-                )
-            }.onFailure { message.value = it.userMessage() }
+                ),
+            )
         }
     }
 
     fun toggleShoppingItem(itemId: String) {
         val item = uiState.value.shoppingItems.firstOrNull { it.id == itemId } ?: return
-        viewModelScope.launch {
-            runCatching { mealPlanner.setShoppingItemChecked(itemId, !item.isChecked) }
-                .onFailure { message.value = it.userMessage() }
-        }
+        launchReporting { mealPlanner.setShoppingItemChecked(itemId, !item.isChecked) }
     }
 
     fun removeShoppingItem(itemId: String) {
-        viewModelScope.launch {
-            runCatching { mealPlanner.deleteShoppingItem(itemId) }
-                .onFailure { message.value = it.userMessage() }
-        }
+        launchReporting { mealPlanner.deleteShoppingItem(itemId) }
     }
 
     fun clearCheckedShoppingItems() {
-        viewModelScope.launch {
-            runCatching { mealPlanner.clearCheckedShoppingItems() }
-                .onFailure { message.value = it.userMessage() }
-        }
+        launchReporting { mealPlanner.clearCheckedShoppingItems() }
     }
 
     fun saveRecipeNote(text: String) {
         val recipeId = selectedRecipeId.value ?: return
-        viewModelScope.launch {
-            runCatching { mealPlanner.saveRecipeNote(recipeId, text.take(10_000)) }
-                .onSuccess { message.value = "Η σημείωση αποθηκεύτηκε." }
-                .onFailure { message.value = it.userMessage() }
+        launchReporting("Η σημείωση αποθηκεύτηκε.") {
+            mealPlanner.saveRecipeNote(recipeId, text.take(10_000))
         }
     }
 
@@ -890,18 +862,13 @@ class SpoonViewModel @Inject constructor(
             calendarMeals = state.calendarMeals,
             weekPlans = state.weekPlans,
         )
-        viewModelScope.launch {
-            runCatching { mealPlanner.setCompleted(date, !completed) }
-                .onFailure { message.value = it.userMessage() }
-        }
+        launchReporting { mealPlanner.setCompleted(date, !completed) }
     }
 
     fun removeCookedHistoryEntry(historyId: String) {
         if (historyId.isBlank()) return
-        viewModelScope.launch {
-            runCatching { mealPlanner.deleteCookedHistoryEntry(historyId) }
-                .onSuccess { message.value = "Η εγγραφή αφαιρέθηκε από το ιστορικό." }
-                .onFailure { message.value = it.userMessage() }
+        launchReporting("Η εγγραφή αφαιρέθηκε από το ιστορικό.") {
+            mealPlanner.deleteCookedHistoryEntry(historyId)
         }
     }
 
@@ -947,7 +914,7 @@ class SpoonViewModel @Inject constructor(
             mealPlanner.accountState.collect { account ->
                 if (accountOwnerTracker.onAccountState(account)) {
                     dismissCustomRecipeEditor()
-                    clearRecipeSelection()
+                    dismissRecipeDetails()
                     resetWeekEnsureForAccountOwner()
                 }
             }
@@ -1024,15 +991,31 @@ class SpoonViewModel @Inject constructor(
     }
 
     private fun launchSelection(block: suspend () -> MealPlanSelection) {
+        launchWorking(work = block) { selection ->
+            when (selection) {
+                is MealPlanSelection.Selected -> Unit
+                is MealPlanSelection.NoMatch -> {
+                    message.value = "Δεν βρέθηκε άλλη συνταγή που να ταιριάζει σε όλα τα φίλτρα."
+                }
+            }
+        }
+    }
+
+    /** Fire-and-forget write that only surfaces failures (and an optional success toast). */
+    private fun launchReporting(successMessage: String? = null, block: suspend () -> Unit) {
+        viewModelScope.launch {
+            runCatching { block() }
+                .onSuccess { if (successMessage != null) message.value = successMessage }
+                .onFailure { message.value = it.userMessage() }
+        }
+    }
+
+    /** Runs bounded background work behind the "working" chrome; [onResult] owns the success path. */
+    private fun <T> launchWorking(work: suspend () -> T, onResult: (T) -> Unit) {
         viewModelScope.launch {
             working.value = true
             try {
-                when (withUserActionTimeout { withContext(Dispatchers.Default) { block() } }) {
-                    is MealPlanSelection.Selected -> Unit
-                    is MealPlanSelection.NoMatch -> {
-                        message.value = "Δεν βρέθηκε άλλη συνταγή που να ταιριάζει σε όλα τα φίλτρα."
-                    }
-                }
+                onResult(withUserActionTimeout { withContext(Dispatchers.Default) { work() } })
             } catch (error: Exception) {
                 message.value = error.userMessage()
             } finally {
@@ -1319,8 +1302,7 @@ private fun Recipe.toRecipeDetailUi(isFavorite: Boolean) = RecipeDetailUi(
 
 private fun Recipe.toExploreRecipeUi(isFavorite: Boolean): ExploreRecipeUi {
     val uiCategoryKey = category.toUiCategoryKey()
-    val knownCategory = com.justdataplease.spoon.ui.model.AvailableCategories
-        .firstOrNull { it.key == uiCategoryKey }
+    val knownCategory = categoryUiOrNull(uiCategoryKey)
     return ExploreRecipeUi(
         recipeId = id,
         title = title,
@@ -1340,16 +1322,6 @@ private fun Recipe.toExploreRecipeUi(isFavorite: Boolean): ExploreRecipeUi {
         isFavorite = isFavorite,
     )
 }
-
-private fun List<Recipe>.toExploreOptionsUi() = ExploreFacetOptionsUi(
-    sources = toExploreSourceOptionsUi(),
-    diets = flatMap(Recipe::dietLabels).cleanFacetOptions(),
-    mealTypes = flatMap(Recipe::mealTypeLabels).cleanFacetOptions(),
-    occasions = flatMap(Recipe::occasionLabels).cleanFacetOptions(),
-    methods = flatMap(Recipe::methodLabels).cleanFacetOptions(),
-    cuisines = flatMap(Recipe::cuisineLabels).cleanFacetOptions(),
-    ingredients = flatMap(Recipe::ingredientLabels).cleanFacetOptions(),
-)
 
 private fun CatalogFacetOptions.toUi() = ExploreFacetOptionsUi(
     sources = sources.map { source ->
@@ -1399,12 +1371,7 @@ private val FacetWhitespace = Regex("\\s+")
 private fun ExploreFiltersUi.toDomain(query: String) = ExploreCriteria(
     query = query,
     category = categoryKey.toDomainCategoryKey(),
-    easeLevel = when (ease) {
-        EaseUi.EASY -> EaseLevel.EASY.key
-        EaseUi.MEDIUM -> EaseLevel.MODERATE.key
-        EaseUi.HARD -> EaseLevel.INVOLVED.key
-        EaseUi.ANY, EaseUi.UNKNOWN -> ""
-    },
+    easeLevel = ease.toDomainEaseKey(),
     minRating = minRating10.coerceIn(0, 9).toDouble(),
     maxPrepMinutes = maxPrepMinutes?.coerceAtLeast(0) ?: 0,
     dietLabels = diet.asSelectedSet(),
@@ -1418,6 +1385,13 @@ private fun ExploreFiltersUi.toDomain(query: String) = ExploreCriteria(
 )
 
 private fun String.asSelectedSet(): Set<String> = if (isBlank()) emptySet() else setOf(this)
+
+private fun EaseUi.toDomainEaseKey(): String = when (this) {
+    EaseUi.EASY -> EaseLevel.EASY.key
+    EaseUi.MEDIUM -> EaseLevel.MODERATE.key
+    EaseUi.HARD -> EaseLevel.INVOLVED.key
+    EaseUi.ANY, EaseUi.UNKNOWN -> ""
+}
 
 private fun RecipeFilters.toUi() = FiltersUi(
     categoryKey = category.toUiCategoryKey(),
@@ -1433,12 +1407,7 @@ private fun RecipeFilters.toUi() = FiltersUi(
 
 private fun FiltersUi.toDomain() = RecipeFilters(
     category = categoryKey.toDomainCategoryKey(),
-    easeLevel = when (ease) {
-        EaseUi.EASY -> EaseLevel.EASY.key
-        EaseUi.MEDIUM -> EaseLevel.MODERATE.key
-        EaseUi.HARD -> EaseLevel.INVOLVED.key
-        EaseUi.ANY, EaseUi.UNKNOWN -> ""
-    },
+    easeLevel = ease.toDomainEaseKey(),
     minRating = minRating10.coerceIn(0, 9).toDouble(),
     maxPrepMinutes = maxPrepMinutes ?: 0,
 )
@@ -1462,14 +1431,6 @@ internal fun resolvedUiCategoryKey(
             ?.takeIf(String::isNotBlank)
         ?: filterCategory
     ).toUiCategoryKey()
-
-private fun String.toDomainCategoryKey(): String = when (this) {
-    "chicken" -> MealCategory.POULTRY.key
-    "vegetarian" -> MealCategory.VEGETABLES.key
-    "dirty" -> MealCategory.STREET_FOOD.key
-    "pasta" -> MealCategory.PASTA_RICE.key
-    else -> this
-}
 
 internal fun Throwable.userMessage(): String {
     if (this is BackendUnavailableException) {

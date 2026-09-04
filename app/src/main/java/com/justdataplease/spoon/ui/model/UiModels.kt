@@ -1,5 +1,6 @@
 package com.justdataplease.spoon.ui.model
 
+import com.justdataplease.spoon.data.model.MealCategory
 import com.justdataplease.spoon.data.model.RecipeIngredientSection
 import com.justdataplease.spoon.data.model.RecipeMethodSection
 import com.justdataplease.spoon.data.model.RecipeNutritionSection
@@ -30,6 +31,17 @@ val AvailableCategories = listOf(
     CategoryUi("dessert", "Γλυκά", "🍰"),
     CategoryUi("other", "Άλλο", "🍽️"),
 )
+
+internal fun categoryUiOrNull(key: String): CategoryUi? = AvailableCategories.firstOrNull { it.key == key }
+
+/** Converts the editable UI aliases to the canonical keys persisted locally and in Firestore. */
+internal fun String.toDomainCategoryKey(): String = when (this) {
+    "chicken" -> MealCategory.POULTRY.key
+    "vegetarian" -> MealCategory.VEGETABLES.key
+    "dirty" -> MealCategory.STREET_FOOD.key
+    "pasta" -> MealCategory.PASTA_RICE.key
+    else -> this
+}
 
 enum class EaseUi(val key: String, val greekLabel: String, val detail: String) {
     ANY("any", "Όλα", "Χωρίς περιορισμό"),
@@ -75,7 +87,6 @@ data class DayPlanUi(
     val isFavorite: Boolean = false,
     val isCompleted: Boolean = false,
     val filters: FiltersUi = FiltersUi(categoryKey = categoryKey),
-    val isDemo: Boolean = false,
 ) {
     val category: CategoryUi
         get() = categoryForKey(categoryKey)
@@ -85,6 +96,9 @@ data class DayPlanUi(
 
     val displayPreparationCount: Int
         get() = preparationCount.coerceAtLeast(0)
+
+    val isDemo: Boolean
+        get() = "demo" in tags
 }
 
 data class FavoriteUi(
@@ -189,7 +203,7 @@ data class RecipeDetailUi(
 }
 
 private fun categoryForKey(categoryKey: String): CategoryUi =
-    AvailableCategories.firstOrNull { it.key == categoryKey }
+    categoryUiOrNull(categoryKey)
         ?: CategoryUi(
             key = categoryKey,
             label = if (categoryKey.isBlank()) "Χωρίς κατηγορία" else "Άλλο",
@@ -204,7 +218,7 @@ data class CalendarMealUi(
     val isCompleted: Boolean,
 ) {
     val emoji: String
-        get() = AvailableCategories.firstOrNull { it.key == categoryKey }?.emoji ?: "🍽️"
+        get() = categoryForKey(categoryKey).emoji
 }
 
 data class SpoonUiState(

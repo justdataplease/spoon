@@ -61,14 +61,16 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.justdataplease.spoon.ui.components.CategoryPill
+import com.justdataplease.spoon.ui.components.DayDateHeader
 import com.justdataplease.spoon.ui.components.EasePill
 import com.justdataplease.spoon.ui.components.EmptyRecipeCard
+import com.justdataplease.spoon.ui.components.GreekLocale
 import com.justdataplease.spoon.ui.components.MetricPill
 import com.justdataplease.spoon.ui.components.RecipeArtwork
 import com.justdataplease.spoon.ui.components.StatusBanner
 import com.justdataplease.spoon.ui.components.MAX_RATING_THRESHOLD
+import com.justdataplease.spoon.ui.components.formatRating10
 import com.justdataplease.spoon.ui.components.greekDayLabel
-import com.justdataplease.spoon.ui.components.greekShortDate
 import com.justdataplease.spoon.ui.components.ratingThresholdLabel
 import com.justdataplease.spoon.domain.repository.BackendState
 import com.justdataplease.spoon.ui.model.AvailableCategories
@@ -79,10 +81,7 @@ import com.justdataplease.spoon.ui.model.SelectableEaseOptions
 import com.justdataplease.spoon.ui.model.SpoonUiState
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
-import java.util.Locale
 import kotlin.math.roundToInt
-
-private val GreekLocale = Locale.forLanguageTag("el-GR")
 
 @Composable
 fun WeekScreen(
@@ -259,10 +258,7 @@ private fun DayRecipeCard(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Column {
-                        Text(plan.date.greekDayLabel(), style = MaterialTheme.typography.titleLarge)
-                        Text(plan.date.greekShortDate(), color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
+                    DayDateHeader(plan.date)
                     if (isToday) {
                         Surface(color = MaterialTheme.colorScheme.primary, contentColor = MaterialTheme.colorScheme.onPrimary, shape = CircleShape) {
                             Text("ΣΗΜΕΡΑ", style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp))
@@ -355,9 +351,6 @@ private fun DayRecipeCard(
         }
     }
 }
-
-internal fun formatRating10(rating10: Double): String =
-    "%.1f".format(GreekLocale, rating10)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

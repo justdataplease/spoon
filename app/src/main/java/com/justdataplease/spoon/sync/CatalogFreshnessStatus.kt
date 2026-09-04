@@ -120,6 +120,15 @@ object CatalogFreshnessPolicy {
     val checkIntervalMillis: Long = TimeUnit.DAYS.toMillis(CHECK_INTERVAL_DAYS)
 
     private val sha256Pattern = Regex("^[0-9a-f]{64}$")
+    private val retryableFirestoreCodes = setOf(
+        "ABORTED",
+        "CANCELLED",
+        "DEADLINE_EXCEEDED",
+        "INTERNAL",
+        "RESOURCE_EXHAUSTED",
+        "UNAVAILABLE",
+        "UNKNOWN",
+    )
 
     fun isDue(lastCheckedAt: Long, nowEpochMillis: Long): Boolean =
         delayUntilNextCheck(lastCheckedAt, nowEpochMillis) == 0L
@@ -132,15 +141,7 @@ object CatalogFreshnessPolicy {
         return (checkIntervalMillis - elapsed).coerceAtLeast(0L)
     }
 
-    fun shouldRetryFirestoreCode(codeName: String): Boolean = codeName in setOf(
-        "ABORTED",
-        "CANCELLED",
-        "DEADLINE_EXCEEDED",
-        "INTERNAL",
-        "RESOURCE_EXHAUSTED",
-        "UNAVAILABLE",
-        "UNKNOWN",
-    )
+    fun shouldRetryFirestoreCode(codeName: String): Boolean = codeName in retryableFirestoreCodes
 
     fun validateCheckpoint(
         exists: Boolean,

@@ -7,9 +7,11 @@ import com.justdataplease.spoon.data.model.Recipe
 import com.justdataplease.spoon.data.model.RecipeFilters
 import com.justdataplease.spoon.data.model.RecipeNote
 import com.justdataplease.spoon.data.model.ShoppingListItem
+import com.justdataplease.spoon.data.preferences.MealPreferenceSettings
 import com.justdataplease.spoon.domain.ExploreCriteria
 import com.justdataplease.spoon.domain.ExploreRecipeFilter
 import com.justdataplease.spoon.domain.RecipeSelector
+import com.justdataplease.spoon.domain.matchesMealPreferences
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -64,10 +66,11 @@ interface SpoonRepository {
         criteria: ExploreCriteria = ExploreCriteria(),
         limit: Int = 24,
         offset: Int = 0,
+        preferences: MealPreferenceSettings = MealPreferenceSettings(),
     ): RecipePage {
         require(limit in 1..100)
         require(offset >= 0)
-        val matches = ExploreRecipeFilter.filter(recipes.first(), criteria)
+        val matches = ExploreRecipeFilter.filter(recipes.first(), criteria, preferences)
         return RecipePage(matches.drop(offset).take(limit), matches.size, offset, limit)
     }
     suspend fun getCatalogFacetOptions(): CatalogFacetOptions = CatalogFacetOptions()
@@ -75,8 +78,9 @@ interface SpoonRepository {
         filters: RecipeFilters,
         excludingRecipeId: String? = null,
         randomSeed: Long = Random.Default.nextLong(),
+        preferences: MealPreferenceSettings = MealPreferenceSettings(),
     ): Recipe? = RecipeSelector().select(
-        recipes = recipes.first(),
+        recipes = recipes.first().filter { it.matchesMealPreferences(preferences) },
         filters = filters,
         excludingRecipeId = excludingRecipeId,
         random = Random(randomSeed),
@@ -106,6 +110,3 @@ private val DEFAULT_ACCOUNT_STATE = MutableStateFlow<AccountState>(AccountState.
 
 private fun unsupported(feature: String): Nothing =
     throw UnsupportedOperationException("Repository does not support $feature")
-
-/** Readable alias for call sites that think of this primarily as a recipe repository. */
-typealias RecipeRepository = SpoonRepository

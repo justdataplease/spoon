@@ -1,6 +1,5 @@
 package com.justdataplease.spoon.ui.history
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -29,18 +28,15 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.justdataplease.spoon.ui.components.GradientHeroCard
+import com.justdataplease.spoon.ui.components.GreekLocale
 import com.justdataplease.spoon.ui.components.RecipeArtwork
 import java.time.LocalDate
 import java.time.YearMonth
 import java.time.format.DateTimeFormatter
-import java.util.Locale
-
-private val GreekLocale = Locale.forLanguageTag("el-GR")
 
 data class HistoryEntryUi(
     val id: String,
@@ -101,33 +97,16 @@ fun HistoryScreen(
 
 @Composable
 private fun HistoryHero(count: Int) {
-    Card(colors = CardDefaults.cardColors(containerColor = Color.Transparent), shape = RoundedCornerShape(30.dp)) {
-        Column(
-            modifier = Modifier
-                .background(
-                    Brush.linearGradient(
-                        listOf(MaterialTheme.colorScheme.tertiaryContainer, MaterialTheme.colorScheme.secondaryContainer),
-                    ),
-                )
-                .fillMaxWidth()
-                .padding(22.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Icon(Icons.Outlined.History, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                Text("Ιστορικό", style = MaterialTheme.typography.displaySmall)
-            }
-            Text(
-                when (count) {
-                    0 -> "Εδώ θα εμφανίζονται όσα σημειώνεις ως «Το έφτιαξα»."
-                    1 -> "Έχεις μαγειρέψει 1 προγραμματισμένη συνταγή."
-                    else -> "Έχεις μαγειρέψει $count προγραμματισμένες συνταγές."
-                },
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
+    GradientHeroCard(
+        icon = Icons.Outlined.History,
+        title = "Ιστορικό",
+        subtitle = when (count) {
+            0 -> "Εδώ θα εμφανίζονται όσα σημειώνεις ως «Το έφτιαξα»."
+            1 -> "Έχεις μαγειρέψει 1 προγραμματισμένη συνταγή."
+            else -> "Έχεις μαγειρέψει $count προγραμματισμένες συνταγές."
+        },
+        gradient = listOf(MaterialTheme.colorScheme.tertiaryContainer, MaterialTheme.colorScheme.secondaryContainer),
+    )
 }
 
 @Composable

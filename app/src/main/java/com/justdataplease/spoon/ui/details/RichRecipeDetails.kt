@@ -55,33 +55,32 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.justdataplease.spoon.ui.components.CategoryPill
 import com.justdataplease.spoon.ui.components.RecipeArtwork
+import com.justdataplease.spoon.ui.components.formatRating10
 import com.justdataplease.spoon.ui.model.EaseUi
 import com.justdataplease.spoon.ui.model.RecipeDetailUi
 import com.justdataplease.spoon.ui.shopping.ShoppingIngredientDraftUi
-import java.util.Locale
 
 internal const val RecipeDetailsBackLabel = "Επιστροφή στις συνταγές"
 
 @Composable
-internal fun RichRecipeDetailsContent(
+fun RecipeDetailsScreen(
     recipe: RecipeDetailUi,
     onBack: () -> Unit,
     onToggleFavorite: () -> Unit,
-    onEdit: (() -> Unit)?,
     onOpenSource: () -> Unit,
-    recipeNote: String,
-    onSaveNote: (String) -> Unit,
-    onAddIngredients: (List<ShoppingIngredientDraftUi>) -> Unit,
     modifier: Modifier = Modifier,
+    onEdit: (() -> Unit)? = null,
+    recipeNote: String = "",
+    onSaveNote: (String) -> Unit = {},
+    onAddIngredients: (List<ShoppingIngredientDraftUi>) -> Unit = {},
     isLoadingDetails: Boolean = false,
 ) {
     val uriHandler = LocalUriHandler.current
-    val openExternal = remember(uriHandler) {
+    val openExternal: (String) -> Unit = remember(uriHandler) {
         { rawUrl: String ->
             normalizeRecipeLink(rawUrl)?.let { safeUrl ->
                 runCatching { uriHandler.openUri(safeUrl) }
             }
-            Unit
         }
     }
 
@@ -167,31 +166,6 @@ internal fun RichRecipeDetailsContent(
         }
     }
 }
-
-@Composable
-fun RecipeDetailsScreen(
-    recipe: RecipeDetailUi,
-    onBack: () -> Unit,
-    onToggleFavorite: () -> Unit,
-    onOpenSource: () -> Unit,
-    modifier: Modifier = Modifier,
-    onEdit: (() -> Unit)? = null,
-    recipeNote: String = "",
-    onSaveNote: (String) -> Unit = {},
-    onAddIngredients: (List<ShoppingIngredientDraftUi>) -> Unit = {},
-    isLoadingDetails: Boolean = false,
-) = RichRecipeDetailsContent(
-    recipe = recipe,
-    onBack = onBack,
-    onToggleFavorite = onToggleFavorite,
-    onEdit = onEdit,
-    onOpenSource = onOpenSource,
-    recipeNote = recipeNote,
-    onSaveNote = onSaveNote,
-    onAddIngredients = onAddIngredients,
-    isLoadingDetails = isLoadingDetails,
-    modifier = modifier,
-)
 
 @Composable
 private fun RichRecipeHero(
@@ -302,7 +276,7 @@ private fun RecipeMetricsGrid(recipe: RecipeDetailUi) {
             add(
                 MetricItem(
                     Icons.Outlined.Star,
-                    "${"%.1f".format(Locale.forLanguageTag("el-GR"), recipe.rating10)}/10",
+                    "${formatRating10(recipe.rating10)}/10",
                     if (recipe.ratingCount > 0) "Βαθμολογία • ${recipe.ratingCount} ψήφοι" else "Βαθμολογία",
                 ),
             )

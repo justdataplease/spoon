@@ -25,7 +25,9 @@ private data class NutritionRow(
 
 @Composable
 internal fun NutritionSection(recipe: RecipeDetailUi) {
-    val sections = recipe.nutritionSections.filter { nutritionRows(it).isNotEmpty() }
+    val sections = recipe.nutritionSections
+        .map { it.title to nutritionRows(it) }
+        .filter { (_, rows) -> rows.isNotEmpty() }
     if (sections.isEmpty() && recipe.nutritionPer.isBlank()) return
     DetailSectionCard("Διατροφική αξία", Icons.Outlined.Equalizer) {
         if (recipe.nutritionPer.isNotBlank()) {
@@ -35,11 +37,11 @@ internal fun NutritionSection(recipe: RecipeDetailUi) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        sections.forEach { section ->
-            if (section.title.isNotBlank()) {
-                Text(section.title, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
+        sections.forEach { (title, rows) ->
+            if (title.isNotBlank()) {
+                Text(title, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
             }
-            NutritionTable(nutritionRows(section))
+            NutritionTable(rows)
         }
     }
 }

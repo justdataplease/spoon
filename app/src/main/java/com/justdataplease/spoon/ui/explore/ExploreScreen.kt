@@ -1,7 +1,6 @@
 package com.justdataplease.spoon.ui.explore
 
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -58,26 +57,24 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.justdataplease.spoon.ui.components.GradientHeroCard
 import com.justdataplease.spoon.ui.components.MAX_RATING_THRESHOLD
 import com.justdataplease.spoon.ui.components.ProviderLabelKind
 import com.justdataplease.spoon.ui.components.RecipeArtwork
+import com.justdataplease.spoon.ui.components.formatRating10
 import com.justdataplease.spoon.ui.components.greekProviderLabel
 import com.justdataplease.spoon.ui.components.ratingThresholdLabel
 import com.justdataplease.spoon.ui.model.AvailableCategories
 import com.justdataplease.spoon.ui.model.EaseUi
 import com.justdataplease.spoon.ui.model.SelectableEaseOptions
-import java.util.Locale
 import kotlin.math.roundToInt
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
 
-private val GreekLocale = Locale.forLanguageTag("el-GR")
 private const val EXPLORE_PREFETCH_DISTANCE = 4
 
 internal fun shouldLoadNextExplorePage(
@@ -108,7 +105,7 @@ fun ExploreScreen(
     onOpenRecipe: (String) -> Unit,
     onToggleFavorite: (String) -> Unit,
     onLoadMore: () -> Unit,
-    onCreateRecipe: () -> Unit = {},
+    onCreateRecipe: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var showFilters by remember { mutableStateOf(false) }
@@ -271,38 +268,25 @@ private fun ExploreResultsEnd() {
 
 @Composable
 private fun ExploreHero(resultCount: Int, totalCount: Int, onCreateRecipe: () -> Unit) {
-    Card(colors = CardDefaults.cardColors(containerColor = Color.Transparent), shape = RoundedCornerShape(30.dp)) {
-        Column(
-            modifier = Modifier
-                .background(
-                    Brush.linearGradient(
-                        listOf(
-                            MaterialTheme.colorScheme.tertiaryContainer,
-                            MaterialTheme.colorScheme.primaryContainer,
-                        ),
-                    ),
-                )
-                .padding(22.dp),
-            verticalArrangement = Arrangement.spacedBy(7.dp),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Icon(Icons.Outlined.RestaurantMenu, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                Text("Εξερεύνηση", style = MaterialTheme.typography.displaySmall)
-            }
-            Text(
-                "Βρες ακριβώς αυτό που θέλεις να μαγειρέψεις.",
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Text(
-                "$resultCount από $totalCount ελληνικές συνταγές",
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.primary,
-            )
-            OutlinedButton(onClick = onCreateRecipe, modifier = Modifier.fillMaxWidth()) {
-                Icon(Icons.AutoMirrored.Outlined.NoteAdd, contentDescription = null)
-                Text("Νέα δική μου συνταγή", modifier = Modifier.padding(start = 8.dp))
-            }
+    GradientHeroCard(
+        icon = Icons.Outlined.RestaurantMenu,
+        title = "Εξερεύνηση",
+        subtitle = "Βρες ακριβώς αυτό που θέλεις να μαγειρέψεις.",
+        gradient = listOf(
+            MaterialTheme.colorScheme.tertiaryContainer,
+            MaterialTheme.colorScheme.primaryContainer,
+        ),
+        spacing = 7.dp,
+        fillMaxWidth = false,
+    ) {
+        Text(
+            "$resultCount από $totalCount ελληνικές συνταγές",
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.primary,
+        )
+        OutlinedButton(onClick = onCreateRecipe, modifier = Modifier.fillMaxWidth()) {
+            Icon(Icons.AutoMirrored.Outlined.NoteAdd, contentDescription = null)
+            Text("Νέα δική μου συνταγή", modifier = Modifier.padding(start = 8.dp))
         }
     }
 }
@@ -358,7 +342,7 @@ private fun ExploreRecipeCard(
                     )
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                    SmallMetric("★ ${"%.1f".format(GreekLocale, recipe.rating10)}/10")
+                    SmallMetric("★ ${formatRating10(recipe.rating10)}/10")
                     SmallMetric(if (recipe.prepMinutes > 0) "${recipe.prepMinutes}′ προετ." else "Χρόνος —")
                 }
             }

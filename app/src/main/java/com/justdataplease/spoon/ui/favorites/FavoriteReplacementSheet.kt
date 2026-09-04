@@ -30,12 +30,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.justdataplease.spoon.ui.components.RecipeArtwork
+import com.justdataplease.spoon.ui.components.formatRating10
 import com.justdataplease.spoon.ui.components.greekDayLabel
 import com.justdataplease.spoon.ui.model.FavoriteUi
 import java.time.LocalDate
-import java.util.Locale
-
-private val GreekLocale = Locale.forLanguageTag("el-GR")
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -116,7 +114,7 @@ fun FavoriteReplacementSheet(
                                     color = MaterialTheme.colorScheme.primary,
                                 )
                                 Text(
-                                    "★ ${"%.1f".format(GreekLocale, favorite.rating10)}/10  ·  ${favorite.prepMinutes}′",
+                                    "★ ${formatRating10(favorite.rating10)}/10  ·  ${favorite.prepMinutes}′",
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )

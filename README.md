@@ -1,4 +1,4 @@
-# Τι να φάω; (Spoon)
+# Τι θα φάμε; (Spoon)
 
 Spoon is an Android meal planner written in Kotlin and Jetpack Compose. The entire
 user interface is Greek. It builds a weekly food plan, proposes a matching recipe
@@ -84,6 +84,9 @@ tools/recipe_importer/
   full_schema.py      rich normalization and Firestore projections
   import_catalog.py   dry-run-first validator and Admin SDK importer
   inspect_recipe.py   one-URL metadata inspector
+
+tools/launcher_icon/
+  icons.py            launcher icon source: previews concepts, exports the vector drawables
 ```
 
 The main libraries are Jetpack Compose/Material 3, Hilt, Navigation Compose,

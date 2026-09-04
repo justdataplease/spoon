@@ -33,7 +33,7 @@ except ImportError:  # pragma: no cover - direct script execution
     from helpers import classify_ease
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 APPLICATION_ID = 0x53504F4E  # ``SPON``; SQLite application_id is signed 32-bit.
 PAGE_SIZE = 16_384  # Avoid overflow-page waste for independently compressed recipes.
 MAX_GIT_BLOB_BYTES = 100_000_000
@@ -236,6 +236,7 @@ class PreparedRecipe:
     source_key: str
     random_key: float
     facet_tokens: Mapping[str, tuple[str, ...]]
+    ingredient_texts: tuple[str, ...]
     recipe_json: bytes
     recipe_json_sha256: str
 
@@ -350,6 +351,42 @@ def _facet_values(
     return facets, labels
 
 
+def _normalized_ingredient_texts(record: Mapping[str, Any]) -> tuple[str, ...]:
+    """Return one searchable title/info row for each distinct raw ingredient.
+
+    Rows intentionally remain ingredient-scoped instead of being concatenated at
+    recipe level. Android can therefore apply normalized phrase containment
+    (for example ``γαλα καρυδας``) without accidentally matching words that
+    occur in separate ingredients. Quantity and unit are excluded because they
+    are preparation data rather than ingredient identity.
+    """
+
+    sections = record.get("ingredientSections")
+    if not isinstance(sections, list):
+        raise CatalogBuildError("ingredientSections must be a list")
+    normalized_texts: set[str] = set()
+    for section in sections:
+        if not isinstance(section, Mapping):
+            raise CatalogBuildError("ingredientSections must contain objects")
+        ingredients = section.get("ingredients")
+        if not isinstance(ingredients, list):
+            raise CatalogBuildError("ingredientSections ingredients must be a list")
+        for ingredient in ingredients:
+            if not isinstance(ingredient, Mapping):
+                raise CatalogBuildError("ingredients must contain objects")
+            chunks: list[str] = []
+            for field in ("title", "info"):
+                value = ingredient.get(field, "")
+                if not isinstance(value, str):
+                    raise CatalogBuildError(f"ingredient {field} must be a string")
+                if value.strip():
+                    chunks.append(value)
+            normalized = normalize_search_token(" ".join(chunks))
+            if normalized:
+                normalized_texts.add(normalized)
+    return tuple(sorted(normalized_texts))
+
+
 def prepare_recipe(
     record: Mapping[str, Any],
 ) -> tuple[PreparedRecipe, dict[str, dict[str, str]]]:
@@ -397,6 +434,7 @@ def prepare_recipe(
         raise CatalogBuildError(f"{recipe_id}: category must be a non-empty string")
 
     facets, labels = _facet_values(record)
+    ingredient_texts = _normalized_ingredient_texts(record)
     kotlin_recipe = {
         field: record[field]
         for field in KOTLIN_RECIPE_FIELDS
@@ -417,6 +455,7 @@ def prepare_recipe(
         source_key=source_key,
         random_key=random_key,
         facet_tokens=facets,
+        ingredient_texts=ingredient_texts,
         recipe_json=compressed,
         recipe_json_sha256=hashlib.sha256(recipe_json).hexdigest(),
     )
@@ -586,6 +625,7 @@ def _content_hash(
             "sourceKey": recipe.source_key,
             "randomKey": recipe.random_key,
             "facets": recipe.facet_tokens,
+            "ingredientTexts": recipe.ingredient_texts,
             "recipeJsonSha256": recipe.recipe_json_sha256,
         }
         digest.update(canonical_json_bytes(envelope))
@@ -623,6 +663,13 @@ CREATE TABLE recipe_facets (
     FOREIGN KEY (recipe_id) REFERENCES recipes(id)
 ) WITHOUT ROWID;
 
+CREATE TABLE recipe_ingredient_texts (
+    recipe_id TEXT NOT NULL,
+    normalized_text TEXT NOT NULL,
+    PRIMARY KEY (recipe_id, normalized_text),
+    FOREIGN KEY (recipe_id) REFERENCES recipes(id)
+) WITHOUT ROWID;
+
 CREATE INDEX recipes_title_idx ON recipes(title_normalized, id);
 CREATE INDEX recipes_plan_idx ON recipes(
     category, ease, quick_recipe, prep_minutes, rating, random_key, id
@@ -656,6 +703,7 @@ def _write_database(
 
         recipe_rows = []
         facet_rows = []
+        ingredient_text_rows = []
         for recipe in recipes:
             recipe_rows.append(
                 (
@@ -677,6 +725,10 @@ def _write_database(
                     (facet_type, token, recipe.id)
                     for token in recipe.facet_tokens[facet_type]
                 )
+            ingredient_text_rows.extend(
+                (recipe.id, normalized_text)
+                for normalized_text in recipe.ingredient_texts
+            )
 
         connection.executemany(
             """
@@ -690,6 +742,13 @@ def _write_database(
         connection.executemany(
             "INSERT INTO recipe_facets(facet_type, token, recipe_id) VALUES (?, ?, ?)",
             sorted(facet_rows),
+        )
+        connection.executemany(
+            """
+            INSERT INTO recipe_ingredient_texts(recipe_id, normalized_text)
+            VALUES (?, ?)
+            """,
+            sorted(ingredient_text_rows),
         )
         connection.executemany(
             "INSERT INTO catalog_meta(key, value) VALUES (?, ?)",
@@ -749,6 +808,8 @@ def build_catalog(
         "facet_options_json": _facet_options_json(option_labels),
         "json_compression": "zlib",
         "token_normalization": "nfkd-casefold-alnum-v1",
+        "ingredient_text_index": "recipe_ingredient_texts-title-info-instr-v1",
+        "ingredient_text_normalization": "nfkd-casefold-alnum-v1",
     }
     _write_database(output_path, recipes, metadata)
     file_bytes = output_path.read_bytes()

@@ -5,6 +5,7 @@ import com.justdataplease.spoon.data.model.MealCategory
 import com.justdataplease.spoon.data.model.Recipe
 import com.justdataplease.spoon.data.model.RecipeFilters
 import com.justdataplease.spoon.domain.ExploreCriteria
+import com.justdataplease.spoon.data.preferences.MealPreferenceSettings
 import java.io.File
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
@@ -68,6 +69,30 @@ class RecipeCatalogTest {
             sql.arguments,
         )
         assertTrue(sql.whereSql.contains("r.id != ?"))
+    }
+
+    @Test
+    fun `global preferences add category vegan and raw ingredient predicates to both paths`() {
+        val preferences = MealPreferenceSettings(
+            excludedCategories = setOf(MealCategory.MEAT.key),
+            veganOnly = true,
+            excludedIngredientTerms = setOf("γαλα καρυδας"),
+        )
+
+        val explore = CatalogSqlBuilder.forExplore(ExploreCriteria(), preferences)
+        val planner = CatalogSqlBuilder.forPlanner(
+            RecipeFilters(category = MealCategory.ANY.key),
+            excludingRecipeId = null,
+            preferences = preferences,
+        )
+
+        listOf(explore, planner).forEach { sql ->
+            assertTrue(sql.whereSql.contains("r.category NOT IN (?)"))
+            assertTrue(sql.whereSql.contains("recipe_ingredient_texts"))
+            assertTrue(sql.whereSql.contains("instr(ingredient.normalized_text, ?)"))
+            assertTrue(sql.whereSql.contains("recipe_facets vegan"))
+            assertTrue(sql.arguments.containsAll(listOf("meat", "vegan", "γαλα καρυδασ")))
+        }
     }
 
     @Test

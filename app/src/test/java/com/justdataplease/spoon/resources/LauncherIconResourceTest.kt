@@ -8,35 +8,56 @@ import org.junit.Test
 
 class LauncherIconResourceTest {
     @Test
-    fun `manifest uses the current spoon launcher icons`() {
+    fun `manifest uses the adaptive launcher icons`() {
         val manifest = projectFile("app/src/main/AndroidManifest.xml").readText()
 
-        assertEquals(2, Regex("@mipmap/ic_launcher_v7").findAll(manifest).count())
-        assertEquals(2, Regex("@mipmap/ic_launcher_round_v7").findAll(manifest).count())
-        assertFalse(manifest.contains("@mipmap/ic_launcher_v6"))
+        assertEquals(2, Regex("@mipmap/ic_launcher\"").findAll(manifest).count())
+        assertEquals(2, Regex("@mipmap/ic_launcher_round\"").findAll(manifest).count())
+        assertFalse(manifest.contains("ic_launcher_v"))
     }
 
     @Test
-    fun `launcher is one filled white spoon on solid terracotta`() {
-        val colors = projectFile("app/src/main/res/values/colors.xml").readText()
-        val foreground = projectFile(
-            "app/src/main/res/drawable/ic_launcher_foreground_v7.xml",
-        ).readText()
-        val adaptive = projectFile(
-            "app/src/main/res/mipmap-anydpi-v26/ic_launcher_v7.xml",
-        ).readText()
+    fun `adaptive icon wires background, foreground and monochrome layers`() {
+        listOf("ic_launcher", "ic_launcher_round").forEach { name ->
+            val adaptive = projectFile("app/src/main/res/mipmap-anydpi-v26/$name.xml").readText()
 
-        assertTrue(colors.contains("launcher_background"))
-        assertTrue(colors.contains("#D96C4B"))
-        assertTrue(colors.contains("launcher_foreground"))
-        assertTrue(colors.contains("#FFFFFF"))
-        assertEquals(1, Regex("<path(?:\\s|>)").findAll(foreground).count())
-        assertTrue(foreground.contains("@color/launcher_foreground"))
-        assertFalse(foreground.contains("strokeColor"))
+            assertTrue(adaptive.contains("@color/ic_launcher_background"))
+            assertTrue(adaptive.contains("@drawable/ic_launcher_foreground"))
+            assertTrue(adaptive.contains("@drawable/ic_launcher_monochrome"))
+        }
+        assertTrue(
+            projectFile("app/src/main/res/values/ic_launcher_background.xml").readText()
+                .contains("#B8442E"),
+        )
+    }
+
+    @Test
+    fun `launcher is a place setting with the Greek question mark, drawn only in the app palette`() {
+        val foreground = projectFile("app/src/main/res/drawable/ic_launcher_foreground.xml").readText()
+        val palette = setOf("#FFF8F1", "#F3E7D8", "#B8442E", "#8D2E1E")
+        val usedColors = Regex("#[0-9A-Fa-f]{6}").findAll(foreground).map(MatchResult::value).toSet()
+
+        assertTrue("unexpected colours: ${usedColors - palette}", palette.containsAll(usedColors))
+        // fork (3 tines, neck, handle, cap), spoon (bowl, handle, cap), plate (shadow, disc, well),
+        // Greek «;» (dot, comma head, comma tail)
+        assertEquals(15, Regex("<path(?:\\s|>)").findAll(foreground).count())
         assertFalse(foreground.contains("gradient"))
-        assertTrue(adaptive.contains("@color/launcher_background"))
-        assertTrue(adaptive.contains("@drawable/ic_launcher_foreground_v7"))
-        assertTrue(adaptive.contains("@drawable/ic_launcher_monochrome_v7"))
+    }
+
+    @Test
+    fun `monochrome layer is a single-colour silhouette`() {
+        val monochrome = projectFile("app/src/main/res/drawable/ic_launcher_monochrome.xml").readText()
+        val usedColors = Regex("#[0-9A-Fa-f]{6}").findAll(monochrome).map(MatchResult::value).toSet()
+
+        assertEquals(setOf("#000000"), usedColors)
+    }
+
+    @Test
+    fun `no stale versioned launcher resources remain`() {
+        val res = projectFile("app/src/main/res/values/strings.xml").parentFile.parentFile
+        val stale = res.walk().filter { it.isFile && it.name.matches(Regex("ic_launcher.*_v\\d+\\.xml")) }.toList()
+
+        assertTrue("stale launcher resources: $stale", stale.isEmpty())
     }
 
     private fun projectFile(relativePath: String): File {

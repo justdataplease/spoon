@@ -126,7 +126,8 @@ private fun VideoCard(
     onOpenExternal: (String) -> Unit,
 ) {
     var requestedPlayback by rememberSaveable(originalUrl) { mutableStateOf(false) }
-    val safeExternalUrl = source?.originalUrl ?: normalizeRecipeLink(originalUrl)
+    val safeExternalUrl = normalizeRecipeLink(originalUrl)
+    val playerModifier = Modifier.fillMaxWidth().height(210.dp)
 
     Card(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
@@ -137,13 +138,13 @@ private fun VideoCard(
                 SecureInlineVideo(
                     source = source,
                     onOpenExternal = onOpenExternal,
-                    modifier = Modifier.fillMaxWidth().height(210.dp),
+                    modifier = playerModifier,
                 )
             } else {
                 VideoPlaceholder(
                     canPlayInline = source != null,
                     onPlay = { requestedPlayback = true },
-                    modifier = Modifier.fillMaxWidth().height(210.dp),
+                    modifier = playerModifier,
                 )
             }
 
@@ -218,7 +219,7 @@ private fun SecureInlineVideo(
     val context = LocalContext.current
 
     val webView = remember(source, context, attempt) {
-        WebViewHolder.create(
+        createInlineVideoWebView(
             context = context,
             source = source,
             onReady = { playerState = InlinePlayerState.Ready },
@@ -309,139 +310,137 @@ private sealed interface InlinePlayerState {
     data class Error(val message: String) : InlinePlayerState
 }
 
-private object WebViewHolder {
-    @SuppressLint("SetJavaScriptEnabled")
-    @Suppress("DEPRECATION")
-    fun create(
-        context: Context,
-        source: InlineVideoSource,
-        onReady: () -> Unit,
-        onError: (String) -> Unit,
-        onExternalNavigation: (String) -> Unit,
-    ): WebView = WebView(context).apply {
-        setBackgroundColor(AndroidColor.rgb(23, 19, 15))
-        setLayerType(WebView.LAYER_TYPE_HARDWARE, null)
-        settings.apply {
-            javaScriptEnabled = true
-            domStorageEnabled = true
-            databaseEnabled = false
-            allowFileAccess = false
-            allowContentAccess = false
-            allowFileAccessFromFileURLs = false
-            allowUniversalAccessFromFileURLs = false
-            javaScriptCanOpenWindowsAutomatically = false
-            setSupportMultipleWindows(false)
-            mediaPlaybackRequiresUserGesture = true
-            mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
-            safeBrowsingEnabled = true
-            builtInZoomControls = false
-            displayZoomControls = false
-            loadWithOverviewMode = true
-            useWideViewPort = true
-        }
-        CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
-        webChromeClient = object : WebChromeClient() {
-            override fun onConsoleMessage(consoleMessage: ConsoleMessage?): Boolean {
-                val message = consoleMessage?.message().orEmpty()
-                return when {
-                    message == "SPOON_VIDEO_READY" -> {
-                        onReady()
-                        true
-                    }
-                    message.startsWith("SPOON_VIDEO_ERROR:") -> {
-                        onError("Δεν ήταν δυνατή η αναπαραγωγή μέσα στην εφαρμογή.")
-                        true
-                    }
-                    else -> super.onConsoleMessage(consoleMessage)
+@SuppressLint("SetJavaScriptEnabled")
+@Suppress("DEPRECATION")
+private fun createInlineVideoWebView(
+    context: Context,
+    source: InlineVideoSource,
+    onReady: () -> Unit,
+    onError: (String) -> Unit,
+    onExternalNavigation: (String) -> Unit,
+): WebView = WebView(context).apply {
+    setBackgroundColor(AndroidColor.rgb(23, 19, 15))
+    setLayerType(WebView.LAYER_TYPE_HARDWARE, null)
+    settings.apply {
+        javaScriptEnabled = true
+        domStorageEnabled = true
+        databaseEnabled = false
+        allowFileAccess = false
+        allowContentAccess = false
+        allowFileAccessFromFileURLs = false
+        allowUniversalAccessFromFileURLs = false
+        javaScriptCanOpenWindowsAutomatically = false
+        setSupportMultipleWindows(false)
+        mediaPlaybackRequiresUserGesture = true
+        mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
+        safeBrowsingEnabled = true
+        builtInZoomControls = false
+        displayZoomControls = false
+        loadWithOverviewMode = true
+        useWideViewPort = true
+    }
+    CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
+    webChromeClient = object : WebChromeClient() {
+        override fun onConsoleMessage(consoleMessage: ConsoleMessage?): Boolean {
+            val message = consoleMessage?.message().orEmpty()
+            return when {
+                message == "SPOON_VIDEO_READY" -> {
+                    onReady()
+                    true
                 }
+                message.startsWith("SPOON_VIDEO_ERROR:") -> {
+                    onError("Δεν ήταν δυνατή η αναπαραγωγή μέσα στην εφαρμογή.")
+                    true
+                }
+                else -> super.onConsoleMessage(consoleMessage)
             }
         }
-        webViewClient = object : WebViewClient() {
-            private var youtubeProbeGeneration = 0
+    }
+    webViewClient = object : WebViewClient() {
+        private var youtubeProbeGeneration = 0
 
-            override fun onReceivedError(
-                view: WebView?,
-                request: WebResourceRequest?,
-                error: WebResourceError?,
-            ) {
-                if (request?.isForMainFrame != false) {
-                    onError("Η σύνδεση για το βίντεο απέτυχε.")
-                }
+        override fun onReceivedError(
+            view: WebView?,
+            request: WebResourceRequest?,
+            error: WebResourceError?,
+        ) {
+            if (request?.isForMainFrame != false) {
+                onError("Η σύνδεση για το βίντεο απέτυχε.")
             }
+        }
 
-            override fun onReceivedHttpError(
-                view: WebView?,
-                request: WebResourceRequest?,
-                errorResponse: WebResourceResponse?,
-            ) {
-                if (request?.isForMainFrame != false && (errorResponse?.statusCode ?: 0) >= 400) {
-                    onError("Ο πάροχος του βίντεο επέστρεψε σφάλμα.")
-                }
+        override fun onReceivedHttpError(
+            view: WebView?,
+            request: WebResourceRequest?,
+            errorResponse: WebResourceResponse?,
+        ) {
+            if (request?.isForMainFrame != false && (errorResponse?.statusCode ?: 0) >= 400) {
+                onError("Ο πάροχος του βίντεο επέστρεψε σφάλμα.")
             }
+        }
 
-            override fun onReceivedSslError(view: WebView?, handler: SslErrorHandler?, error: SslError?) {
-                handler?.cancel()
-                onError("Δεν ήταν ασφαλής η σύνδεση του βίντεο.")
-            }
+        override fun onReceivedSslError(view: WebView?, handler: SslErrorHandler?, error: SslError?) {
+            handler?.cancel()
+            onError("Δεν ήταν ασφαλής η σύνδεση του βίντεο.")
+        }
 
-            override fun onRenderProcessGone(view: WebView?, detail: RenderProcessGoneDetail?): Boolean {
-                onError("Η αναπαραγωγή βίντεο σταμάτησε απρόσμενα.")
-                return true
-            }
+        override fun onRenderProcessGone(view: WebView?, detail: RenderProcessGoneDetail?): Boolean {
+            onError("Η αναπαραγωγή βίντεο σταμάτησε απρόσμενα.")
+            return true
+        }
 
-            override fun onPageFinished(view: WebView?, url: String?) {
-                super.onPageFinished(view, url)
-                val youtubeSource = source as? InlineVideoSource.YouTube ?: return
-                val playerView = view ?: return
-                if (url == null || !isAllowedVideoNavigation(url, youtubeSource)) return
-                val generation = ++youtubeProbeGeneration
-                playerView.evaluateJavascript(YouTubeViewportFixScript) {
-                    if (generation == youtubeProbeGeneration) {
-                        probeYouTubePlayer(playerView, generation, YouTubeProbeAttempts)
-                    }
-                }
-            }
-
-            override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
-                val target = request?.url?.toString() ?: return true
-                if (!request.isForMainFrame) return false
-                return handleNavigation(target)
-            }
-
-            private fun handleNavigation(target: String): Boolean {
-                if (isAllowedVideoNavigation(target, source)) return false
-                if (target.startsWith("https://", ignoreCase = true)) onExternalNavigation(target)
-                return true
-            }
-
-            private fun probeYouTubePlayer(view: WebView, generation: Int, attemptsRemaining: Int) {
-                view.evaluateJavascript(YouTubePlayerProbeScript) { rawResult ->
-                    if (generation != youtubeProbeGeneration) return@evaluateJavascript
-                    when (parseYouTubePlayerProbeResult(rawResult)) {
-                        YouTubePlayerProbeResult.READY -> onReady()
-                        YouTubePlayerProbeResult.ERROR ->
-                            onError("Το YouTube δεν μπόρεσε να αναπαράγει αυτό το βίντεο μέσα στην εφαρμογή.")
-                        YouTubePlayerProbeResult.LOADING -> if (attemptsRemaining > 0) {
-                            view.postDelayed(
-                                { probeYouTubePlayer(view, generation, attemptsRemaining - 1) },
-                                YouTubeProbeDelayMillis,
-                            )
-                        }
-                    }
+        override fun onPageFinished(view: WebView?, url: String?) {
+            super.onPageFinished(view, url)
+            val youtubeSource = source as? InlineVideoSource.YouTube ?: return
+            val playerView = view ?: return
+            if (url == null || !isAllowedVideoNavigation(url, youtubeSource)) return
+            val generation = ++youtubeProbeGeneration
+            playerView.evaluateJavascript(YouTubeViewportFixScript) {
+                if (generation == youtubeProbeGeneration) {
+                    probeYouTubePlayer(playerView, generation, YouTubeProbeAttempts)
                 }
             }
         }
 
-        when (source) {
-            is InlineVideoSource.YouTube ->
-                loadUrl(source.embedUrl, inlineVideoRequestHeaders(source).toMutableMap())
-            else -> loadDataWithBaseURL(
-                InlineVideoReferer,
-                inlineVideoHtml(source),
-                "text/html",
-                "UTF-8",
-                null,
-            )
+        override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+            val target = request?.url?.toString() ?: return true
+            if (!request.isForMainFrame) return false
+            return handleNavigation(target)
         }
+
+        private fun handleNavigation(target: String): Boolean {
+            if (isAllowedVideoNavigation(target, source)) return false
+            if (target.startsWith("https://", ignoreCase = true)) onExternalNavigation(target)
+            return true
+        }
+
+        private fun probeYouTubePlayer(view: WebView, generation: Int, attemptsRemaining: Int) {
+            view.evaluateJavascript(YouTubePlayerProbeScript) { rawResult ->
+                if (generation != youtubeProbeGeneration) return@evaluateJavascript
+                when (parseYouTubePlayerProbeResult(rawResult)) {
+                    YouTubePlayerProbeResult.READY -> onReady()
+                    YouTubePlayerProbeResult.ERROR ->
+                        onError("Το YouTube δεν μπόρεσε να αναπαράγει αυτό το βίντεο μέσα στην εφαρμογή.")
+                    YouTubePlayerProbeResult.LOADING -> if (attemptsRemaining > 0) {
+                        view.postDelayed(
+                            { probeYouTubePlayer(view, generation, attemptsRemaining - 1) },
+                            YouTubeProbeDelayMillis,
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    when (source) {
+        is InlineVideoSource.YouTube ->
+            loadUrl(source.embedUrl, inlineVideoRequestHeaders(source))
+        else -> loadDataWithBaseURL(
+            InlineVideoReferer,
+            inlineVideoHtml(source),
+            "text/html",
+            "UTF-8",
+            null,
+        )
     }
 }

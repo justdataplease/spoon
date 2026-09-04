@@ -45,10 +45,11 @@ import com.justdataplease.spoon.ui.history.HistoryScreen
 import com.justdataplease.spoon.ui.model.SpoonUiState
 import com.justdataplease.spoon.ui.more.MoreScreen
 import com.justdataplease.spoon.ui.shopping.ShoppingScreen
+import com.justdataplease.spoon.ui.settings.FoodPreferencesScreen
 import com.justdataplease.spoon.ui.week.WeekScreen
 
 private enum class PrimaryDestination { WEEK, EXPLORE, FAVORITES, SHOPPING, MORE }
-private enum class MorePage { HUB, CALENDAR, HISTORY, ACCOUNT }
+private enum class MorePage { HUB, CALENDAR, HISTORY, PREFERENCES, ACCOUNT }
 
 private data class Destination(
     val key: PrimaryDestination,
@@ -78,6 +79,7 @@ fun SpoonApp(
     val selectedRecipe = state.selectedRecipe
     val customRecipeEditor by viewModel.customRecipeEditor.collectAsStateWithLifecycle()
     val retainedCustomRecipePhoto by viewModel.customRecipeEditorRetainedPhoto.collectAsStateWithLifecycle()
+    val mealPreferenceSettings by viewModel.mealPreferenceSettings.collectAsStateWithLifecycle()
 
     BackHandler(
         enabled = selectedRecipe != null ||
@@ -221,6 +223,7 @@ fun SpoonApp(
                     MorePage.HUB -> MoreScreen(
                         onOpenCalendar = { morePage = MorePage.CALENDAR },
                         onOpenHistory = { morePage = MorePage.HISTORY },
+                        onOpenPreferences = { morePage = MorePage.PREFERENCES },
                         onOpenAccount = { morePage = MorePage.ACCOUNT },
                         onCreateRecipe = viewModel::createCustomRecipe,
                         modifier = Modifier.padding(padding),
@@ -239,6 +242,15 @@ fun SpoonApp(
                         entries = state.historyEntries,
                         onOpenRecipe = viewModel::showRecipeDetails,
                         onRemoveEntry = viewModel::removeCookedHistoryEntry,
+                        modifier = Modifier.padding(padding),
+                    )
+                    MorePage.PREFERENCES -> FoodPreferencesScreen(
+                        settings = mealPreferenceSettings,
+                        onBack = { morePage = MorePage.HUB },
+                        onSave = { settings ->
+                            viewModel.saveMealPreferenceSettings(settings)
+                            morePage = MorePage.HUB
+                        },
                         modifier = Modifier.padding(padding),
                     )
                     MorePage.ACCOUNT -> AccountScreen(

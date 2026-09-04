@@ -70,30 +70,23 @@ data class CustomRecipeEditorState(
             mode = CustomRecipeEditorMode.CREATE,
         )
 
-        fun edit(recipe: RecipeDetailUi): CustomRecipeEditorState = CustomRecipeEditorState(
-            mode = CustomRecipeEditorMode.EDIT,
-            recipeId = recipe.recipeId,
-            title = recipe.title,
-            description = recipe.description,
-            categoryKey = recipe.categoryKey
-                .takeIf { key -> AvailableCategories.any { it.key == key } }
-                ?: "other",
-            prepMinutes = recipe.prepMinutes.takeIf { it > 0 }?.toString().orEmpty(),
-            cookMinutes = recipe.cookMinutes.takeIf { it > 0 }?.toString().orEmpty(),
-            servings = recipe.servings,
-            ingredients = recipe.ingredientSections.flatMap { section ->
-                section.ingredients.map { ingredient ->
-                    CustomIngredientDraftUi(
-                        title = ingredient.title,
-                        quantity = ingredient.quantity,
-                        unit = ingredient.unit,
-                    )
-                }
-            },
-            steps = recipe.methodSections.flatMap { it.steps },
-            // Never put recipe.imageUrl in saved state: custom photos are large data URIs.
-            retainExistingPhoto = recipe.imageUrl.isNotBlank(),
-        )
+        fun edit(recipe: RecipeDetailUi): CustomRecipeEditorState {
+            val draft = recipe.toCustomRecipeDraftUi()
+            return CustomRecipeEditorState(
+                mode = CustomRecipeEditorMode.EDIT,
+                recipeId = draft.recipeId,
+                title = draft.title,
+                description = draft.description,
+                categoryKey = draft.categoryKey,
+                prepMinutes = draft.prepMinutes.takeIf { it > 0 }?.toString().orEmpty(),
+                cookMinutes = draft.cookMinutes.takeIf { it > 0 }?.toString().orEmpty(),
+                servings = draft.servings,
+                ingredients = draft.ingredients,
+                steps = draft.steps,
+                // Never put recipe.imageUrl in saved state: custom photos are large data URIs.
+                retainExistingPhoto = draft.imageDataUrl.isNotBlank(),
+            )
+        }
     }
 }
 

@@ -17,13 +17,6 @@ enum class EaseLevel(
     companion object {
         fun fromKey(key: String): EaseLevel? = entries.firstOrNull { it.key == key }
 
-        fun fromStepCount(stepCount: Int): EaseLevel = when {
-            stepCount <= 0 -> UNKNOWN
-            stepCount <= 5 -> EASY
-            stepCount <= 9 -> MODERATE
-            else -> INVOLVED
-        }
-
         fun fromWorkload(preparationCount: Int, stepCount: Int): EaseLevel {
             val preparations = preparationCount.coerceAtLeast(0)
             val steps = stepCount.coerceAtLeast(0)

@@ -1,6 +1,5 @@
 package com.justdataplease.spoon.ui.more
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -18,25 +17,27 @@ import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Menu
+import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.justdataplease.spoon.ui.components.GradientHeroCard
 
 @Composable
 fun MoreScreen(
     onOpenCalendar: () -> Unit,
     onOpenHistory: () -> Unit,
     onOpenAccount: () -> Unit,
+    onOpenPreferences: () -> Unit,
     onCreateRecipe: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -46,28 +47,24 @@ fun MoreScreen(
         verticalArrangement = Arrangement.spacedBy(13.dp),
     ) {
         item {
-            Card(colors = CardDefaults.cardColors(containerColor = Color.Transparent), shape = RoundedCornerShape(30.dp)) {
-                Column(
-                    modifier = Modifier
-                        .background(
-                            Brush.linearGradient(
-                                listOf(MaterialTheme.colorScheme.primaryContainer, MaterialTheme.colorScheme.tertiaryContainer),
-                            ),
-                        )
-                        .fillMaxWidth()
-                        .padding(22.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Icon(Icons.Outlined.Menu, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                        Text("Περισσότερα", style = MaterialTheme.typography.displaySmall)
-                    }
-                    Text("Το ημερολόγιο, το ιστορικό και ο λογαριασμός σου.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
+            GradientHeroCard(
+                icon = Icons.Outlined.Menu,
+                title = "Περισσότερα",
+                subtitle = "Το ημερολόγιο, το ιστορικό και ο λογαριασμός σου.",
+                gradient = listOf(MaterialTheme.colorScheme.primaryContainer, MaterialTheme.colorScheme.tertiaryContainer),
+                subtitleStyle = LocalTextStyle.current,
+            )
         }
         item { MoreCard("Ημερολόγιο", "Δες το πλάνο ανά μήνα", Icons.Outlined.CalendarMonth, onOpenCalendar) }
         item { MoreCard("Ιστορικό", "Όλες οι συνταγές που έφτιαξες", Icons.Outlined.History, onOpenHistory) }
+        item {
+            MoreCard(
+                "Προτιμήσεις φαγητού",
+                "Vegan και αποκλεισμοί κατηγοριών ή υλικών",
+                Icons.Outlined.Tune,
+                onOpenPreferences,
+            )
+        }
         item { MoreCard("Λογαριασμός", "Σύνδεση και συγχρονισμός", Icons.Outlined.AccountCircle, onOpenAccount) }
         item { MoreCard("Νέα δική μου συνταγή", "Υλικά, βήματα και φωτογραφία", Icons.AutoMirrored.Outlined.NoteAdd, onCreateRecipe) }
     }

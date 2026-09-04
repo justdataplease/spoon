@@ -75,6 +75,12 @@ fun AccountScreen(
         onClearError()
     }
 
+    fun edit(apply: () -> Unit) {
+        apply()
+        localError = null
+        onClearError()
+    }
+
     LazyColumn(
         modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(start = 18.dp, end = 18.dp, top = 14.dp, bottom = 42.dp),
@@ -126,21 +132,9 @@ fun AccountScreen(
                     password = password,
                     confirmation = confirmation,
                     isBusy = state.isBusy,
-                    onEmailChange = {
-                        email = it
-                        localError = null
-                        onClearError()
-                    },
-                    onPasswordChange = {
-                        password = it
-                        localError = null
-                        onClearError()
-                    },
-                    onConfirmationChange = {
-                        confirmation = it
-                        localError = null
-                        onClearError()
-                    },
+                    onEmailChange = { value -> edit { email = value } },
+                    onPasswordChange = { value -> edit { password = value } },
+                    onConfirmationChange = { value -> edit { confirmation = value } },
                     onSubmit = {
                         val error = validateAccountInput(mode, email, password, confirmation)
                         if (error != null) {

@@ -47,14 +47,13 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.justdataplease.spoon.ui.components.CategoryPill
+import com.justdataplease.spoon.ui.components.GreekLocale
 import com.justdataplease.spoon.ui.components.greekDayLabel
 import com.justdataplease.spoon.ui.model.CalendarMealUi
 import java.time.LocalDate
 import java.time.YearMonth
 import java.time.format.DateTimeFormatter
-import java.util.Locale
 
-private val GreekLocale = Locale.forLanguageTag("el-GR")
 private val FullDateFormatter = DateTimeFormatter.ofPattern("EEEE d MMMM yyyy", GreekLocale)
 
 @Composable
@@ -95,10 +94,10 @@ fun CalendarScreen(
                 onCurrentMonth = onCurrentMonth,
             )
         }
-        if (selectedDate != null) {
+        selectedDate?.let { date ->
             item {
                 SelectedDayCard(
-                    date = selectedDate!!,
+                    date = date,
                     meal = selectedMeal,
                     onOpenRecipe = onOpenRecipe,
                     onToggleCompleted = onToggleCompleted,

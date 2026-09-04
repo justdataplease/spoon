@@ -1,14 +1,18 @@
 package com.justdataplease.spoon.data.local
 
+import com.justdataplease.spoon.data.eligibleRecipeDetails
 import com.justdataplease.spoon.data.model.EaseLevel
 import com.justdataplease.spoon.data.model.CustomRecipe
 import com.justdataplease.spoon.data.model.MealCategory
 import com.justdataplease.spoon.data.model.Recipe
 import com.justdataplease.spoon.data.model.RecipeFilters
+import com.justdataplease.spoon.data.model.isCustomRecipeId
+import com.justdataplease.spoon.data.preferences.MealPreferenceSettings
 import com.justdataplease.spoon.domain.ExploreCriteria
 import com.justdataplease.spoon.domain.ExploreRecipeFilter
 import com.justdataplease.spoon.domain.RecipeSelector
 import com.justdataplease.spoon.domain.isActiveGreekRecipe
+import com.justdataplease.spoon.domain.matchesMealPreferences
 import com.justdataplease.spoon.domain.repository.CatalogFacetOptions
 import com.justdataplease.spoon.domain.repository.CatalogSourceOption
 import com.justdataplease.spoon.domain.repository.RecipePage
@@ -25,13 +29,23 @@ interface RecipeCatalog {
     suspend fun ensureReady()
     suspend fun getRecipe(recipeId: String): Recipe?
     suspend fun getRecipesByIds(recipeIds: Set<String>): List<Recipe>
-    suspend fun queryRecipes(criteria: ExploreCriteria, limit: Int, offset: Int): RecipePage
+    suspend fun queryRecipes(
+        criteria: ExploreCriteria,
+        limit: Int,
+        offset: Int,
+        preferences: MealPreferenceSettings = MealPreferenceSettings(),
+    ): RecipePage
     suspend fun getFacetOptions(): CatalogFacetOptions
-    suspend fun countPlannerMatches(filters: RecipeFilters, excludingRecipeId: String?): Int
+    suspend fun countPlannerMatches(
+        filters: RecipeFilters,
+        excludingRecipeId: String?,
+        preferences: MealPreferenceSettings = MealPreferenceSettings(),
+    ): Int
     suspend fun selectRandomRecipe(
         filters: RecipeFilters,
         excludingRecipeId: String?,
         randomSeed: Long,
+        preferences: MealPreferenceSettings = MealPreferenceSettings(),
     ): Recipe?
 }
 
@@ -46,9 +60,14 @@ class InMemoryRecipeCatalog(recipes: List<Recipe>) : RecipeCatalog {
     override suspend fun getRecipesByIds(recipeIds: Set<String>): List<Recipe> =
         catalog.filter { it.id in recipeIds }
 
-    override suspend fun queryRecipes(criteria: ExploreCriteria, limit: Int, offset: Int): RecipePage {
+    override suspend fun queryRecipes(
+        criteria: ExploreCriteria,
+        limit: Int,
+        offset: Int,
+        preferences: MealPreferenceSettings,
+    ): RecipePage {
         requirePageBounds(limit, offset)
-        val matches = ExploreRecipeFilter.filter(catalog, criteria)
+        val matches = ExploreRecipeFilter.filter(catalog, criteria, preferences)
         return RecipePage(matches.drop(offset).take(limit), matches.size, offset, limit)
     }
 
@@ -57,16 +76,20 @@ class InMemoryRecipeCatalog(recipes: List<Recipe>) : RecipeCatalog {
     override suspend fun countPlannerMatches(
         filters: RecipeFilters,
         excludingRecipeId: String?,
+        preferences: MealPreferenceSettings,
     ): Int = catalog.count { recipe ->
-        recipe.id != excludingRecipeId && recipe.matchesPlannerFilters(filters)
+        recipe.id != excludingRecipeId &&
+            recipe.matchesPlannerFilters(filters) &&
+            recipe.matchesMealPreferences(preferences)
     }
 
     override suspend fun selectRandomRecipe(
         filters: RecipeFilters,
         excludingRecipeId: String?,
         randomSeed: Long,
+        preferences: MealPreferenceSettings,
     ): Recipe? = RecipeSelector().select(
-        recipes = catalog,
+        recipes = catalog.filter { it.matchesMealPreferences(preferences) },
         filters = filters,
         excludingRecipeId = excludingRecipeId,
         random = Random(randomSeed),
@@ -174,24 +197,88 @@ internal suspend fun selectIncludingCustomRecipes(
     filters: RecipeFilters,
     excludingRecipeId: String?,
     randomSeed: Long,
+    preferences: MealPreferenceSettings = MealPreferenceSettings(),
 ): Recipe? {
     if (!filters.isValid()) return null
-    val customCandidates = customRecipes.asSequence()
-        .filter(CustomRecipe::active)
-        .map(CustomRecipe::toRecipe)
-        .filter { it.id != excludingRecipeId && it.matchesPlannerFilters(filters) }
-        .toList()
-    val publicCount = recipeCatalog.countPlannerMatches(filters, excludingRecipeId)
+    val customCandidates = customRecipes.toActiveRecipes()
+        .filter {
+            it.id != excludingRecipeId &&
+                it.matchesPlannerFilters(filters) &&
+                it.matchesMealPreferences(preferences)
+        }
+    val publicCount = recipeCatalog.countPlannerMatches(filters, excludingRecipeId, preferences)
     val totalCount = publicCount + customCandidates.size
     if (totalCount == 0) return null
     val random = Random(randomSeed)
     return if (random.nextInt(totalCount) < customCandidates.size) {
         customCandidates[random.nextInt(customCandidates.size)]
     } else {
-        recipeCatalog.selectRandomRecipe(filters, excludingRecipeId, random.nextLong())
+        recipeCatalog.selectRandomRecipe(filters, excludingRecipeId, random.nextLong(), preferences)
             ?: customCandidates.randomOrNull(random)
     }
 }
+
+internal fun List<CustomRecipe>.toActiveRecipes(): List<Recipe> =
+    filter(CustomRecipe::active).map(CustomRecipe::toRecipe)
+
+/** The observable projection: bounded catalog cache, referenced rows, then custom recipes. */
+internal fun mergeCatalogRecipes(
+    cached: List<Recipe>,
+    referenced: List<Recipe>,
+    customRecipes: List<CustomRecipe>,
+): List<Recipe> = (cached + referenced + customRecipes.toActiveRecipes())
+    .distinctBy(Recipe::id)
+    .sortedBy(Recipe::title)
+
+internal suspend fun RecipeCatalog.getRecipeDetailsIncludingCustom(
+    safeRecipeId: String,
+    customRecipes: List<CustomRecipe>,
+): Recipe? {
+    if (safeRecipeId.isCustomRecipeId()) {
+        return customRecipes.firstOrNull { it.id == safeRecipeId && it.active }?.toRecipe()
+    }
+    return eligibleRecipeDetails(getRecipe(safeRecipeId), safeRecipeId, safeRecipeId)
+}
+
+internal suspend fun RecipeCatalog.getRecipesByIdsIncludingCustom(
+    recipeIds: Set<String>,
+    customRecipes: List<CustomRecipe>,
+): List<Recipe> {
+    if (recipeIds.isEmpty()) return emptyList()
+    val customById = customRecipes.toActiveRecipes()
+        .filter { it.id in recipeIds }
+        .associateBy(Recipe::id)
+    val public = getRecipesByIds(recipeIds - customById.keys)
+    val all = public.associateBy(Recipe::id) + customById
+    return recipeIds.mapNotNull(all::get)
+}
+
+/** Custom recipes page first; the public catalog continues after them. */
+internal suspend fun RecipeCatalog.queryIncludingCustomRecipes(
+    customRecipes: List<CustomRecipe>,
+    criteria: ExploreCriteria,
+    limit: Int,
+    offset: Int,
+    preferences: MealPreferenceSettings = MealPreferenceSettings(),
+): RecipePage {
+    requirePageBounds(limit, offset)
+    val customMatches = ExploreRecipeFilter.filter(customRecipes.toActiveRecipes(), criteria, preferences)
+    val customPage = customMatches.drop(offset).take(limit)
+    val publicOffset = (offset - customMatches.size).coerceAtLeast(0)
+    val remaining = limit - customPage.size
+    val publicPage = queryRecipes(criteria, limit, publicOffset, preferences)
+    return RecipePage(
+        recipes = customPage + publicPage.recipes.take(remaining),
+        totalCount = customMatches.size + publicPage.totalCount,
+        offset = offset,
+        limit = limit,
+    )
+}
+
+internal suspend fun RecipeCatalog.facetOptionsIncludingCustom(
+    customRecipes: List<CustomRecipe>,
+): CatalogFacetOptions =
+    mergeFacetOptions(getFacetOptions(), facetOptionsFrom(customRecipes.toActiveRecipes()))
 
 internal const val MAX_RECIPE_PAGE_SIZE = 100
 private val CATALOG_WHITESPACE = Regex("\\s+")

@@ -13,12 +13,13 @@ import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.FirebaseFirestoreException
 import com.google.firebase.firestore.Query
 import com.google.firebase.firestore.QuerySnapshot
-import com.justdataplease.spoon.data.eligibleRecipeDetails
-import com.justdataplease.spoon.data.isSafeRecipeDocumentId
 import com.justdataplease.spoon.data.local.RecipeCatalog
-import com.justdataplease.spoon.data.local.facetOptionsFrom
-import com.justdataplease.spoon.data.local.mergeFacetOptions
-import com.justdataplease.spoon.data.local.requirePageBounds
+import com.justdataplease.spoon.data.local.boundedReferencedRecipeIds
+import com.justdataplease.spoon.data.local.facetOptionsIncludingCustom
+import com.justdataplease.spoon.data.local.getRecipeDetailsIncludingCustom
+import com.justdataplease.spoon.data.local.getRecipesByIdsIncludingCustom
+import com.justdataplease.spoon.data.local.mergeCatalogRecipes
+import com.justdataplease.spoon.data.local.queryIncludingCustomRecipes
 import com.justdataplease.spoon.data.local.selectIncludingCustomRecipes
 import com.justdataplease.spoon.data.model.CookedMeal
 import com.justdataplease.spoon.data.model.CustomRecipe
@@ -29,6 +30,7 @@ import com.justdataplease.spoon.data.model.Recipe
 import com.justdataplease.spoon.data.model.RecipeFilters
 import com.justdataplease.spoon.data.model.RecipeNote
 import com.justdataplease.spoon.data.model.ShoppingListItem
+import com.justdataplease.spoon.data.preferences.MealPreferenceSettings
 import com.justdataplease.spoon.data.model.isCustomRecipeId
 import com.justdataplease.spoon.data.model.mergeCookedHistory
 import com.justdataplease.spoon.data.model.newCookedMealEventId
@@ -45,7 +47,6 @@ import com.justdataplease.spoon.domain.repository.RecipePage
 import com.justdataplease.spoon.domain.repository.SpoonRepository
 import com.justdataplease.spoon.domain.repository.accountFailureForFirebaseCode
 import com.justdataplease.spoon.domain.ExploreCriteria
-import com.justdataplease.spoon.domain.ExploreRecipeFilter
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -107,6 +108,14 @@ class FirestoreSpoonRepository internal constructor(
     private val notesHealth = MutableStateFlow<CloudComponentState>(CloudComponentState.Pending)
     private val customRecipesHealth = MutableStateFlow<CloudComponentState>(CloudComponentState.Pending)
     private val cookedHistoryHealth = MutableStateFlow<CloudComponentState>(CloudComponentState.Pending)
+    private val ownerHealth = listOf(
+        mealPlansHealth,
+        favoritesHealth,
+        shoppingHealth,
+        notesHealth,
+        customRecipesHealth,
+        cookedHistoryHealth,
+    )
     private val _referencedCatalogRecipes = MutableStateFlow<List<Recipe>>(emptyList())
     private val _mealPlans = MutableStateFlow<List<DayMealPlan>>(emptyList())
     private val _favoriteRecipeIds = MutableStateFlow<Set<String>>(emptySet())
@@ -125,18 +134,7 @@ class FirestoreSpoonRepository internal constructor(
     @Volatile
     private var authRefreshJob: Job? = null
 
-    override val backendState = combine(
-        listOf(
-            authHealth,
-            recipesHealth,
-            mealPlansHealth,
-            favoritesHealth,
-            shoppingHealth,
-            notesHealth,
-            customRecipesHealth,
-            cookedHistoryHealth,
-        ),
-    ) { states ->
+    override val backendState = combine(listOf(authHealth, recipesHealth) + ownerHealth) { states ->
         aggregateCloudState(states.toList())
     }.stateIn(scope, SharingStarted.Eagerly, BackendState.Connecting)
 
@@ -145,11 +143,8 @@ class FirestoreSpoonRepository internal constructor(
         recipeCatalog.cachedRecipes,
         _referencedCatalogRecipes,
         _customRecipes,
-    ) { recent, referenced, custom ->
-        (recent + referenced + custom.filter(CustomRecipe::active).map(CustomRecipe::toRecipe))
-            .distinctBy(Recipe::id)
-            .sortedBy(Recipe::title)
-    }.stateIn(scope, SharingStarted.Eagerly, emptyList())
+        ::mergeCatalogRecipes,
+    ).stateIn(scope, SharingStarted.Eagerly, emptyList())
     override val mealPlans = _mealPlans.asStateFlow()
     override val favoriteRecipeIds = _favoriteRecipeIds.asStateFlow()
     override val shoppingItems = _shoppingItems.asStateFlow()
@@ -182,13 +177,8 @@ class FirestoreSpoonRepository internal constructor(
                     _mealPlans,
                     _favoriteRecipeIds,
                     _cookedHistory,
-                ) { plans, favoriteIds, history ->
-                    buildSet {
-                        plans.mapTo(this, DayMealPlan::recipeId)
-                        addAll(favoriteIds)
-                        history.mapTo(this, CookedMeal::recipeId)
-                    }.filter(::isSafeRecipeDocumentId).take(MAX_REFERENCED_RECIPES).toSet()
-                }.distinctUntilChanged().collect { referencedIds ->
+                    ::boundedReferencedRecipeIds,
+                ).distinctUntilChanged().collect { referencedIds ->
                     _referencedCatalogRecipes.value = recipeCatalog.getRecipesByIds(referencedIds)
                 }
             } catch (error: CancellationException) {
@@ -264,65 +254,42 @@ class FirestoreSpoonRepository internal constructor(
 
     override suspend fun getRecipeDetails(recipeId: String): Recipe? {
         val safeRecipeId = requireSafeRecipeDocumentId(recipeId)
-        if (safeRecipeId.isCustomRecipeId()) {
-            ensureReady()
-            val cached = _customRecipes.value.firstOrNull { it.id == safeRecipeId }
-            return cached?.takeIf(CustomRecipe::active)?.toRecipe()
-        }
-
-        val recipe = recipeCatalog.getRecipe(safeRecipeId)
-        return eligibleRecipeDetails(recipe, safeRecipeId, safeRecipeId)
+        // Custom recipes live in the owner cache, which must be warm before it is consulted.
+        if (safeRecipeId.isCustomRecipeId()) ensureReady()
+        return recipeCatalog.getRecipeDetailsIncludingCustom(safeRecipeId, _customRecipes.value)
     }
 
-    override suspend fun getRecipesByIds(recipeIds: Set<String>): List<Recipe> {
-        if (recipeIds.isEmpty()) return emptyList()
-        val customById = _customRecipes.value.asSequence()
-            .filter(CustomRecipe::active)
-            .map(CustomRecipe::toRecipe)
-            .filter { it.id in recipeIds }
-            .associateBy(Recipe::id)
-        val public = recipeCatalog.getRecipesByIds(recipeIds - customById.keys)
-        val all = public.associateBy(Recipe::id) + customById
-        return recipeIds.mapNotNull(all::get)
-    }
+    override suspend fun getRecipesByIds(recipeIds: Set<String>): List<Recipe> =
+        recipeCatalog.getRecipesByIdsIncludingCustom(recipeIds, _customRecipes.value)
 
     override suspend fun queryRecipes(
         criteria: ExploreCriteria,
         limit: Int,
         offset: Int,
-    ): RecipePage {
-        requirePageBounds(limit, offset)
-        val customMatches = ExploreRecipeFilter.filter(
-            _customRecipes.value.filter(CustomRecipe::active).map(CustomRecipe::toRecipe),
-            criteria,
-        )
-        val customPage = customMatches.drop(offset).take(limit)
-        val publicOffset = (offset - customMatches.size).coerceAtLeast(0)
-        val remaining = limit - customPage.size
-        val publicPage = recipeCatalog.queryRecipes(criteria, limit, publicOffset)
-        return RecipePage(
-            recipes = customPage + publicPage.recipes.take(remaining),
-            totalCount = customMatches.size + publicPage.totalCount,
-            offset = offset,
-            limit = limit,
-        )
-    }
-
-    override suspend fun getCatalogFacetOptions(): CatalogFacetOptions = mergeFacetOptions(
-        recipeCatalog.getFacetOptions(),
-        facetOptionsFrom(_customRecipes.value.filter(CustomRecipe::active).map(CustomRecipe::toRecipe)),
+        preferences: MealPreferenceSettings,
+    ): RecipePage = recipeCatalog.queryIncludingCustomRecipes(
+        _customRecipes.value,
+        criteria,
+        limit,
+        offset,
+        preferences,
     )
+
+    override suspend fun getCatalogFacetOptions(): CatalogFacetOptions =
+        recipeCatalog.facetOptionsIncludingCustom(_customRecipes.value)
 
     override suspend fun selectRandomRecipe(
         filters: RecipeFilters,
         excludingRecipeId: String?,
         randomSeed: Long,
+        preferences: MealPreferenceSettings,
     ): Recipe? = selectIncludingCustomRecipes(
         recipeCatalog = recipeCatalog,
         customRecipes = _customRecipes.value,
         filters = filters,
         excludingRecipeId = excludingRecipeId,
         randomSeed = randomSeed,
+        preferences = preferences,
     )
 
     override suspend fun upsertMealPlan(plan: DayMealPlan) {
@@ -675,16 +642,7 @@ class FirestoreSpoonRepository internal constructor(
         val readiness = try {
             withTimeout(PERSONAL_CACHE_WARMUP_TIMEOUT_MILLIS) {
                 combine(
-                    combine(
-                        listOf(
-                            mealPlansHealth,
-                            favoritesHealth,
-                            shoppingHealth,
-                            notesHealth,
-                            customRecipesHealth,
-                            cookedHistoryHealth,
-                        ),
-                    ) { states -> states.toList() },
+                    combine(ownerHealth) { states -> states.toList() },
                     ownerBootstrapComplete,
                     establishedCachedPersonalData,
                 ) { states, bootstrapComplete, establishedCache ->
@@ -756,11 +714,10 @@ class FirestoreSpoonRepository internal constructor(
     ) {
         scope.launch {
             uid.flatMapLatest { currentUid ->
+                health.value = CloudComponentState.Pending
                 if (currentUid == null) {
-                    health.value = CloudComponentState.Pending
                     flowOf<Pair<String?, ObservedObjects<T>?>>(currentUid to null)
                 } else {
-                    health.value = CloudComponentState.Pending
                     resilientObjectsFlow(
                         ownerUid = currentUid,
                         health = health,
@@ -935,12 +892,7 @@ class FirestoreSpoonRepository internal constructor(
     }
 
     private fun markOwnerComponentsPending() {
-        mealPlansHealth.value = CloudComponentState.Pending
-        favoritesHealth.value = CloudComponentState.Pending
-        shoppingHealth.value = CloudComponentState.Pending
-        notesHealth.value = CloudComponentState.Pending
-        customRecipesHealth.value = CloudComponentState.Pending
-        cookedHistoryHealth.value = CloudComponentState.Pending
+        ownerHealth.forEach { it.value = CloudComponentState.Pending }
     }
 
     private suspend fun runAccountOperation(operation: suspend () -> Unit) {
@@ -967,23 +919,15 @@ class FirestoreSpoonRepository internal constructor(
         }
     }
 
-    private fun mealPlans(uid: String) =
-        firestore.collection(USER_ROOT_COLLECTION).document(uid).collection(MEAL_PLANS_COLLECTION)
+    private fun ownerCollection(uid: String, name: String) =
+        firestore.collection(USER_ROOT_COLLECTION).document(uid).collection(name)
 
-    private fun favorites(uid: String) =
-        firestore.collection(USER_ROOT_COLLECTION).document(uid).collection(FAVORITES_COLLECTION)
-
-    private fun shoppingItems(uid: String) =
-        firestore.collection(USER_ROOT_COLLECTION).document(uid).collection(SHOPPING_ITEMS_COLLECTION)
-
-    private fun recipeNotes(uid: String) =
-        firestore.collection(USER_ROOT_COLLECTION).document(uid).collection(RECIPE_NOTES_COLLECTION)
-
-    private fun customRecipeDocuments(uid: String) =
-        firestore.collection(USER_ROOT_COLLECTION).document(uid).collection(CUSTOM_RECIPES_COLLECTION)
-
-    private fun cookedHistoryDocuments(uid: String) =
-        firestore.collection(USER_ROOT_COLLECTION).document(uid).collection(COOKED_HISTORY_COLLECTION)
+    private fun mealPlans(uid: String) = ownerCollection(uid, MEAL_PLANS_COLLECTION)
+    private fun favorites(uid: String) = ownerCollection(uid, FAVORITES_COLLECTION)
+    private fun shoppingItems(uid: String) = ownerCollection(uid, SHOPPING_ITEMS_COLLECTION)
+    private fun recipeNotes(uid: String) = ownerCollection(uid, RECIPE_NOTES_COLLECTION)
+    private fun customRecipeDocuments(uid: String) = ownerCollection(uid, CUSTOM_RECIPES_COLLECTION)
+    private fun cookedHistoryDocuments(uid: String) = ownerCollection(uid, COOKED_HISTORY_COLLECTION)
 
     companion object {
         const val USER_ROOT_COLLECTION = "spoon"
@@ -1000,7 +944,6 @@ class FirestoreSpoonRepository internal constructor(
         private const val FIRESTORE_BATCH_LIMIT = 450
         private const val AUTH_ATTEMPT_TIMEOUT_MILLIS = 20_000L
         private const val PERSONAL_CACHE_WARMUP_TIMEOUT_MILLIS = 15_000L
-        private const val MAX_REFERENCED_RECIPES = 1_024
         private const val MEAL_PLANS_COMPONENT = "mealPlans"
         private const val FAVORITES_COMPONENT = "favorites"
         private const val SHOPPING_COMPONENT = "shopping"

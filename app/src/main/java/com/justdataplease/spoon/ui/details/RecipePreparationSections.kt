@@ -129,14 +129,10 @@ private fun IngredientRow(
     }
 }
 
-internal fun RecipeIngredient.primaryLabel(): String = buildList {
-    listOf(quantity.trim(), unit.trim())
-        .filter(String::isNotBlank)
-        .joinToString(" ")
-        .takeIf(String::isNotBlank)
-        ?.let(::add)
-    title.trim().takeIf(String::isNotBlank)?.let(::add)
-}.joinToString("  ")
+internal fun RecipeIngredient.primaryLabel(): String = listOf(
+    listOf(quantity.trim(), unit.trim()).filter(String::isNotBlank).joinToString(" "),
+    title.trim(),
+).filter(String::isNotBlank).joinToString("  ")
 
 internal fun RecipeDetailUi.shoppingIngredientDrafts(): List<ShoppingIngredientDraftUi> =
     ingredientSections.flatMap { section ->

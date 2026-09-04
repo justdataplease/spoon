@@ -8,6 +8,7 @@ import androidx.core.content.pm.PackageInfoCompat
 import com.justdataplease.spoon.data.model.MealCategory
 import com.justdataplease.spoon.data.model.Recipe
 import com.justdataplease.spoon.data.model.RecipeFilters
+import com.justdataplease.spoon.data.preferences.MealPreferenceSettings
 import com.justdataplease.spoon.data.requireSafeRecipeDocumentId
 import com.justdataplease.spoon.domain.ExploreCriteria
 import com.justdataplease.spoon.domain.repository.CatalogFacetOptions
@@ -85,9 +86,8 @@ class BundledRecipeCatalog(
             val missing = safeIds - found.keys
             val decodedRecipes = mutableListOf<Recipe>()
             missing.chunked(SQLITE_MAX_BOUND_IDS).forEach { chunk ->
-                val placeholders = List(chunk.size) { "?" }.joinToString(",")
                 database().rawQuery(
-                    "SELECT id, recipe_json FROM recipes WHERE id IN ($placeholders)",
+                    "SELECT id, recipe_json FROM recipes WHERE id IN (${placeholders(chunk.size)})",
                     chunk.toTypedArray(),
                 ).use { cursor ->
                     while (cursor.moveToNext()) {
@@ -106,17 +106,12 @@ class BundledRecipeCatalog(
         criteria: ExploreCriteria,
         limit: Int,
         offset: Int,
+        preferences: MealPreferenceSettings,
     ): RecipePage = withContext(ioDispatcher) {
         requirePageBounds(limit, offset)
         if (!criteria.isValid()) return@withContext RecipePage(emptyList(), 0, offset, limit)
-        val selection = CatalogSqlBuilder.forExplore(criteria)
-        val totalCount = database().rawQuery(
-            "SELECT COUNT(*) FROM recipes r ${selection.whereSql}",
-            selection.arguments.toTypedArray(),
-        ).use { cursor ->
-            check(cursor.moveToFirst())
-            cursor.getInt(0)
-        }
+        val selection = CatalogSqlBuilder.forExplore(criteria, preferences)
+        val totalCount = countMatches(selection)
         if (offset >= totalCount) {
             return@withContext RecipePage(emptyList(), totalCount, offset, limit)
         }
@@ -181,13 +176,11 @@ class BundledRecipeCatalog(
         filters: RecipeFilters,
         excludingRecipeId: String?,
         randomSeed: Long,
+        preferences: MealPreferenceSettings,
     ): Recipe? = withContext(ioDispatcher) {
         if (!filters.isValid()) return@withContext null
-        val safeExcludedId = excludingRecipeId
-            ?.takeIf(String::isNotBlank)
-            ?.let(::requireSafeRecipeDocumentId)
-        val selection = CatalogSqlBuilder.forPlanner(filters, safeExcludedId)
-        val candidateCount = countPlannerMatches(filters, safeExcludedId)
+        val selection = plannerSelection(filters, excludingRecipeId, preferences)
+        val candidateCount = countMatches(selection)
         if (candidateCount == 0) return@withContext null
         selectAtOffset(
             selection = selection,
@@ -198,20 +191,27 @@ class BundledRecipeCatalog(
     override suspend fun countPlannerMatches(
         filters: RecipeFilters,
         excludingRecipeId: String?,
+        preferences: MealPreferenceSettings,
     ): Int = withContext(ioDispatcher) {
         if (!filters.isValid()) return@withContext 0
-        val safeExcludedId = excludingRecipeId
-            ?.takeIf(String::isNotBlank)
-            ?.let(::requireSafeRecipeDocumentId)
-        val selection = CatalogSqlBuilder.forPlanner(filters, safeExcludedId)
-        database().rawQuery(
-            "SELECT COUNT(*) FROM recipes r ${selection.whereSql}",
-            selection.arguments.toTypedArray(),
-        ).use { cursor ->
-            check(cursor.moveToFirst())
-            cursor.getInt(0)
-        }
+        countMatches(plannerSelection(filters, excludingRecipeId, preferences))
     }
+
+    private fun plannerSelection(
+        filters: RecipeFilters,
+        excludingRecipeId: String?,
+        preferences: MealPreferenceSettings,
+    ): CatalogSql =
+        CatalogSqlBuilder.forPlanner(
+            filters,
+            excludingRecipeId?.takeIf(String::isNotBlank)?.let(::requireSafeRecipeDocumentId),
+            preferences,
+        )
+
+    private fun countMatches(selection: CatalogSql): Int = database().rawQuery(
+        "SELECT COUNT(*) FROM recipes r ${selection.whereSql}",
+        selection.arguments.toTypedArray(),
+    ).singleInt()
 
     /** Selects one exact uniform index from every matching recipe, independent of provider. */
     private fun selectAtOffset(selection: CatalogSql, offset: Int): Recipe? =
@@ -320,6 +320,7 @@ class BundledRecipeCatalog(
             check(!database.metaValue(META_CATALOG_VERSION).isNullOrBlank())
             check(!database.metaValue(META_SOURCE_COUNTS).isNullOrBlank())
             check(!database.metaValue(META_FACET_OPTIONS).isNullOrBlank())
+            check(database.metaValue(META_INGREDIENT_TEXT_INDEX) == INGREDIENT_TEXT_INDEX_VERSION)
             val expectedCount = database.metaValue(META_CATALOG_COUNT)?.toIntOrNull()
             check(expectedCount != null && expectedCount > 0) { "Invalid catalog count" }
             val actualCount = database.rawQuery("SELECT COUNT(*) FROM recipes", null).singleInt()
@@ -334,6 +335,10 @@ class BundledRecipeCatalog(
             ).use { }
             database.rawQuery(
                 "SELECT facet_type, token, recipe_id FROM recipe_facets LIMIT 0",
+                null,
+            ).use { }
+            database.rawQuery(
+                "SELECT recipe_id, normalized_text FROM recipe_ingredient_texts LIMIT 0",
                 null,
             ).use { }
         }
@@ -360,7 +365,7 @@ class BundledRecipeCatalog(
         private const val INSTALL_PREFERENCES = "spoon_catalog_install"
         private const val INSTALL_STAMP_KEY = "apk_install_stamp_v1"
         private const val EXPECTED_APPLICATION_ID = 0x53504F4E
-        private const val EXPECTED_SCHEMA_VERSION = 1
+        private const val EXPECTED_SCHEMA_VERSION = 2
         private const val CACHE_LIMIT = 256
         private const val SQLITE_MAX_BOUND_IDS = 800
         private const val META_SCHEMA_VERSION = "schema_version"
@@ -370,7 +375,10 @@ class BundledRecipeCatalog(
         private const val META_JSON_COMPRESSION = "json_compression"
         private const val META_SOURCE_COUNTS = "source_counts"
         private const val META_FACET_OPTIONS = "facet_options_json"
+        private const val META_INGREDIENT_TEXT_INDEX = "ingredient_text_index"
         private const val JSON_COMPRESSION_ZLIB = "zlib"
+        private const val INGREDIENT_TEXT_INDEX_VERSION =
+            "recipe_ingredient_texts-title-info-instr-v1"
         private const val FACET_DIET = "diet"
         private const val FACET_MEAL = "meal"
         private const val FACET_OCCASION = "occasion"
@@ -396,13 +404,15 @@ internal data class CatalogSql(
         get() = predicates.takeIf(List<String>::isNotEmpty)
             ?.joinToString(prefix = "WHERE ", separator = " AND ")
             .orEmpty()
-
-    fun and(predicate: String): String =
-        (predicates + predicate).joinToString(prefix = "WHERE ", separator = " AND ")
 }
 
+private fun placeholders(count: Int): String = List(count) { "?" }.joinToString(",")
+
 internal object CatalogSqlBuilder {
-    fun forExplore(criteria: ExploreCriteria): CatalogSql {
+    fun forExplore(
+        criteria: ExploreCriteria,
+        preferences: MealPreferenceSettings = MealPreferenceSettings(),
+    ): CatalogSql {
         val predicates = mutableListOf<String>()
         val arguments = mutableListOf<String>()
         criteria.category.normalizedCatalogToken()
@@ -439,10 +449,15 @@ internal object CatalogSqlBuilder {
         addFacetPredicate(predicates, arguments, FACET_METHOD, criteria.methodLabels)
         addFacetPredicate(predicates, arguments, FACET_CUISINE, criteria.cuisineLabels)
         addFacetPredicate(predicates, arguments, FACET_INGREDIENT, criteria.ingredientLabels)
+        addPreferencePredicates(predicates, arguments, preferences)
         return CatalogSql(predicates, arguments)
     }
 
-    fun forPlanner(filters: RecipeFilters, excludingRecipeId: String?): CatalogSql {
+    fun forPlanner(
+        filters: RecipeFilters,
+        excludingRecipeId: String?,
+        preferences: MealPreferenceSettings = MealPreferenceSettings(),
+    ): CatalogSql {
         val predicates = mutableListOf<String>()
         val arguments = mutableListOf<String>()
         if (filters.category != MealCategory.ANY.key) {
@@ -466,7 +481,52 @@ internal object CatalogSqlBuilder {
             predicates += "r.id != ?"
             arguments += it
         }
+        addPreferencePredicates(predicates, arguments, preferences)
         return CatalogSql(predicates, arguments)
+    }
+
+    private fun addPreferencePredicates(
+        predicates: MutableList<String>,
+        arguments: MutableList<String>,
+        preferences: MealPreferenceSettings,
+    ) {
+        val excludedCategories = preferences.excludedCategories.normalizedTokens()
+        if (excludedCategories.isNotEmpty()) {
+            predicates += "r.category NOT IN (${placeholders(excludedCategories.size)})"
+            arguments += excludedCategories
+        }
+        if (preferences.veganOnly) {
+            predicates += """
+                EXISTS (
+                    SELECT 1 FROM recipe_facets vegan
+                    WHERE vegan.recipe_id = r.id
+                      AND vegan.facet_type = ?
+                      AND instr(vegan.token, ?) > 0
+                )
+            """.trimIndent()
+            arguments += FACET_DIET
+            arguments += VEGAN_TOKEN
+        }
+        preferences.excludedIngredientTerms.normalizedTokens().forEach { term ->
+            predicates += """
+                NOT EXISTS (
+                    SELECT 1 FROM recipe_ingredient_texts ingredient
+                    WHERE ingredient.recipe_id = r.id
+                      AND instr(ingredient.normalized_text, ?) > 0
+                )
+            """.trimIndent()
+            arguments += term
+            predicates += """
+                NOT EXISTS (
+                    SELECT 1 FROM recipe_facets ingredient_facet
+                    WHERE ingredient_facet.recipe_id = r.id
+                      AND ingredient_facet.facet_type = ?
+                      AND instr(ingredient_facet.token, ?) > 0
+                )
+            """.trimIndent()
+            arguments += FACET_INGREDIENT
+            arguments += term
+        }
     }
 
     private fun addInPredicate(
@@ -475,9 +535,9 @@ internal object CatalogSqlBuilder {
         column: String,
         rawValues: Set<String>,
     ) {
-        val values = rawValues.map(String::normalizedCatalogToken).filter(String::isNotBlank).distinct()
+        val values = rawValues.normalizedTokens()
         if (values.isEmpty()) return
-        predicates += "$column IN (${List(values.size) { "?" }.joinToString(",")})"
+        predicates += "$column IN (${placeholders(values.size)})"
         arguments += values
     }
 
@@ -487,19 +547,22 @@ internal object CatalogSqlBuilder {
         facetType: String,
         rawValues: Set<String>,
     ) {
-        val values = rawValues.map(String::normalizedCatalogToken).filter(String::isNotBlank).distinct()
+        val values = rawValues.normalizedTokens()
         if (values.isEmpty()) return
         predicates += """
             EXISTS (
                 SELECT 1 FROM recipe_facets f
                 WHERE f.recipe_id = r.id
                   AND f.facet_type = ?
-                  AND f.token IN (${List(values.size) { "?" }.joinToString(",")})
+                  AND f.token IN (${placeholders(values.size)})
             )
         """.trimIndent()
         arguments += facetType
         arguments += values
     }
+
+    private fun Set<String>.normalizedTokens(): List<String> =
+        map(String::normalizedCatalogToken).filter(String::isNotBlank).distinct()
 
     private const val FACET_DIET = "diet"
     private const val FACET_MEAL = "meal"
@@ -507,4 +570,5 @@ internal object CatalogSqlBuilder {
     private const val FACET_METHOD = "method"
     private const val FACET_CUISINE = "cuisine"
     private const val FACET_INGREDIENT = "ingredient"
+    private const val VEGAN_TOKEN = "vegan"
 }

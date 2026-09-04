@@ -17,22 +17,24 @@ internal fun eligibleRemoteRecipes(remoteRecipes: List<Recipe>): List<Recipe> =
  */
 internal fun Recipe.withCurrentAkisPlannerCategory(): Recipe {
     if (effectiveSourceKey != "akis") return this
-    val hasStreetFoodFacet = mealTypeLabels.any { label ->
-        label.trim().equals("Σάντουιτς", ignoreCase = true) ||
-            label.trim().equals("Finger food", ignoreCase = true)
-    }
     if (category == "dessert" || category == "other") return this
+    val hasStreetFoodFacet = mealTypeLabels.any { label ->
+        val trimmed = label.trim()
+        trimmed.equals("Σάντουιτς", ignoreCase = true) ||
+            trimmed.equals("Finger food", ignoreCase = true)
+    }
     if (hasStreetFoodFacet) {
         val previousCategoryLabel = categoryLabel.trim()
         val secondaryTags = tags.filterNot { tag ->
-            tag.trim().equals("Βρώμικο", ignoreCase = true) ||
+            val trimmed = tag.trim()
+            trimmed.equals("Βρώμικο", ignoreCase = true) ||
                 previousCategoryLabel.isNotEmpty() &&
-                tag.trim().equals(previousCategoryLabel, ignoreCase = true)
+                trimmed.equals(previousCategoryLabel, ignoreCase = true)
         }
         return copy(
             category = "street_food",
             categoryLabel = "Βρώμικο",
-            tags = listOf("Βρώμικο", *secondaryTags.toTypedArray()),
+            tags = listOf("Βρώμικο") + secondaryTags,
         )
     }
     if (category != "street_food") return this

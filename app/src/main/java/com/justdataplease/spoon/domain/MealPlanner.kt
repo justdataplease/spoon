@@ -3,25 +3,24 @@ package com.justdataplease.spoon.domain
 import com.justdataplease.spoon.data.model.CookedMeal
 import com.justdataplease.spoon.data.model.CustomRecipe
 import com.justdataplease.spoon.data.model.DayMealPlan
+import com.justdataplease.spoon.data.model.MealCategory
 import com.justdataplease.spoon.data.model.Recipe
 import com.justdataplease.spoon.data.model.RecipeFilters
 import com.justdataplease.spoon.data.model.RecipeNote
 import com.justdataplease.spoon.data.model.ShoppingListItem
 import com.justdataplease.spoon.data.model.newCustomRecipeId
+import com.justdataplease.spoon.data.preferences.MealPreferenceSettings
+import com.justdataplease.spoon.data.preferences.MealPreferenceSettingsStore
 import com.justdataplease.spoon.data.isSafeRecipeDocumentId
 import com.justdataplease.spoon.domain.repository.AccountState
 import com.justdataplease.spoon.domain.repository.CatalogFacetOptions
 import com.justdataplease.spoon.domain.repository.RecipePage
 import com.justdataplease.spoon.domain.repository.SpoonRepository
 import java.time.LocalDate
-import java.util.UUID
 import javax.inject.Inject
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.flowOn
-import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.flowOf
 import kotlin.random.Random
 
 sealed interface MealPlanSelection {
@@ -57,6 +56,7 @@ sealed interface FavoriteReplacementResult {
 class MealPlanner @Inject constructor(
     private val repository: SpoonRepository,
     private val selector: RecipeSelector,
+    private val preferenceStore: MealPreferenceSettingsStore? = null,
 ) {
     val backendState = repository.backendState
     val accountState: Flow<AccountState> = repository.accountState
@@ -67,32 +67,33 @@ class MealPlanner @Inject constructor(
     val recipeNotes: Flow<List<RecipeNote>> = repository.recipeNotes
     val customRecipes: Flow<List<CustomRecipe>> = repository.customRecipes
     val cookedHistory: Flow<List<CookedMeal>> = repository.cookedHistory
+    val mealPreferenceSettings: Flow<MealPreferenceSettings> =
+        preferenceStore?.settings ?: flowOf(MealPreferenceSettings())
 
     suspend fun getRecipeDetails(recipeId: String): Recipe? =
         repository.getRecipeDetails(recipeId)
-
-    suspend fun getRecipesByIds(recipeIds: Set<String>): List<Recipe> =
-        repository.getRecipesByIds(recipeIds)
 
     suspend fun queryRecipes(
         criteria: ExploreCriteria = ExploreCriteria(),
         limit: Int = 24,
         offset: Int = 0,
-    ): RecipePage = repository.queryRecipes(criteria, limit, offset)
+    ): RecipePage = repository.queryRecipes(
+        criteria,
+        limit,
+        offset,
+        mealPreferenceSettings.first(),
+    )
+
+    suspend fun saveMealPreferenceSettings(settings: MealPreferenceSettings) {
+        preferenceStore?.update { settings }
+    }
+
+    suspend fun clearMealPreferenceSettings() {
+        preferenceStore?.clear()
+    }
 
     suspend fun getCatalogFacetOptions(): CatalogFacetOptions =
         repository.getCatalogFacetOptions()
-
-    fun observeWeek(containingDate: LocalDate): Flow<List<DayMealPlan>> {
-        val dates = WeeklyPlanDefaults.dates(containingDate).map(LocalDate::toString).toSet()
-        return mealPlans.map { plans ->
-            plans.filter { it.date in dates }.sortedBy(DayMealPlan::date)
-        }
-    }
-
-    fun observeFavorites(): Flow<List<Recipe>> = favoriteRecipeIds
-        .map(repository::getRecipesByIds)
-        .flowOn(Dispatchers.IO)
 
     suspend fun ensureWeek(
         containingDate: LocalDate = LocalDate.now(),
@@ -101,14 +102,12 @@ class MealPlanner @Inject constructor(
         repository.ensureReady()
         val existing = repository.mealPlans.first().associateBy(DayMealPlan::date)
         val recipesById = repository.getRecipesByIds(
-            existing.values.mapTo(mutableSetOf(), DayMealPlan::recipeId)
-                .filter(String::isNotBlank)
-                .toSet(),
+            existing.values.mapNotNullTo(mutableSetOf()) { it.recipeId.takeIf(String::isNotBlank) },
         ).associateBy(Recipe::id)
 
         return WeeklyPlanDefaults.dates(containingDate).map { date ->
             val current = existing[date.toString()]
-            if (current != null && current.isUsable(recipesById, selector)) {
+            if (current != null && current.isUsable(recipesById)) {
                 current
             } else {
                 val replacement = createDay(
@@ -136,24 +135,31 @@ class MealPlanner @Inject constructor(
         val existing = repository.mealPlans.first().firstOrNull { it.date == date.toString() }
         val requestedFilters = filters ?: existing?.filters ?: WeeklyPlanDefaults.filtersFor(date)
         val excludedId = existing?.recipeId.orEmpty()
-        val selected = repository.selectRandomRecipe(
+        val preferences = mealPreferenceSettings.first()
+        var effectiveFilters = requestedFilters
+        var selected = repository.selectRandomRecipe(
             filters = requestedFilters,
             excludingRecipeId = excludedId.ifBlank { null },
             randomSeed = random.nextLong(),
-        ) ?: return MealPlanSelection.NoMatch(date, requestedFilters, excludedId)
-
-        val plan = DayMealPlan(
-            id = date.toString(),
-            date = date.toString(),
-            category = requestedFilters.category,
-            recipeId = selected.id,
-            recipeTitle = selected.title,
-            filters = requestedFilters,
-            // A different proposal has not been cooked yet. Persisting the previous
-            // completion here would also create a false cooked-history entry.
-            completed = false,
-            updatedAtEpochMillis = System.currentTimeMillis(),
+            preferences = preferences,
         )
+        if (
+            selected == null &&
+            filters == null &&
+            preferences != MealPreferenceSettings() &&
+            requestedFilters.category != MealCategory.ANY.key
+        ) {
+            effectiveFilters = requestedFilters.copy(category = MealCategory.ANY.key)
+            selected = repository.selectRandomRecipe(
+                filters = effectiveFilters,
+                excludingRecipeId = excludedId.ifBlank { null },
+                randomSeed = random.nextLong(),
+                preferences = preferences,
+            )
+        }
+        selected ?: return MealPlanSelection.NoMatch(date, effectiveFilters, excludedId)
+
+        val plan = newPlan(date, effectiveFilters, selected)
         repository.upsertMealPlan(plan)
         return MealPlanSelection.Selected(plan, selected)
     }
@@ -179,32 +185,6 @@ class MealPlanner @Inject constructor(
         return repository.toggleFavorite(recipeId)
     }
 
-    /** Adds every non-blank ingredient from the opened rich recipe as an independent item. */
-    suspend fun addRecipeIngredientsToShoppingList(recipe: Recipe): Int {
-        repository.ensureReady()
-        val now = System.currentTimeMillis()
-        val items = recipe.ingredientSections.flatMap { section ->
-            section.ingredients.mapNotNull { ingredient ->
-                val name = ingredient.title.trim().takeIf(String::isNotEmpty) ?: return@mapNotNull null
-                ShoppingListItem(
-                    id = "shopping_${UUID.randomUUID()}",
-                    name = name.take(200),
-                    quantity = ingredient.quantity.take(100),
-                    unit = ingredient.unit.take(100),
-                    info = ingredient.info.take(500),
-                    recipeId = recipe.id,
-                    recipeTitle = recipe.title.take(300),
-                    sectionTitle = section.title.take(200),
-                    checked = false,
-                    createdAtEpochMillis = now,
-                    updatedAtEpochMillis = now,
-                )
-            }
-        }
-        repository.upsertShoppingItems(items)
-        return items.size
-    }
-
     suspend fun upsertShoppingItems(items: List<ShoppingListItem>) {
         repository.ensureReady()
         repository.upsertShoppingItems(items)
@@ -224,9 +204,6 @@ class MealPlanner @Inject constructor(
         repository.ensureReady()
         repository.clearCheckedShoppingItems()
     }
-
-    fun observeRecipeNote(recipeId: String): Flow<RecipeNote?> =
-        recipeNotes.map { notes -> notes.firstOrNull { it.recipeId == recipeId } }
 
     suspend fun saveRecipeNote(recipeId: String, text: String) {
         repository.ensureReady()
@@ -256,11 +233,6 @@ class MealPlanner @Inject constructor(
         )
         repository.upsertCustomRecipe(stored)
         return stored
-    }
-
-    suspend fun deleteCustomRecipe(recipeId: String) {
-        repository.ensureReady()
-        repository.deleteCustomRecipe(recipeId)
     }
 
     suspend fun registerEmailAccount(email: String, password: String) {
@@ -303,17 +275,7 @@ class MealPlanner @Inject constructor(
                     ?.takeIf(String::isNotBlank)
                 ?: WeeklyPlanDefaults.filtersFor(date).category
         }
-        val filters = RecipeFilters(category = category)
-        val plan = DayMealPlan(
-            id = date.toString(),
-            date = date.toString(),
-            category = category,
-            recipeId = recipe.id,
-            recipeTitle = recipe.title,
-            filters = filters,
-            completed = false,
-            updatedAtEpochMillis = System.currentTimeMillis(),
-        )
+        val plan = newPlan(date, RecipeFilters(category = category), recipe)
         repository.upsertMealPlan(plan)
         return FavoriteReplacementResult.Selected(plan, recipe)
     }
@@ -326,28 +288,43 @@ class MealPlanner @Inject constructor(
         val filters = previous?.filters
             ?.takeIf(RecipeFilters::isValid)
             ?: WeeklyPlanDefaults.filtersFor(date)
-        val recipe = repository.selectRandomRecipe(
+        val preferences = mealPreferenceSettings.first()
+        var effectiveFilters = filters
+        var recipe = repository.selectRandomRecipe(
             filters = filters,
             randomSeed = random.nextLong(),
+            preferences = preferences,
         )
-        return DayMealPlan(
+        if (
+            recipe == null &&
+            preferences != MealPreferenceSettings() &&
+            filters.category != MealCategory.ANY.key
+        ) {
+            effectiveFilters = filters.copy(category = MealCategory.ANY.key)
+            recipe = repository.selectRandomRecipe(
+                filters = effectiveFilters,
+                randomSeed = random.nextLong(),
+                preferences = preferences,
+            )
+        }
+        return newPlan(date, effectiveFilters, recipe)
+    }
+
+    private fun newPlan(date: LocalDate, filters: RecipeFilters, recipe: Recipe?): DayMealPlan =
+        DayMealPlan(
             id = date.toString(),
             date = date.toString(),
             category = filters.category,
             recipeId = recipe?.id.orEmpty(),
             recipeTitle = recipe?.title.orEmpty(),
             filters = filters,
-            // createDay is only used when the previous proposal is missing/unusable.
-            // A newly selected recipe must never inherit another recipe's completion.
+            // A fresh proposal has not been cooked yet. Inheriting a previous completion
+            // would also create a false cooked-history entry.
             completed = false,
             updatedAtEpochMillis = System.currentTimeMillis(),
         )
-    }
 
-    private fun DayMealPlan.isUsable(
-        recipesById: Map<String, Recipe>,
-        selector: RecipeSelector,
-    ): Boolean {
+    private fun DayMealPlan.isUsable(recipesById: Map<String, Recipe>): Boolean {
         val structurallyValid = date.isNotBlank() &&
             isSafeRecipeDocumentId(recipeId) &&
             recipeTitle.isNotBlank()
