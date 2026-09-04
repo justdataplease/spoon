@@ -8,6 +8,7 @@ import com.justdataplease.spoon.data.local.BundledRecipeCatalog
 import com.justdataplease.spoon.data.local.LocalSpoonRepository
 import com.justdataplease.spoon.data.local.RecipeCatalog
 import com.justdataplease.spoon.data.remote.FirestoreSpoonRepository
+import com.justdataplease.spoon.data.remote.NoBackupMealPlanOutbox
 import com.justdataplease.spoon.data.remote.NoBackupOwnerBootstrapStore
 import com.justdataplease.spoon.data.remote.configurePersistentPersonalCache
 import com.justdataplease.spoon.data.preferences.MealPreferenceSettingsStore
@@ -50,6 +51,7 @@ object RepositoryModule {
                 auth = FirebaseAuth.getInstance(firebaseApp),
                 firestore = firestore,
                 recipeCatalog = recipeCatalog,
+                mealPlanOutbox = NoBackupMealPlanOutbox(context, json),
                 ownerBootstrapStore = NoBackupOwnerBootstrapStore(context),
                 preferenceStore = preferenceStore,
             )

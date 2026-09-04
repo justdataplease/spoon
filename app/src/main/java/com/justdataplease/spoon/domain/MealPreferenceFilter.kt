@@ -1,5 +1,6 @@
 package com.justdataplease.spoon.domain
 
+import com.justdataplease.spoon.data.expandedIngredientAliasTokens
 import com.justdataplease.spoon.data.local.normalizedCatalogToken
 import com.justdataplease.spoon.data.model.Recipe
 import com.justdataplease.spoon.data.preferences.MealPreferenceSettings
@@ -14,9 +15,10 @@ internal fun Recipe.matchesMealPreferences(settings: MealPreferenceSettings): Bo
 
     if (settings.veganOnly && !isStrictlyVegan()) return false
 
-    val excludedIngredients = settings.excludedIngredientTerms
-        .map(String::normalizedCatalogToken)
-        .filter(String::isNotBlank)
+    val excludedIngredients = settings.excludedIngredientTerms.asSequence()
+        .flatMap { ingredient -> expandedIngredientAliasTokens(ingredient).asSequence() }
+        .distinct()
+        .toList()
     if (excludedIngredients.isEmpty()) return true
 
     val ingredientTexts = sequence {

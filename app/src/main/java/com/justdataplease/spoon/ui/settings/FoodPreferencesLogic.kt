@@ -1,5 +1,8 @@
 package com.justdataplease.spoon.ui.settings
 
+import com.justdataplease.spoon.data.canonicalIngredientDisplayLabel
+import com.justdataplease.spoon.data.canonicalIngredientIdentity
+import com.justdataplease.spoon.data.expandedIngredientAliasTokens
 import com.justdataplease.spoon.data.local.normalizedCatalogToken
 import com.justdataplease.spoon.data.model.MealCategory
 
@@ -75,11 +78,12 @@ internal fun canonicalIngredientOption(
     ingredientOptions: Collection<String>,
     candidate: String,
 ): String? {
-    val candidateKey = candidate.normalizedCatalogToken()
-    if (candidateKey.isBlank()) return null
-    return ingredientOptions.firstOrNull { option ->
-        option.normalizedCatalogToken() == candidateKey
-    }?.trim()
+    val candidateIdentity = canonicalIngredientIdentity(candidate)
+    if (candidateIdentity.isBlank()) return null
+    val matchingOption = ingredientOptions.firstOrNull { option ->
+        canonicalIngredientIdentity(option) == candidateIdentity
+    } ?: return null
+    return canonicalIngredientDisplayLabel(matchingOption)
 }
 
 /**
@@ -94,22 +98,33 @@ internal fun ingredientSuggestions(
 ): List<String> {
     if (limit <= 0) return emptyList()
     val queryKey = query.normalizedCatalogToken()
-    val excludedKeys = excludedIngredients
-        .map(String::normalizedCatalogToken)
+    val excludedIdentities = excludedIngredients
+        .map(::canonicalIngredientIdentity)
         .filter(String::isNotBlank)
         .toSet()
 
     return ingredientOptions.asSequence()
         .map(String::trim)
         .filter(String::isNotBlank)
-        .distinctBy(String::normalizedCatalogToken)
-        .map { label -> IngredientSuggestion(label, label.normalizedCatalogToken()) }
-        .filter { suggestion -> suggestion.key !in excludedKeys }
-        .filter { suggestion -> queryKey.isBlank() || queryKey in suggestion.key }
+        .map { label ->
+            IngredientSuggestion(
+                label = canonicalIngredientDisplayLabel(label),
+                identity = canonicalIngredientIdentity(label),
+                searchTokens = expandedIngredientAliasTokens(label),
+            )
+        }
+        .distinctBy(IngredientSuggestion::identity)
+        .filter { suggestion -> suggestion.identity !in excludedIdentities }
+        .filter { suggestion ->
+            queryKey.isBlank() || suggestion.searchTokens.any { token -> queryKey in token }
+        }
         .sortedWith(
             compareBy<IngredientSuggestion> { suggestion ->
-                if (queryKey.isBlank() || suggestion.key.startsWith(queryKey)) 0 else 1
-            }.thenBy(IngredientSuggestion::key),
+                if (
+                    queryKey.isBlank() ||
+                    suggestion.searchTokens.any { token -> token.startsWith(queryKey) }
+                ) 0 else 1
+            }.thenBy(IngredientSuggestion::identity),
         )
         .take(limit)
         .map(IngredientSuggestion::label)
@@ -118,5 +133,6 @@ internal fun ingredientSuggestions(
 
 private data class IngredientSuggestion(
     val label: String,
-    val key: String,
+    val identity: String,
+    val searchTokens: List<String>,
 )

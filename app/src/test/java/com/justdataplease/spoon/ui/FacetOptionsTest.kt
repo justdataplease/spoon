@@ -33,4 +33,32 @@ class FacetOptionsTest {
             listOf("  Χωρίς   ζάχαρη  ", "χωρίς ζάχαρη").cleanFacetOptions(),
         )
     }
+
+    @Test
+    fun ingredientOptionsUseCanonicalLabelsAndKeepDistinctIngredientConcepts() {
+        val options = listOf(
+            "ΑΥΓΑ",
+            "Αυγό",
+            "ΦΟΥΝΤΟΥΚΙΑ",
+            "Φουντούκι",
+            "ΑΛΕΥΡΙ",
+            "Αλεύρι (ζύμες)",
+            "Γάλα αμυγδάλου",
+            "Γάλα βρώμης",
+            "ΚΙΜΑΣ",
+        ).cleanIngredientFacetOptions()
+
+        assertEquals(
+            listOf(
+                "Αλεύρι",
+                "Αλεύρι (ζύμες)",
+                "Αυγό",
+                "Γάλα αμυγδάλου",
+                "Γάλα βρώμης",
+                "Κιμάς",
+                "Φουντούκι",
+            ),
+            options,
+        )
+    }
 }

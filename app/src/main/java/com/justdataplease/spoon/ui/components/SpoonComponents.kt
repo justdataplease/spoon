@@ -298,7 +298,7 @@ private fun backendErrorText(state: BackendState.Error): String {
         BackendFailureKind.PERMISSION -> "Το Firestore απέρριψε την πρόσβαση."
         BackendFailureKind.CONFIGURATION -> "Η ρύθμιση του Firebase χρειάζεται διόρθωση."
         BackendFailureKind.AUTHENTICATION -> "Η ταυτοποίηση στο Firebase απέτυχε."
-        BackendFailureKind.NETWORK -> "Δεν υπάρχει σύνδεση με το Firestore."
+        BackendFailureKind.NETWORK -> "Χωρίς σύνδεση · οι τοπικές προτάσεις λειτουργούν."
         BackendFailureKind.UNKNOWN -> "Η σύνδεση με το Firebase απέτυχε."
     }
     return if (state.failure.isRetryable) "$text Θα γίνει νέα προσπάθεια." else text

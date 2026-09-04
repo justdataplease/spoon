@@ -5,6 +5,7 @@ import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteException
 import androidx.core.content.pm.PackageInfoCompat
+import com.justdataplease.spoon.data.expandedIngredientAliasTokens
 import com.justdataplease.spoon.data.model.MealCategory
 import com.justdataplease.spoon.data.model.Recipe
 import com.justdataplease.spoon.data.model.RecipeFilters
@@ -449,7 +450,13 @@ internal object CatalogSqlBuilder {
         addFacetPredicate(predicates, arguments, FACET_OCCASION, criteria.occasionLabels)
         addFacetPredicate(predicates, arguments, FACET_METHOD, criteria.methodLabels)
         addFacetPredicate(predicates, arguments, FACET_CUISINE, criteria.cuisineLabels)
-        addFacetPredicate(predicates, arguments, FACET_INGREDIENT, criteria.ingredientLabels)
+        addFacetPredicate(
+            predicates,
+            arguments,
+            FACET_INGREDIENT,
+            criteria.ingredientLabels,
+            expandIngredientAliases = true,
+        )
         addPreferencePredicates(predicates, arguments, preferences)
         return CatalogSql(predicates, arguments)
     }
@@ -499,7 +506,7 @@ internal object CatalogSqlBuilder {
         if (preferences.veganOnly) {
             predicates += "r.vegan_eligible = 1"
         }
-        preferences.excludedIngredientTerms.normalizedTokens().forEach { term ->
+        preferences.excludedIngredientTerms.expandedIngredientTokens().forEach { term ->
             predicates += """
                 NOT EXISTS (
                     SELECT 1 FROM recipe_ingredient_texts ingredient
@@ -537,8 +544,13 @@ internal object CatalogSqlBuilder {
         arguments: MutableList<String>,
         facetType: String,
         rawValues: Set<String>,
+        expandIngredientAliases: Boolean = false,
     ) {
-        val values = rawValues.normalizedTokens()
+        val values = if (expandIngredientAliases) {
+            rawValues.expandedIngredientTokens()
+        } else {
+            rawValues.normalizedTokens()
+        }
         if (values.isEmpty()) return
         predicates += """
             EXISTS (
@@ -554,6 +566,12 @@ internal object CatalogSqlBuilder {
 
     private fun Set<String>.normalizedTokens(): List<String> =
         map(String::normalizedCatalogToken).filter(String::isNotBlank).distinct()
+
+    private fun Set<String>.expandedIngredientTokens(): List<String> =
+        asSequence()
+            .flatMap { ingredient -> expandedIngredientAliasTokens(ingredient).asSequence() }
+            .distinct()
+            .toList()
 
     private const val FACET_DIET = "diet"
     private const val FACET_MEAL = "meal"

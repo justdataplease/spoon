@@ -1,5 +1,7 @@
 package com.justdataplease.spoon.domain
 
+import com.justdataplease.spoon.data.DistinctIngredientConceptCases
+import com.justdataplease.spoon.data.ReviewedIngredientAliasCases
 import com.justdataplease.spoon.data.model.EaseLevel
 import com.justdataplease.spoon.data.model.MealCategory
 import com.justdataplease.spoon.data.model.Recipe
@@ -148,6 +150,97 @@ class ExploreRecipeFilterTest {
             ExploreCriteria(ingredientLabels = setOf("avocado")),
         ).forEach { criteria ->
             assertEquals(listOf(match), ExploreRecipeFilter.filter(recipes, criteria))
+        }
+    }
+
+    @Test
+    fun `canonical ingredient selection matches reviewed provider aliases`() {
+        val providerPlural = recipe(
+            id = "provider-plural",
+            ingredientLabels = listOf("Αυγά"),
+        )
+        val unrelated = recipe(
+            id = "unrelated",
+            ingredientLabels = listOf("Τυρί"),
+        )
+
+        assertEquals(
+            listOf(providerPlural),
+            ExploreRecipeFilter.filter(
+                listOf(providerPlural, unrelated),
+                ExploreCriteria(ingredientLabels = setOf("Αυγό")),
+            ),
+        )
+    }
+
+    @Test
+    fun `personal ingredient facets use SQLite punctuation normalization without broadening concepts`() {
+        val exactConcept = recipe(
+            id = "exact-concept",
+            ingredientLabels = listOf("Αλεύρι (ζύμες)"),
+        )
+        val parentConcept = recipe(
+            id = "parent-concept",
+            ingredientLabels = listOf("Αλεύρι"),
+        )
+
+        assertEquals(
+            listOf(exactConcept),
+            ExploreRecipeFilter.filter(
+                listOf(exactConcept, parentConcept),
+                ExploreCriteria(ingredientLabels = setOf("ΑΛΕΥΡΙ - ΖΥΜΕΣ")),
+            ),
+        )
+    }
+
+    @Test
+    fun `every reviewed ingredient group matches its provider alias in memory`() {
+        ReviewedIngredientAliasCases.forEachIndexed { index, case ->
+            val providerRecipe = recipe(
+                id = "provider-$index",
+                ingredientLabels = listOf(case.providerAlias),
+            )
+
+            assertEquals(
+                "Alias parity failed for ${case.canonical}",
+                listOf(providerRecipe),
+                ExploreRecipeFilter.filter(
+                    listOf(providerRecipe),
+                    ExploreCriteria(ingredientLabels = setOf(case.canonical)),
+                ),
+            )
+        }
+    }
+
+    @Test
+    fun `ingredient choices use OR semantics within the facet`() {
+        val eggs = recipe(id = "eggs", ingredientLabels = listOf("Αυγά"))
+        val potatoes = recipe(id = "potatoes", ingredientLabels = listOf("Πατάτες"))
+        val unrelated = recipe(id = "unrelated", ingredientLabels = listOf("Τυρί"))
+
+        assertEquals(
+            listOf(eggs, potatoes),
+            ExploreRecipeFilter.filter(
+                listOf(unrelated, potatoes, eggs),
+                ExploreCriteria(ingredientLabels = setOf("Αυγό", "Πατάτα")),
+            ),
+        )
+    }
+
+    @Test
+    fun `reviewed distinct ingredient concepts do not match in memory`() {
+        DistinctIngredientConceptCases.forEachIndexed { index, (selected, distinct) ->
+            val match = recipe(id = "match-$index", ingredientLabels = listOf(selected))
+            val nonMatch = recipe(id = "non-match-$index", ingredientLabels = listOf(distinct))
+
+            assertEquals(
+                "Distinct concept broadened for $selected",
+                listOf(match),
+                ExploreRecipeFilter.filter(
+                    listOf(nonMatch, match),
+                    ExploreCriteria(ingredientLabels = setOf(selected)),
+                ),
+            )
         }
     }
 

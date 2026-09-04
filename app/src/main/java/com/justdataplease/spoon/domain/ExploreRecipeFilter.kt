@@ -1,5 +1,6 @@
 package com.justdataplease.spoon.domain
 
+import com.justdataplease.spoon.data.expandedIngredientAliasTokens
 import com.justdataplease.spoon.data.model.EaseLevel
 import com.justdataplease.spoon.data.model.MealCategory
 import com.justdataplease.spoon.data.model.Recipe
@@ -54,7 +55,7 @@ object ExploreRecipeFilter {
         val selectedOccasions = criteria.occasionLabels.normalizedFacetSelection()
         val selectedMethods = criteria.methodLabels.normalizedFacetSelection()
         val selectedCuisines = criteria.cuisineLabels.normalizedFacetSelection()
-        val selectedIngredients = criteria.ingredientLabels.normalizedFacetSelection()
+        val selectedIngredients = criteria.ingredientLabels.expandedIngredientFacetTokens()
         val selectedSources = criteria.sourceKeys.normalizedFacetSelection()
 
         return recipes.asSequence()
@@ -78,7 +79,7 @@ object ExploreRecipeFilter {
             .filter { selectedOccasions.matchesFacet(it.occasionLabels) }
             .filter { selectedMethods.matchesFacet(it.methodLabels) }
             .filter { selectedCuisines.matchesFacet(it.cuisineLabels) }
-            .filter { selectedIngredients.matchesFacet(it.ingredientLabels) }
+            .filter { selectedIngredients.matchesIngredientFacet(it.ingredientLabels) }
             .filter { recipe ->
                 selectedSources.isEmpty() ||
                     sequenceOf(recipe.effectiveSourceKey, recipe.source, recipe.sourceName)
@@ -113,6 +114,18 @@ private fun Set<String>.matchesFacet(actualValues: List<String>): Boolean {
     return actualValues.asSequence()
         .map(String::normalizedSearchText)
         .any { normalized -> normalized in this }
+}
+
+private fun Set<String>.expandedIngredientFacetTokens(): Set<String> = asSequence()
+    .flatMap { ingredient -> expandedIngredientAliasTokens(ingredient).asSequence() }
+    .toSet()
+
+/** Uses the catalog normalizer on both sides so personal recipes match SQLite semantics. */
+private fun Set<String>.matchesIngredientFacet(actualValues: List<String>): Boolean {
+    if (isEmpty()) return true
+    return actualValues.asSequence()
+        .flatMap { ingredient -> expandedIngredientAliasTokens(ingredient).asSequence() }
+        .any { token -> token in this }
 }
 
 private fun Recipe.searchableText(): String = buildList {

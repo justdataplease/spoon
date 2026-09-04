@@ -377,7 +377,7 @@ private fun FilterEditorSheet(
                 Text("Η νέα πρόταση θα τηρήσει όλα τα φίλτρα.", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             item {
-                FilterSectionTitle("Βασικό υλικό")
+                FilterSectionTitle("Κατηγορία")
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     items(AvailableCategories, key = { it.key }) { category ->
                         FilterChip(

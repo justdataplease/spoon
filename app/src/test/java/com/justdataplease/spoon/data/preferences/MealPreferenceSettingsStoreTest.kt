@@ -9,6 +9,7 @@ import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -135,6 +136,19 @@ class MealPreferenceSettingsStoreTest {
     }
 
     @Test
+    fun `first authenticated edit initializes an empty local owner slot durably`() = runTest {
+        val store = newStore()
+        val firstEdit = MealPreferenceSettings(
+            veganOnly = true,
+            updatedAtEpochMillis = 100L,
+        )
+
+        assertTrue(store.replaceForOwner("owner-a", firstEdit))
+        assertEquals(firstEdit, store.readForOwner("owner-a"))
+        assertNull(store.readPendingForNextOwner())
+    }
+
+    @Test
     fun `stale remote replacement cannot roll back the active owners cache`() = runTest {
         val store = newStore()
         val current = MealPreferenceSettings(
@@ -184,6 +198,89 @@ class MealPreferenceSettingsStoreTest {
 
         assertEquals(MealPreferenceSettings(), claimed)
         assertEquals(0L, store.settings.first().updatedAtEpochMillis)
+    }
+
+    @Test
+    fun `pending edit stays isolated from previous owner and is claimed by next owner`() = runTest {
+        val store = newStore()
+        val previousOwner = MealPreferenceSettings(
+            excludedCategories = setOf("fish"),
+            updatedAtEpochMillis = 100L,
+        )
+        val pending = MealPreferenceSettings(
+            excludedCategories = setOf("poultry", "meat"),
+            veganOnly = true,
+            excludedIngredientTerms = setOf("γάλα"),
+            updatedAtEpochMillis = 200L,
+        )
+        store.readForOwner("owner-a")
+        store.replaceForOwner("owner-a", previousOwner)
+
+        store.replacePendingForNextOwner(pending)
+
+        assertEquals(previousOwner, store.settings.first())
+        assertEquals(pending, store.readPendingForNextOwner())
+        assertEquals(pending, store.readForOwner("owner-b"))
+        assertNull(store.readPendingForNextOwner())
+    }
+
+    @Test
+    fun `pending clear-all edit is claimed even without active selections`() = runTest {
+        val store = newStore()
+        store.readForOwner("owner-a")
+        store.replaceForOwner(
+            "owner-a",
+            MealPreferenceSettings(veganOnly = true, updatedAtEpochMillis = 100L),
+        )
+        val pendingClear = MealPreferenceSettings(updatedAtEpochMillis = 200L)
+
+        store.replacePendingForNextOwner(pendingClear)
+
+        assertEquals(pendingClear, store.readForOwner("owner-b"))
+        assertNull(store.readPendingForNextOwner())
+    }
+
+    @Test
+    fun `clear removes pending edit and leaves no settings for the next owner`() = runTest {
+        val store = newStore()
+        store.readForOwner("owner-a")
+        store.replaceForOwner(
+            "owner-a",
+            MealPreferenceSettings(veganOnly = true, updatedAtEpochMillis = 100L),
+        )
+        store.replacePendingForNextOwner(
+            MealPreferenceSettings(
+                excludedCategories = setOf("meat"),
+                excludedIngredientTerms = setOf("γάλα"),
+                updatedAtEpochMillis = 200L,
+            ),
+        )
+
+        store.clear()
+
+        assertEquals(MealPreferenceSettings(), store.settings.first())
+        assertNull(store.readPendingForNextOwner())
+        assertEquals(MealPreferenceSettings(), store.readForOwner("owner-b"))
+    }
+
+    @Test
+    fun `pending clear-all replacement cannot resurrect an older pending selection`() = runTest {
+        val store = newStore()
+        store.replacePendingForNextOwner(
+            MealPreferenceSettings(
+                excludedCategories = setOf("poultry"),
+                veganOnly = true,
+                excludedIngredientTerms = setOf("αυγό"),
+                updatedAtEpochMillis = 100L,
+            ),
+        )
+        val pendingClear = MealPreferenceSettings(updatedAtEpochMillis = 101L)
+
+        store.replacePendingForNextOwner(pendingClear)
+
+        assertEquals(pendingClear, store.readPendingForNextOwner())
+        assertEquals(pendingClear, store.readForOwner("owner-a"))
+        assertNull(store.readPendingForNextOwner())
     }
 
     private fun kotlinx.coroutines.test.TestScope.newStore(): MealPreferenceSettingsStore {

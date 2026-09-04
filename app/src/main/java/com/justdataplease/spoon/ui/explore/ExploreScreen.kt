@@ -34,11 +34,15 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -70,6 +74,7 @@ import com.justdataplease.spoon.ui.components.ratingThresholdLabel
 import com.justdataplease.spoon.ui.model.AvailableCategories
 import com.justdataplease.spoon.ui.model.EaseUi
 import com.justdataplease.spoon.ui.model.SelectableEaseOptions
+import com.justdataplease.spoon.ui.settings.ingredientSuggestions
 import kotlin.math.roundToInt
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -405,6 +410,8 @@ private fun ExploreFilterSheet(
     var rating by remember(current) {
         mutableFloatStateOf(current.minRating10.coerceIn(0, MAX_RATING_THRESHOLD).toFloat())
     }
+    var ingredientQuery by remember(current) { mutableStateOf(current.ingredient) }
+    var ingredientMenuExpanded by remember(current) { mutableStateOf(false) }
     val prepOptions = listOf<Int?>(null, 15, 30, 45, 60, 90, 120)
 
     ModalBottomSheet(onDismissRequest = onDismiss) {
@@ -448,7 +455,7 @@ private fun ExploreFilterSheet(
                 }
             }
             item {
-                FilterTitle("Βασικό υλικό")
+                FilterTitle("Κατηγορία")
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     item {
                         ChoiceChip("Όλα", draft.categoryKey.isBlank()) { draft = draft.copy(categoryKey = "") }
@@ -511,13 +518,33 @@ private fun ExploreFilterSheet(
             item { FacetRow("Περίσταση", ProviderLabelKind.OCCASION, options.occasions, draft.occasion) { draft = draft.copy(occasion = it) } }
             item { FacetRow("Τρόπος μαγειρέματος", ProviderLabelKind.METHOD, options.methods, draft.method) { draft = draft.copy(method = it) } }
             item { FacetRow("Χώρα / διεθνής κουζίνα", ProviderLabelKind.CUISINE, options.cuisines, draft.cuisine) { draft = draft.copy(cuisine = it) } }
-            item { FacetRow("Κύριο υλικό", ProviderLabelKind.INGREDIENT, options.ingredients, draft.ingredient) { draft = draft.copy(ingredient = it) } }
+            item {
+                IngredientFacetDropdown(
+                    options = options.ingredients,
+                    selected = draft.ingredient,
+                    query = ingredientQuery,
+                    expanded = ingredientMenuExpanded,
+                    onQueryChange = { query ->
+                        ingredientQuery = query
+                        ingredientMenuExpanded = true
+                        draft = draft.copy(ingredient = "")
+                    },
+                    onExpandedChange = { ingredientMenuExpanded = it },
+                    onSelect = { ingredient ->
+                        ingredientQuery = ingredient
+                        ingredientMenuExpanded = false
+                        draft = draft.copy(ingredient = ingredient)
+                    },
+                )
+            }
             item {
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     OutlinedButton(
                         onClick = {
                             draft = ExploreFiltersUi()
                             rating = 0f
+                            ingredientQuery = ""
+                            ingredientMenuExpanded = false
                         },
                         modifier = Modifier.weight(1f).height(54.dp),
                     ) { Text("Καθαρισμός") }
@@ -525,6 +552,83 @@ private fun ExploreFilterSheet(
                         onClick = { onApply(draft.copy(minRating10 = rating.roundToInt())) },
                         modifier = Modifier.weight(1f).height(54.dp),
                     ) { Text("Εφαρμογή") }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun IngredientFacetDropdown(
+    options: List<String>,
+    selected: String,
+    query: String,
+    expanded: Boolean,
+    onQueryChange: (String) -> Unit,
+    onExpandedChange: (Boolean) -> Unit,
+    onSelect: (String) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        FilterTitle("Κύριο υλικό")
+        if (options.isEmpty()) {
+            Text(
+                "Δεν υπάρχουν ακόμη διαθέσιμες επιλογές.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            return@Column
+        }
+
+        val suggestions = ingredientSuggestions(
+            ingredientOptions = options,
+            excludedIngredients = emptySet(),
+            query = query,
+        )
+        ExposedDropdownMenuBox(
+            expanded = expanded,
+            onExpandedChange = onExpandedChange,
+        ) {
+            OutlinedTextField(
+                value = query,
+                onValueChange = onQueryChange,
+                modifier = Modifier
+                    .menuAnchor(type = MenuAnchorType.PrimaryEditable, enabled = true)
+                    .fillMaxWidth(),
+                label = { Text("Αναζήτησε υλικό") },
+                placeholder = { Text("π.χ. Αυγό") },
+                supportingText = if (selected.isNotBlank()) {
+                    { Text("Επιλεγμένο: ${greekProviderLabel(selected, ProviderLabelKind.INGREDIENT)}") }
+                } else {
+                    null
+                },
+                singleLine = true,
+                trailingIcon = {
+                    ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded)
+                },
+            )
+            ExposedDropdownMenu(
+                expanded = expanded,
+                onDismissRequest = { onExpandedChange(false) },
+            ) {
+                DropdownMenuItem(
+                    text = { Text("Όλα") },
+                    onClick = { onSelect("") },
+                )
+                if (suggestions.isEmpty()) {
+                    DropdownMenuItem(
+                        text = { Text("Δεν βρέθηκε υλικό") },
+                        onClick = {},
+                        enabled = false,
+                    )
+                } else {
+                    suggestions.forEach { ingredient ->
+                        DropdownMenuItem(
+                            text = {
+                                Text(greekProviderLabel(ingredient, ProviderLabelKind.INGREDIENT))
+                            },
+                            onClick = { onSelect(ingredient) },
+                        )
+                    }
                 }
             }
         }

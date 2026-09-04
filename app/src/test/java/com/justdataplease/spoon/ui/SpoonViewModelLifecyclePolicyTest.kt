@@ -12,6 +12,28 @@ import org.junit.Test
 
 class SpoonViewModelLifecyclePolicyTest {
     @Test
+    fun `preference reconciliation restarts an active ensure for the same week`() {
+        val weekStart = LocalDate.of(2026, 8, 31)
+
+        assertFalse(
+            shouldStartWeekEnsure(
+                isActive = true,
+                activeWeekStart = weekStart,
+                requestedWeekStart = weekStart,
+                force = false,
+            ),
+        )
+        assertTrue(
+            shouldStartWeekEnsure(
+                isActive = true,
+                activeWeekStart = weekStart,
+                requestedWeekStart = weekStart,
+                force = true,
+            ),
+        )
+    }
+
+    @Test
     fun `owner tracker ignores profile refresh but detects uid change and sign out`() {
         val tracker = AccountOwnerTracker()
 

@@ -17,6 +17,7 @@ import com.justdataplease.spoon.domain.repository.BackendState
 import java.time.LocalDate
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -121,6 +122,75 @@ class MealPlannerTest {
     }
 
     @Test
+    fun ensure_week_uses_one_preference_snapshot_and_replaces_unfinished_excluded_recipe() = runBlocking {
+        val monday = LocalDate.of(2026, 8, 31)
+        val legumes = DemoRecipeCatalog.recipes.first {
+            it.category == MealCategory.LEGUMES.key
+        }
+        val poultry = DemoRecipeCatalog.recipes.first {
+            it.category == MealCategory.POULTRY.key
+        }
+        val stale = DayMealPlan(
+            id = monday.toString(),
+            date = monday.toString(),
+            category = MealCategory.POULTRY.key,
+            recipeId = poultry.id,
+            recipeTitle = poultry.title,
+            filters = RecipeFilters(category = MealCategory.POULTRY.key),
+        )
+        val preferences = MealPreferenceSettings(
+            excludedCategories = MealCategory.entries
+                .filterNot { it == MealCategory.ANY || it == MealCategory.LEGUMES }
+                .mapTo(mutableSetOf(), MealCategory::key),
+        )
+        var preferenceReads = 0
+        val repository = FakeRepository(
+            initialPlans = listOf(stale),
+            initialRecipes = listOf(legumes, poultry),
+            preferenceFlow = flow {
+                preferenceReads++
+                emit(preferences)
+            },
+        )
+
+        val week = MealPlanner(repository, RecipeSelector()).ensureWeek(monday)
+
+        assertEquals(1, preferenceReads)
+        assertEquals(legumes.id, week.first { it.date == monday.toString() }.recipeId)
+        assertTrue(week.all { it.recipeId == legumes.id })
+    }
+
+    @Test
+    fun ensure_week_preserves_completed_recipe_excluded_by_preferences() = runBlocking {
+        val tuesday = LocalDate.of(2026, 9, 1)
+        val poultry = DemoRecipeCatalog.recipes.first {
+            it.category == MealCategory.POULTRY.key
+        }
+        val completed = DayMealPlan(
+            id = tuesday.toString(),
+            date = tuesday.toString(),
+            category = MealCategory.POULTRY.key,
+            recipeId = poultry.id,
+            recipeTitle = poultry.title,
+            filters = RecipeFilters(category = MealCategory.POULTRY.key),
+            completed = true,
+        )
+        val repository = FakeRepository(
+            initialPlans = listOf(completed),
+            initialRecipes = listOf(poultry),
+            initialPreferences = MealPreferenceSettings(
+                excludedCategories = setOf(MealCategory.POULTRY.key),
+            ),
+        )
+
+        val preserved = MealPlanner(repository, RecipeSelector())
+            .ensureWeek(tuesday)
+            .first { it.date == tuesday.toString() }
+
+        assertEquals(completed, preserved)
+    }
+
+    @Test
     fun `ensure week repairs a partial plan and resets completion`() = runBlocking {
         val date = LocalDate.of(2026, 9, 4)
         val partial = DayMealPlan(
@@ -177,6 +247,38 @@ class MealPlannerTest {
         assertEquals("Νέα πρόταση", repaired.recipeTitle)
         assertEquals(false, repaired.completed)
         assertEquals(repaired, repository.plans.value.single())
+    }
+
+    @Test
+    fun `ensure week preserves unresolved custom plan while owner cache is warming`() = runBlocking {
+        val date = LocalDate.of(2026, 9, 4)
+        val customPlan = DayMealPlan(
+            id = date.toString(),
+            date = date.toString(),
+            category = MealCategory.FISH.key,
+            recipeId = "custom_01234567-89ab-4def-8123-456789abcdef",
+            recipeTitle = "My custom recipe",
+            filters = RecipeFilters(category = MealCategory.FISH.key),
+        )
+        val replacement = Recipe(
+            id = "bundled-fish",
+            title = "Bundled fish",
+            category = MealCategory.FISH.key,
+        )
+        val repository = FakeRepository(
+            initialPlans = listOf(customPlan),
+            initialRecipes = listOf(replacement),
+        )
+
+        val preserved = MealPlanner(repository, RecipeSelector())
+            .ensureWeek(date)
+            .first { it.date == date.toString() }
+
+        assertEquals(customPlan, preserved)
+        assertEquals(
+            customPlan,
+            repository.plans.value.first { it.date == date.toString() },
+        )
     }
 
     @Test
@@ -553,6 +655,7 @@ class MealPlannerTest {
         initialCustomRecipes: List<CustomRecipe> = emptyList(),
         initialHistory: List<CookedMeal> = emptyList(),
         initialPreferences: MealPreferenceSettings = MealPreferenceSettings(),
+        preferenceFlow: Flow<MealPreferenceSettings>? = null,
     ) : SpoonRepository {
         override val backendState = MutableStateFlow<BackendState>(BackendState.Local)
         override val recipes: Flow<List<Recipe>> = MutableStateFlow(initialRecipes)
@@ -565,7 +668,7 @@ class MealPlannerTest {
         val history = MutableStateFlow(initialHistory)
         override val cookedHistory: Flow<List<CookedMeal>> = history
         override val mealPreferenceSettings: Flow<MealPreferenceSettings> =
-            MutableStateFlow(initialPreferences)
+            preferenceFlow ?: MutableStateFlow(initialPreferences)
         var ensureReadyCount = 0
         var upsertCount = 0
         val deletedHistoryIds = mutableListOf<String>()

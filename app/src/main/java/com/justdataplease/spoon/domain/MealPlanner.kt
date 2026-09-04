@@ -8,6 +8,7 @@ import com.justdataplease.spoon.data.model.Recipe
 import com.justdataplease.spoon.data.model.RecipeFilters
 import com.justdataplease.spoon.data.model.RecipeNote
 import com.justdataplease.spoon.data.model.ShoppingListItem
+import com.justdataplease.spoon.data.model.isCustomRecipeId
 import com.justdataplease.spoon.data.model.newCustomRecipeId
 import com.justdataplease.spoon.data.preferences.MealPreferenceSettings
 import com.justdataplease.spoon.data.isSafeRecipeDocumentId
@@ -96,6 +97,9 @@ class MealPlanner @Inject constructor(
         random: Random = Random.Default,
     ): List<DayMealPlan> {
         repository.ensureReady()
+        // Keep one coherent preference snapshot for the entire refresh. A cloud/cache update
+        // arriving halfway through the loop must not produce a week with mixed policies.
+        val preferences = mealPreferenceSettings.first()
         val existing = repository.mealPlans.first().associateBy(DayMealPlan::date)
         val recipesById = repository.getRecipesByIds(
             existing.values.mapNotNullTo(mutableSetOf()) { it.recipeId.takeIf(String::isNotBlank) },
@@ -103,13 +107,14 @@ class MealPlanner @Inject constructor(
 
         return WeeklyPlanDefaults.dates(containingDate).map { date ->
             val current = existing[date.toString()]
-            if (current != null && current.isUsable(recipesById)) {
+            if (current != null && current.isUsable(recipesById, preferences)) {
                 current
             } else {
                 val replacement = createDay(
                     date = date,
                     random = random,
                     previous = current,
+                    preferences = preferences,
                 )
                 when {
                     replacement.recipeId.isNotBlank() -> replacement.also {
@@ -135,7 +140,7 @@ class MealPlanner @Inject constructor(
         val excludedId = existing?.recipeId.orEmpty()
         val preferences = mealPreferenceSettings.first()
         var effectiveFilters = requestedFilters
-        var selected = repository.selectRandomRecipe(
+        var selected = selectEligibleRecipe(
             filters = requestedFilters,
             excludingRecipeId = excludedId.ifBlank { null },
             randomSeed = random.nextLong(),
@@ -148,7 +153,7 @@ class MealPlanner @Inject constructor(
             requestedFilters.category != MealCategory.ANY.key
         ) {
             effectiveFilters = requestedFilters.copy(category = MealCategory.ANY.key)
-            selected = repository.selectRandomRecipe(
+            selected = selectEligibleRecipe(
                 filters = effectiveFilters,
                 excludingRecipeId = excludedId.ifBlank { null },
                 randomSeed = random.nextLong(),
@@ -282,14 +287,15 @@ class MealPlanner @Inject constructor(
         date: LocalDate,
         random: Random,
         previous: DayMealPlan? = null,
+        preferences: MealPreferenceSettings,
     ): DayMealPlan {
         val filters = previous?.filters
             ?.takeIf(RecipeFilters::isValid)
             ?: WeeklyPlanDefaults.filtersFor(date)
-        val preferences = mealPreferenceSettings.first()
         var effectiveFilters = filters
-        var recipe = repository.selectRandomRecipe(
+        var recipe = selectEligibleRecipe(
             filters = filters,
+            excludingRecipeId = null,
             randomSeed = random.nextLong(),
             preferences = preferences,
         )
@@ -299,13 +305,31 @@ class MealPlanner @Inject constructor(
             filters.category != MealCategory.ANY.key
         ) {
             effectiveFilters = filters.copy(category = MealCategory.ANY.key)
-            recipe = repository.selectRandomRecipe(
+            recipe = selectEligibleRecipe(
                 filters = effectiveFilters,
+                excludingRecipeId = null,
                 randomSeed = random.nextLong(),
                 preferences = preferences,
             )
         }
         return newPlan(date, effectiveFilters, recipe)
+    }
+
+    /** Defends the planner contract even if a repository implementation returns a bad row. */
+    private suspend fun selectEligibleRecipe(
+        filters: RecipeFilters,
+        excludingRecipeId: String?,
+        randomSeed: Long,
+        preferences: MealPreferenceSettings,
+    ): Recipe? = repository.selectRandomRecipe(
+        filters = filters,
+        excludingRecipeId = excludingRecipeId,
+        randomSeed = randomSeed,
+        preferences = preferences,
+    )?.takeIf { recipe ->
+        recipe.id != excludingRecipeId &&
+            selector.matches(recipe, filters) &&
+            recipe.matchesMealPreferences(preferences)
     }
 
     private fun newPlan(date: LocalDate, filters: RecipeFilters, recipe: Recipe?): DayMealPlan =
@@ -322,13 +346,18 @@ class MealPlanner @Inject constructor(
             updatedAtEpochMillis = System.currentTimeMillis(),
         )
 
-    private fun DayMealPlan.isUsable(recipesById: Map<String, Recipe>): Boolean {
+    private fun DayMealPlan.isUsable(
+        recipesById: Map<String, Recipe>,
+        preferences: MealPreferenceSettings,
+    ): Boolean {
         val structurallyValid = date.isNotBlank() &&
             isSafeRecipeDocumentId(recipeId) &&
             recipeTitle.isNotBlank()
         if (completed && structurallyValid) return true
         if (!structurallyValid || category != filters.category || !filters.isValid()) return false
-        val currentRecipe = recipesById[recipeId] ?: return false
-        return selector.matches(currentRecipe, filters)
+        val currentRecipe = recipesById[recipeId]
+            ?: return recipeId.isCustomRecipeId()
+        return selector.matches(currentRecipe, filters) &&
+            currentRecipe.matchesMealPreferences(preferences)
     }
 }

@@ -62,6 +62,24 @@ class MealPreferenceFilterTest {
     }
 
     @Test
+    fun `persisted ingredient aliases match equivalent recipe ingredient forms`() {
+        listOf(
+            Triple("1 αυγό", "ΑΥΓΑ", "singular to plural"),
+            Triple("2 αυγά", "Αυγό", "plural to singular"),
+            Triple("ρεβίθια βρασμένα", "ΡΕΒΥΘΙΑ", "alternate spelling"),
+            Triple("ξερά φρούτα", "Αποξηραμένα φρούτα", "semantic synonym"),
+            Triple("πατάτες baby", "Πατάτα", "number variant"),
+        ).forEach { (ingredient, excludedAlias, description) ->
+            assertFalse(
+                description,
+                veganRecipe.withIngredient(ingredient).matchesMealPreferences(
+                    MealPreferenceSettings(excludedIngredientTerms = setOf(excludedAlias)),
+                ),
+            )
+        }
+    }
+
+    @Test
     fun `untagged recipe is not assumed vegan`() {
         assertFalse(
             veganRecipe.copy(dietLabels = emptyList())

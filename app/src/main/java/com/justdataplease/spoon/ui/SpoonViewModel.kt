@@ -5,6 +5,8 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.firebase.FirebaseException
+import com.justdataplease.spoon.data.canonicalIngredientDisplayLabel
+import com.justdataplease.spoon.data.canonicalIngredientIdentity
 import com.justdataplease.spoon.data.model.DayMealPlan
 import com.justdataplease.spoon.data.model.CookedMeal
 import com.justdataplease.spoon.data.model.EaseLevel
@@ -565,6 +567,8 @@ class SpoonViewModel @Inject constructor(
             work = { mealPlanner.saveMealPreferenceSettings(settings) },
         ) {
             message.value = "Οι προτιμήσεις φαγητού αποθηκεύτηκαν."
+            // Unfinished cards must be reconciled against the newly saved preferences.
+            ensureWeek(selectedWeekStart.value, force = true)
             onSaved()
         }
     }
@@ -946,9 +950,16 @@ class SpoonViewModel @Inject constructor(
         }
     }
 
-    private fun ensureWeek(date: LocalDate) {
+    private fun ensureWeek(date: LocalDate, force: Boolean = false) {
         val weekStart = WeeklyPlanDefaults.weekStart(date)
-        if (weekEnsureJob?.isActive == true && ensuringWeekStart == weekStart) return
+        if (
+            !shouldStartWeekEnsure(
+                isActive = weekEnsureJob?.isActive == true,
+                activeWeekStart = ensuringWeekStart,
+                requestedWeekStart = weekStart,
+                force = force,
+            )
+        ) return
         catalogWeekRetryGate.onDirectRequest(weekStart)
         startWeekEnsure(weekStart, isCatalogRetry = false)
     }
@@ -1075,6 +1086,13 @@ private fun AccountState.ownerUidOrNull(): String? = when (this) {
  * Remembers a direct request made before the complete catalog is observable. A retry is consumed
  * before it starts, so another backend-state emission cannot create duplicate plans or a loop.
  */
+internal fun shouldStartWeekEnsure(
+    isActive: Boolean,
+    activeWeekStart: LocalDate?,
+    requestedWeekStart: LocalDate,
+    force: Boolean,
+): Boolean = force || !isActive || activeWeekStart != requestedWeekStart
+
 internal class CatalogWeekRetryGate {
     private var catalogReady = false
     private var pendingWeekStart: LocalDate? = null
@@ -1332,7 +1350,7 @@ private fun CatalogFacetOptions.toUi() = ExploreFacetOptionsUi(
     occasions = occasions.cleanFacetOptions(),
     methods = methods.cleanFacetOptions(),
     cuisines = cuisines.cleanFacetOptions(),
-    ingredients = ingredients.cleanFacetOptions(),
+    ingredients = ingredients.cleanIngredientFacetOptions(),
 )
 
 internal fun List<String>.cleanFacetOptions(): List<String> = asSequence()
@@ -1346,6 +1364,15 @@ internal fun List<String>.cleanFacetOptions(): List<String> = asSequence()
         }
     }
     .sortedBy(String::normalizedFacetOptionKey)
+
+/** Collapses reviewed provider aliases after the usual case/diacritic cleanup. */
+internal fun List<String>.cleanIngredientFacetOptions(): List<String> = cleanFacetOptions()
+    .asSequence()
+    .map(::canonicalIngredientDisplayLabel)
+    .filter(String::isNotBlank)
+    .distinctBy(::canonicalIngredientIdentity)
+    .sortedBy(::canonicalIngredientIdentity)
+    .toList()
 
 private fun String.normalizedFacetOptionKey(): String =
     Normalizer.normalize(this, Normalizer.Form.NFD)

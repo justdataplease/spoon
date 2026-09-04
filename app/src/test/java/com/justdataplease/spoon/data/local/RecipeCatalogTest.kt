@@ -1,5 +1,7 @@
 package com.justdataplease.spoon.data.local
 
+import com.justdataplease.spoon.data.DistinctIngredientConceptCases
+import com.justdataplease.spoon.data.ReviewedIngredientAliasCases
 import com.justdataplease.spoon.data.model.CustomRecipe
 import com.justdataplease.spoon.data.model.MealCategory
 import com.justdataplease.spoon.data.model.Recipe
@@ -53,6 +55,70 @@ class RecipeCatalogTest {
     }
 
     @Test
+    fun `Explore ingredient facet expands reviewed aliases in one OR predicate`() {
+        val sql = CatalogSqlBuilder.forExplore(
+            ExploreCriteria(ingredientLabels = setOf("Αυγό")),
+        )
+
+        assertEquals(listOf("ingredient", "αυγο", "αυγα"), sql.arguments)
+        assertTrue(sql.whereSql.contains("f.token IN (?,?)"))
+        assertEquals(1, "SELECT 1 FROM recipe_facets f".toRegex().findAll(sql.whereSql).count())
+    }
+
+    @Test
+    fun `Explore SQL expands every reviewed ingredient group to its exact tokens`() {
+        ReviewedIngredientAliasCases.forEach { case ->
+            val sql = CatalogSqlBuilder.forExplore(
+                ExploreCriteria(ingredientLabels = setOf(case.canonical)),
+            )
+            val expectedTokens = case.aliases
+                .map(String::normalizedCatalogToken)
+                .filter(String::isNotBlank)
+                .distinct()
+
+            assertEquals(
+                "Alias token expansion failed for ${case.canonical}",
+                listOf("ingredient") + expectedTokens,
+                sql.arguments,
+            )
+            assertTrue(
+                "Alias SQL was not a single OR predicate for ${case.canonical}",
+                sql.whereSql.contains(
+                    "f.token IN (${List(expectedTokens.size) { "?" }.joinToString(",")})",
+                ),
+            )
+        }
+    }
+
+    @Test
+    fun `Explore SQL ORs multiple ingredient groups inside one facet predicate`() {
+        val sql = CatalogSqlBuilder.forExplore(
+            ExploreCriteria(ingredientLabels = setOf("Αυγό", "Πατάτα")),
+        )
+
+        assertEquals(
+            listOf("ingredient", "αυγο", "αυγα", "πατατα", "πατατεσ"),
+            sql.arguments,
+        )
+        assertTrue(sql.whereSql.contains("f.token IN (?,?,?,?)"))
+        assertEquals(1, "SELECT 1 FROM recipe_facets f".toRegex().findAll(sql.whereSql).count())
+    }
+
+    @Test
+    fun `Explore SQL does not expand reviewed distinct ingredient concepts`() {
+        DistinctIngredientConceptCases.forEach { (selected, distinct) ->
+            val sql = CatalogSqlBuilder.forExplore(
+                ExploreCriteria(ingredientLabels = setOf(selected)),
+            )
+
+            assertFalse(
+                "Distinct concept $distinct leaked into $selected",
+                sql.arguments.contains(distinct.normalizedCatalogToken()),
+            )
+        }
+    }
+
+    @Test
     fun `planner SQL is indexed and excludes the current recipe`() {
         val sql = CatalogSqlBuilder.forPlanner(
             RecipeFilters(
@@ -101,6 +167,45 @@ class RecipeCatalogTest {
             assertFalse(sql.whereSql.contains("ingredient_facet.recipe_id = r.id"))
             assertEquals(listOf("meat", "γαλα καρυδασ", "ingredient", "γαλα καρυδασ"), sql.arguments)
         }
+    }
+
+    @Test
+    fun `SQLite ingredient exclusions expand reviewed aliases for raw and facet indexes`() {
+        val sql = CatalogSqlBuilder.forPlanner(
+            filters = RecipeFilters(category = MealCategory.ANY.key),
+            excludingRecipeId = null,
+            preferences = MealPreferenceSettings(excludedIngredientTerms = setOf("Αυγά")),
+        )
+
+        assertEquals(
+            listOf(
+                "αυγο", "ingredient", "αυγο",
+                "αυγα", "ingredient", "αυγα",
+            ),
+            sql.arguments,
+        )
+        assertEquals(2, "recipe_ingredient_texts".toRegex().findAll(sql.whereSql).count())
+        assertEquals(2, "SELECT ingredient_facet.recipe_id".toRegex().findAll(sql.whereSql).count())
+    }
+
+    @Test
+    fun `SQLite alias expansion keeps flour hierarchy and plant milks distinct`() {
+        val sql = CatalogSqlBuilder.forExplore(
+            criteria = ExploreCriteria(),
+            preferences = MealPreferenceSettings(
+                excludedIngredientTerms = setOf("Αλεύρι (ζύμες)", "Γάλα αμυγδάλου"),
+            ),
+        )
+
+        assertEquals(
+            listOf(
+                "αλευρι ζυμεσ", "ingredient", "αλευρι ζυμεσ",
+                "γαλα αμυγδαλου", "ingredient", "γαλα αμυγδαλου",
+            ),
+            sql.arguments,
+        )
+        assertFalse(sql.arguments.contains("αλευρι"))
+        assertFalse(sql.arguments.contains("γαλα βρωμησ"))
     }
 
     @Test

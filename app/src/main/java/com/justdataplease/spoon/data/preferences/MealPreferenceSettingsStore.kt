@@ -17,6 +17,7 @@ import javax.inject.Singleton
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 
 /**
@@ -90,8 +91,35 @@ class MealPreferenceSettingsStore internal constructor(
             preferences.remove(VEGAN_ONLY)
             preferences.remove(EXCLUDED_INGREDIENT_TERMS)
             preferences.remove(UPDATED_AT_EPOCH_MILLIS)
+            clearPending(preferences)
         }
     }
+
+    /**
+     * Persists a local edit made before Firebase has identified an owner. The pending value is
+     * deliberately separate from the last owner's cache, so an offline sign-out/startup cannot
+     * expose or overwrite another account's preferences. The next authenticated owner claims it.
+     */
+    suspend fun replacePendingForNextOwner(settings: MealPreferenceSettings) {
+        dataStore.edit { preferences ->
+            preferences[HAS_PENDING_SETTINGS] = true
+            preferences[PENDING_EXCLUDED_CATEGORIES] =
+                settings.excludedCategories.cleanedPreferenceValues()
+            preferences[PENDING_VEGAN_ONLY] = settings.veganOnly
+            preferences[PENDING_EXCLUDED_INGREDIENT_TERMS] =
+                settings.excludedIngredientTerms.cleanedPreferenceValues()
+            preferences[PENDING_UPDATED_AT_EPOCH_MILLIS] = settings.updatedAtEpochMillis
+                .coerceIn(0L, MAX_MEAL_PREFERENCE_EPOCH_MILLIS)
+        }
+    }
+
+    /** Returns only an ownerless local edit, never the previous authenticated owner's cache. */
+    suspend fun readPendingForNextOwner(): MealPreferenceSettings? = dataStore.data
+        .catch { failure ->
+            if (failure is IOException) emit(emptyPreferences()) else throw failure
+        }
+        .map(::decodePending)
+        .first()
 
     /**
      * Activates an account-scoped cache. Legacy v0.7 values are claimed once by the account
@@ -104,6 +132,8 @@ class MealPreferenceSettingsStore internal constructor(
             val storedOwner = preferences[OWNER_UID]
             val decoded = decode(preferences)
             result = when {
+                preferences[HAS_PENDING_SETTINGS] == true ->
+                    requireNotNull(decodePending(preferences))
                 storedOwner == ownerUid -> decoded
                 // Keep legacy values at revision zero. The repository promotes them only after
                 // a server-backed empty snapshot, so an existing cloud document always wins.
@@ -112,6 +142,7 @@ class MealPreferenceSettingsStore internal constructor(
             }
             preferences[OWNER_UID] = ownerUid
             encode(preferences, result)
+            clearPending(preferences)
         }
         return result
     }
@@ -124,11 +155,14 @@ class MealPreferenceSettingsStore internal constructor(
         var replaced = false
         dataStore.edit { preferences ->
             val current = decode(preferences)
+            val storedOwner = preferences[OWNER_UID]
             if (
-                preferences[OWNER_UID] == ownerUid &&
+                (storedOwner == ownerUid || storedOwner == null) &&
                 settings.updatedAtEpochMillis >= current.updatedAtEpochMillis
             ) {
+                preferences[OWNER_UID] = ownerUid
                 encode(preferences, settings)
+                clearPending(preferences)
                 replaced = true
             }
         }
@@ -143,6 +177,14 @@ class MealPreferenceSettingsStore internal constructor(
         private val EXCLUDED_INGREDIENT_TERMS = stringSetPreferencesKey("excluded_ingredient_terms")
         private val UPDATED_AT_EPOCH_MILLIS = longPreferencesKey("updated_at_epoch_millis")
         private val OWNER_UID = stringPreferencesKey("owner_uid")
+        private val HAS_PENDING_SETTINGS = booleanPreferencesKey("has_pending_settings")
+        private val PENDING_EXCLUDED_CATEGORIES =
+            stringSetPreferencesKey("pending_excluded_categories")
+        private val PENDING_VEGAN_ONLY = booleanPreferencesKey("pending_vegan_only")
+        private val PENDING_EXCLUDED_INGREDIENT_TERMS =
+            stringSetPreferencesKey("pending_excluded_ingredient_terms")
+        private val PENDING_UPDATED_AT_EPOCH_MILLIS =
+            longPreferencesKey("pending_updated_at_epoch_millis")
 
         fun decode(preferences: Preferences): MealPreferenceSettings = MealPreferenceSettings(
             excludedCategories = preferences[EXCLUDED_CATEGORIES].orEmpty().cleanedPreferenceValues(),
@@ -164,6 +206,32 @@ class MealPreferenceSettingsStore internal constructor(
                 .cleanedPreferenceValues()
             preferences[UPDATED_AT_EPOCH_MILLIS] = settings.updatedAtEpochMillis
                 .coerceIn(0L, MAX_MEAL_PREFERENCE_EPOCH_MILLIS)
+        }
+
+        private fun decodePending(preferences: Preferences): MealPreferenceSettings? {
+            if (preferences[HAS_PENDING_SETTINGS] != true) return null
+            return MealPreferenceSettings(
+                excludedCategories = preferences[PENDING_EXCLUDED_CATEGORIES]
+                    .orEmpty()
+                    .cleanedPreferenceValues(),
+                veganOnly = preferences[PENDING_VEGAN_ONLY] ?: false,
+                excludedIngredientTerms = preferences[PENDING_EXCLUDED_INGREDIENT_TERMS]
+                    .orEmpty()
+                    .cleanedPreferenceValues(),
+                updatedAtEpochMillis =
+                    (preferences[PENDING_UPDATED_AT_EPOCH_MILLIS] ?: 0L)
+                        .coerceIn(0L, MAX_MEAL_PREFERENCE_EPOCH_MILLIS),
+            )
+        }
+
+        private fun clearPending(
+            preferences: androidx.datastore.preferences.core.MutablePreferences,
+        ) {
+            preferences.remove(HAS_PENDING_SETTINGS)
+            preferences.remove(PENDING_EXCLUDED_CATEGORIES)
+            preferences.remove(PENDING_VEGAN_ONLY)
+            preferences.remove(PENDING_EXCLUDED_INGREDIENT_TERMS)
+            preferences.remove(PENDING_UPDATED_AT_EPOCH_MILLIS)
         }
     }
 }
