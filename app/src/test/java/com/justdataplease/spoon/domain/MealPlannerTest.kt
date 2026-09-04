@@ -11,6 +11,7 @@ import com.justdataplease.spoon.data.model.RecipeFilters
 import com.justdataplease.spoon.data.model.RecipeIngredient
 import com.justdataplease.spoon.data.model.RecipeIngredientSection
 import com.justdataplease.spoon.data.model.RecipeMethodSection
+import com.justdataplease.spoon.data.preferences.MealPreferenceSettings
 import com.justdataplease.spoon.domain.repository.SpoonRepository
 import com.justdataplease.spoon.domain.repository.BackendState
 import java.time.LocalDate
@@ -78,6 +79,45 @@ class MealPlannerTest {
 
         assertTrue(result is MealPlanSelection.NoMatch)
         assertEquals(listOf(original), repository.plans.value)
+    }
+
+    @Test
+    fun `explicit reroll uses local selection without waiting for full repository readiness`() = runBlocking {
+        val date = LocalDate.of(2026, 9, 4)
+        val repository = FakeRepository()
+
+        val result = MealPlanner(repository, RecipeSelector()).reroll(date)
+
+        assertTrue(result is MealPlanSelection.Selected)
+        assertEquals(0, repository.ensureReadyCount)
+    }
+
+    @Test
+    fun `chicken-only preference falls back from the weekday category to poultry only`() = runBlocking {
+        val date = LocalDate.of(2026, 8, 31) // Monday normally requests legumes.
+        val poultry = DemoRecipeCatalog.recipes.first { recipe ->
+            recipe.category == MealCategory.POULTRY.key
+        }
+        val meat = DemoRecipeCatalog.recipes.first { recipe ->
+            recipe.category == MealCategory.MEAT.key
+        }
+        val allowed = setOf(MealCategory.POULTRY.key)
+        val repository = FakeRepository(
+            initialRecipes = listOf(poultry, meat),
+            initialPreferences = MealPreferenceSettings(
+                excludedCategories = MealCategory.entries
+                    .map(MealCategory::key)
+                    .filterNot { key -> key == MealCategory.ANY.key || key in allowed }
+                    .toSet(),
+            ),
+        )
+
+        val result = MealPlanner(repository, RecipeSelector()).reroll(date)
+
+        assertTrue(result is MealPlanSelection.Selected)
+        val selected = result as MealPlanSelection.Selected
+        assertEquals(MealCategory.POULTRY.key, selected.recipe.category)
+        assertEquals(poultry.id, repository.plans.value.single().recipeId)
     }
 
     @Test
@@ -512,6 +552,7 @@ class MealPlannerTest {
         initialFavorites: Set<String> = emptySet(),
         initialCustomRecipes: List<CustomRecipe> = emptyList(),
         initialHistory: List<CookedMeal> = emptyList(),
+        initialPreferences: MealPreferenceSettings = MealPreferenceSettings(),
     ) : SpoonRepository {
         override val backendState = MutableStateFlow<BackendState>(BackendState.Local)
         override val recipes: Flow<List<Recipe>> = MutableStateFlow(initialRecipes)
@@ -523,6 +564,8 @@ class MealPlannerTest {
         override val customRecipes: Flow<List<CustomRecipe>> = custom
         val history = MutableStateFlow(initialHistory)
         override val cookedHistory: Flow<List<CookedMeal>> = history
+        override val mealPreferenceSettings: Flow<MealPreferenceSettings> =
+            MutableStateFlow(initialPreferences)
         var ensureReadyCount = 0
         var upsertCount = 0
         val deletedHistoryIds = mutableListOf<String>()

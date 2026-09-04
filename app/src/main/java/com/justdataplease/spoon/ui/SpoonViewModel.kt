@@ -557,11 +557,15 @@ class SpoonViewModel @Inject constructor(
         exploreFilters.value = filters
     }
 
-    fun saveMealPreferenceSettings(settings: MealPreferenceSettings) {
+    fun saveMealPreferenceSettings(
+        settings: MealPreferenceSettings,
+        onSaved: () -> Unit = {},
+    ) {
         launchWorking(
             work = { mealPlanner.saveMealPreferenceSettings(settings) },
         ) {
             message.value = "Οι προτιμήσεις φαγητού αποθηκεύτηκαν."
+            onSaved()
         }
     }
 

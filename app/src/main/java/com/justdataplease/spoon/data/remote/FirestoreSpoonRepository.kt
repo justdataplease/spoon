@@ -418,7 +418,10 @@ class FirestoreSpoonRepository internal constructor(
     )
 
     override suspend fun updateMealPreferenceSettings(settings: MealPreferenceSettings) {
-        val currentUid = awaitUid()
+        // This is an explicit local edit. Authentication identifies its owner, while the
+        // DataStore mirror and Firestore's persistent queue make the mutation offline-first.
+        // Waiting for every remote owner collection here would unnecessarily block settings.
+        val currentUid = awaitAuthenticatedUid()
         val stored = withPersonalMutation(currentUid) {
             val next = settings.normalizedForSync(
                 nextPreferenceTimestamp(
@@ -439,7 +442,8 @@ class FirestoreSpoonRepository internal constructor(
 
     override suspend fun upsertMealPlan(plan: DayMealPlan) {
         require(plan.date.isNotBlank())
-        val currentUid = awaitUid()
+        // Rerolls are selected from bundled SQLite and may be queued while Firestore is offline.
+        val currentUid = awaitAuthenticatedUid()
         withPersonalMutation(currentUid) {
             val stored = plan.copy(id = plan.date)
             val task = mealPlans(currentUid).document(plan.date).set(stored.toFirestoreDocument())

@@ -127,7 +127,9 @@ class MealPlanner @Inject constructor(
         filters: RecipeFilters? = null,
         random: Random = Random.Default,
     ): MealPlanSelection {
-        repository.ensureReady()
+        // A reroll is an explicit user action and recipe selection is served by the bundled
+        // catalog. Do not wait for every Firestore owner listener before searching locally;
+        // the resulting personal write is queued to Firestore by the repository.
         val existing = repository.mealPlans.first().firstOrNull { it.date == date.toString() }
         val requestedFilters = filters ?: existing?.filters ?: WeeklyPlanDefaults.filtersFor(date)
         val excludedId = existing?.recipeId.orEmpty()

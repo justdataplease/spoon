@@ -246,10 +246,10 @@ fun SpoonApp(
                     )
                     MorePage.PREFERENCES -> FoodPreferencesScreen(
                         settings = mealPreferenceSettings,
+                        ingredientOptions = state.exploreOptions.ingredients,
                         onBack = { morePage = MorePage.HUB },
                         onSave = { settings ->
-                            viewModel.saveMealPreferenceSettings(settings)
-                            morePage = MorePage.HUB
+                            viewModel.saveMealPreferenceSettings(settings) { morePage = MorePage.HUB }
                         },
                         modifier = Modifier.padding(padding),
                     )

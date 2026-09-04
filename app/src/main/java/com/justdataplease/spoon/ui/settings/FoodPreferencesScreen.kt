@@ -15,12 +15,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Category
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Restaurant
@@ -29,11 +26,16 @@ import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.InputChip
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -50,20 +52,20 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import com.justdataplease.spoon.data.preferences.MealPreferenceSettings
+import com.justdataplease.spoon.ui.components.ProviderLabelKind
+import com.justdataplease.spoon.ui.components.greekProviderLabel
 import com.justdataplease.spoon.ui.model.AvailableCategories
 import com.justdataplease.spoon.ui.model.toDomainCategoryKey
 
-private const val MIN_INGREDIENT_LENGTH = 2
-private const val MAX_INGREDIENT_LENGTH = 60
 private const val MAX_EXCLUDED_INGREDIENTS = 40
 
-@OptIn(ExperimentalLayoutApi::class)
+@OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun FoodPreferencesScreen(
     settings: MealPreferenceSettings,
+    ingredientOptions: List<String>,
     onBack: () -> Unit,
     onSave: (MealPreferenceSettings) -> Unit,
     modifier: Modifier = Modifier,
@@ -71,28 +73,19 @@ fun FoodPreferencesScreen(
     BackHandler(onBack = onBack)
     var draft by remember(settings) { mutableStateOf(settings) }
     var ingredientInput by rememberSaveable { mutableStateOf("") }
-    var ingredientError by rememberSaveable { mutableStateOf<String?>(null) }
+    var ingredientMenuExpanded by rememberSaveable { mutableStateOf(false) }
     val keyboardController = LocalSoftwareKeyboardController.current
+    val availableCategoryKeys = remember {
+        AvailableCategories.map { category -> category.key.toDomainCategoryKey() }
+    }
 
-    fun addIngredient(): MealPreferenceSettings? {
-        val ingredient = ingredientInput.trim().replace(Whitespace, " ")
-        val validationError = when {
-            ingredient.length < MIN_INGREDIENT_LENGTH -> "Γράψε τουλάχιστον 2 χαρακτήρες."
-            ingredient.length > MAX_INGREDIENT_LENGTH -> "Το υλικό μπορεί να έχει έως 60 χαρακτήρες."
-            draft.excludedIngredientTerms.size >= MAX_EXCLUDED_INGREDIENTS ->
-                "Μπορείς να αποκλείσεις έως 40 υλικά."
-            draft.excludedIngredientTerms.any { it.equals(ingredient, ignoreCase = true) } ->
-                "Αυτό το υλικό υπάρχει ήδη."
-            else -> null
-        }
-        ingredientError = validationError
-        if (validationError != null) return null
-
-        val updatedDraft = draft.copy(excludedIngredientTerms = draft.excludedIngredientTerms + ingredient)
-        draft = updatedDraft
+    fun selectIngredient(candidate: String) {
+        if (draft.excludedIngredientTerms.size >= MAX_EXCLUDED_INGREDIENTS) return
+        val canonicalIngredient = canonicalIngredientOption(ingredientOptions, candidate) ?: return
+        draft = draft.copy(excludedIngredientTerms = draft.excludedIngredientTerms + canonicalIngredient)
         ingredientInput = ""
+        ingredientMenuExpanded = false
         keyboardController?.hide()
-        return updatedDraft
     }
 
     Column(modifier = modifier.fillMaxSize()) {
@@ -170,38 +163,86 @@ fun FoodPreferencesScreen(
                         }
                         Switch(
                             checked = draft.veganOnly,
-                            onCheckedChange = { draft = draft.copy(veganOnly = it) },
+                            onCheckedChange = { veganOnly ->
+                                draft = draft.copy(
+                                    veganOnly = veganOnly,
+                                    excludedCategories = reconcileCategoryExclusionsForVegan(
+                                        availableCategoryKeys = availableCategoryKeys,
+                                        excludedCategoryKeys = draft.excludedCategories,
+                                        veganOnly = veganOnly,
+                                    ),
+                                )
+                            },
                         )
                     }
                 }
             }
 
             item {
-                val includedCount = AvailableCategories.count { category ->
-                    category.key.toDomainCategoryKey() !in draft.excludedCategories
+                val includedKeys = includedCategoryKeys(
+                    availableCategoryKeys = availableCategoryKeys,
+                    excludedCategoryKeys = draft.excludedCategories,
+                )
+                val allCategoriesSelected = includedKeys == availableCategoryKeys.toSet()
+                val compatibleCategoryKeys = if (draft.veganOnly) {
+                    availableCategoryKeys.toSet() - VEGAN_INCOMPATIBLE_CATEGORY_KEYS
+                } else {
+                    availableCategoryKeys.toSet()
+                }
+                val includedCount = if (allCategoriesSelected) {
+                    compatibleCategoryKeys.size
+                } else {
+                    includedKeys.count(compatibleCategoryKeys::contains)
                 }
                 PreferenceCard(
-                    title = "Κατηγορίες που επιτρέπονται",
-                    subtitle = "Αποεπίλεξε όσες θέλεις να αποκλείσεις · $includedCount από ${AvailableCategories.size} ενεργές.",
+                    title = "Κατηγορίες που θέλεις",
+                    subtitle = when {
+                        draft.veganOnly && allCategoriesSelected ->
+                            "Όλες οι συμβατές vegan κατηγορίες είναι ενεργές."
+                        allCategoriesSelected -> "Όλες οι κατηγορίες είναι ενεργές."
+                        else -> "$includedCount από ${compatibleCategoryKeys.size} ενεργές."
+                    },
                     icon = Icons.Outlined.Category,
                 ) {
                     FlowRow(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalArrangement = Arrangement.spacedBy(7.dp),
                     ) {
+                        FilterChip(
+                            selected = allCategoriesSelected,
+                            onClick = {
+                                draft = draft.copy(excludedCategories = emptySet())
+                            },
+                            label = { Text("Όλες") },
+                            leadingIcon = if (allCategoriesSelected) {
+                                {
+                                    Icon(
+                                        Icons.Filled.Check,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(17.dp),
+                                    )
+                                }
+                            } else {
+                                null
+                            },
+                        )
                         AvailableCategories.forEach { category ->
                             val domainKey = category.key.toDomainCategoryKey()
-                            val included = domainKey !in draft.excludedCategories
+                            val incompatibleWithVegan = draft.veganOnly &&
+                                domainKey in VEGAN_INCOMPATIBLE_CATEGORY_KEYS
+                            val included = !allCategoriesSelected && domainKey in includedKeys
                             FilterChip(
                                 selected = included,
                                 onClick = {
-                                    val exclusions = if (included) {
-                                        draft.excludedCategories + domainKey
-                                    } else {
-                                        draft.excludedCategories - domainKey
-                                    }
-                                    draft = draft.copy(excludedCategories = exclusions)
+                                    draft = draft.copy(
+                                        excludedCategories = toggleCategoryInclusions(
+                                            availableCategoryKeys = availableCategoryKeys,
+                                            excludedCategoryKeys = draft.excludedCategories,
+                                            categoryKey = domainKey,
+                                        ),
+                                    )
                                 },
+                                enabled = !incompatibleWithVegan,
                                 label = { Text("${category.emoji} ${category.label}") },
                                 leadingIcon = if (included) {
                                     {
@@ -217,43 +258,89 @@ fun FoodPreferencesScreen(
                             )
                         }
                     }
+                    if (draft.veganOnly) {
+                        Text(
+                            "Κρέας, κοτόπουλο και ψάρι δεν είναι διαθέσιμα στη vegan επιλογή.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
             }
 
             item {
                 PreferenceCard(
                     title = "Αποκλεισμένα υλικά",
-                    subtitle = "Δεν θα εμφανίζονται συνταγές που περιέχουν κάποιο από αυτά.",
+                    subtitle = "Διάλεξε υλικά από τον υπάρχοντα κατάλογο συνταγών.",
                     icon = Icons.Outlined.Restaurant,
                 ) {
-                    OutlinedTextField(
-                        value = ingredientInput,
-                        onValueChange = {
-                            ingredientInput = it
-                            ingredientError = null
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        label = { Text("Υλικό προς αποκλεισμό") },
-                        placeholder = { Text("π.χ. μανιτάρια") },
-                        supportingText = {
-                            Text(
-                                ingredientError
-                                    ?: "${draft.excludedIngredientTerms.size}/$MAX_EXCLUDED_INGREDIENTS υλικά",
-                            )
-                        },
-                        isError = ingredientError != null,
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                        keyboardActions = KeyboardActions(onDone = { addIngredient() }),
-                        trailingIcon = {
-                            IconButton(
-                                onClick = { addIngredient() },
-                                enabled = ingredientInput.isNotBlank(),
-                            ) {
-                                Icon(Icons.Outlined.Add, contentDescription = "Προσθήκη υλικού")
-                            }
-                        },
+                    val suggestions = ingredientSuggestions(
+                        ingredientOptions = ingredientOptions,
+                        excludedIngredients = draft.excludedIngredientTerms,
+                        query = ingredientInput,
                     )
+                    val canAddIngredient = ingredientOptions.isNotEmpty() &&
+                        draft.excludedIngredientTerms.size < MAX_EXCLUDED_INGREDIENTS
+                    val showIngredientMenu = ingredientMenuExpanded && suggestions.isNotEmpty()
+                    ExposedDropdownMenuBox(
+                        expanded = showIngredientMenu,
+                        onExpandedChange = { expanded ->
+                            if (canAddIngredient) ingredientMenuExpanded = expanded
+                        },
+                    ) {
+                        OutlinedTextField(
+                            value = ingredientInput,
+                            onValueChange = { query ->
+                                ingredientInput = query
+                                ingredientMenuExpanded = true
+                            },
+                            modifier = Modifier
+                                .menuAnchor(
+                                    type = MenuAnchorType.PrimaryEditable,
+                                    enabled = canAddIngredient,
+                                )
+                                .fillMaxWidth(),
+                            enabled = canAddIngredient,
+                            label = { Text("Αναζήτησε υλικό") },
+                            placeholder = { Text("π.χ. κοτόπουλο") },
+                            supportingText = {
+                                Text(
+                                    when {
+                                        ingredientOptions.isEmpty() ->
+                                            "Δεν υπάρχουν διαθέσιμα υλικά στον κατάλογο."
+                                        !canAddIngredient ->
+                                            "Έχεις φτάσει το όριο των $MAX_EXCLUDED_INGREDIENTS υλικών."
+                                        else ->
+                                            "${draft.excludedIngredientTerms.size}/$MAX_EXCLUDED_INGREDIENTS υλικά"
+                                    },
+                                )
+                            },
+                            singleLine = true,
+                            trailingIcon = {
+                                ExposedDropdownMenuDefaults.TrailingIcon(
+                                    expanded = showIngredientMenu,
+                                )
+                            },
+                        )
+                        ExposedDropdownMenu(
+                            expanded = showIngredientMenu,
+                            onDismissRequest = { ingredientMenuExpanded = false },
+                        ) {
+                            suggestions.forEach { rawIngredient ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            greekProviderLabel(
+                                                rawIngredient,
+                                                ProviderLabelKind.INGREDIENT,
+                                            ),
+                                        )
+                                    },
+                                    onClick = { selectIngredient(rawIngredient) },
+                                )
+                            }
+                        }
+                    }
 
                     if (draft.excludedIngredientTerms.isEmpty()) {
                         Text(
@@ -269,6 +356,10 @@ fun FoodPreferencesScreen(
                             verticalArrangement = Arrangement.spacedBy(7.dp),
                         ) {
                             draft.excludedIngredientTerms.sorted().forEach { ingredient ->
+                                val displayIngredient = greekProviderLabel(
+                                    ingredient,
+                                    ProviderLabelKind.INGREDIENT,
+                                )
                                 InputChip(
                                     selected = true,
                                     onClick = {
@@ -276,11 +367,11 @@ fun FoodPreferencesScreen(
                                             excludedIngredientTerms = draft.excludedIngredientTerms - ingredient,
                                         )
                                     },
-                                    label = { Text(ingredient) },
+                                    label = { Text(displayIngredient) },
                                     trailingIcon = {
                                         Icon(
                                             Icons.Outlined.Close,
-                                            contentDescription = "Αφαίρεση $ingredient",
+                                            contentDescription = "Αφαίρεση $displayIngredient",
                                             modifier = Modifier.size(17.dp),
                                         )
                                     },
@@ -305,7 +396,7 @@ fun FoodPreferencesScreen(
                     onClick = {
                         draft = MealPreferenceSettings()
                         ingredientInput = ""
-                        ingredientError = null
+                        ingredientMenuExpanded = false
                     },
                     enabled = draft.hasActiveSelections() || ingredientInput.isNotBlank(),
                     modifier = Modifier.weight(1f).height(54.dp),
@@ -313,14 +404,8 @@ fun FoodPreferencesScreen(
                     Text("Επαναφορά όλων")
                 }
                 Button(
-                    onClick = {
-                        if (ingredientInput.isBlank()) {
-                            onSave(draft)
-                        } else {
-                            addIngredient()?.let(onSave)
-                        }
-                    },
-                    enabled = draft != settings || ingredientInput.isNotBlank(),
+                    onClick = { onSave(draft) },
+                    enabled = draft != settings,
                     modifier = Modifier.weight(1f).height(54.dp),
                 ) {
                     Text("Αποθήκευση")
@@ -369,5 +454,3 @@ private fun PreferenceCard(
         }
     }
 }
-
-private val Whitespace = Regex("\\s+")
