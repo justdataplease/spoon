@@ -154,6 +154,10 @@ def _prepared_for_vegan_test(
         "σολομός",
         "ψάρι",
         "αυγό",
+        "αβγά",
+        "κρέμα",
+        "tuna",
+        "duck",
         "γάλα",
         "παρμεζάνα",
         "βούτυρο",
@@ -494,3 +498,12 @@ def test_catalog_audit_detects_planner_predicate_drift(tmp_path, column, bad_val
     report = audit_catalog(output)
     assert report["indexMismatchCount"] == 1
     assert column in report["indexMismatchSamples"][0]["plannerDifferences"]
+
+
+def test_vegan_eligibility_also_checks_ingredient_facets():
+    record = _record("facet_vegan", "fixture", title="Δοκιμή")
+    record["category"] = "vegetables"
+    record["dietLabels"] = ["Vegan"]
+    record["ingredientLabels"] = ["Αυγά"]
+    record["ingredientSections"] = [{"ingredients": [{"title": "λαχανικά", "info": ""}]}]
+    assert prepare_recipe(record)[0].vegan_eligible == 0

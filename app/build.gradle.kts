@@ -24,8 +24,8 @@ android {
         applicationId = "com.spoon.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 16
-        versionName = "0.7.6"
+        versionCode = 17
+        versionName = "0.7.7"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("boolean", "HAS_FIREBASE_CONFIG", hasFirebaseConfig.toString())
     }
@@ -88,6 +88,9 @@ dependencies {
     implementation(libs.androidx.exifinterface)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.coil.compose)
+
+    androidTestImplementation("androidx.test:runner:1.7.0")
+    androidTestImplementation(libs.junit)
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
