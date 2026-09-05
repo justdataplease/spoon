@@ -108,6 +108,21 @@ $env:ANDROID_SDK_ROOT=$env:ANDROID_HOME
 .\gradlew.bat assembleRelease
 ```
 
+For catalog, taxonomy, or filtering changes, also run the full catalog contract
+on a connected Android emulator before distributing an APK:
+
+```powershell
+.\gradlew.bat connectedDebugAndroidTest
+python -m pytest tools/recipe_importer/tests -q
+python tools/recipe_importer/audit_catalog_quality.py
+```
+
+This executes production SQLite queries and Kotlin filters against all bundled
+recipes, checks every published facet, repeated planning across every category,
+cache eviction, saved-state reopening, and catalog replacement on upgrade.
+The tests keep their catalog and personal preferences in an isolated namespace.
+See [the device verification report](docs/device-catalog-audit-2026-09-05.md).
+
 The optimized, signed personal release APK is delivered at `dist/spoon.apk`. To
 install or upgrade it over USB:
 

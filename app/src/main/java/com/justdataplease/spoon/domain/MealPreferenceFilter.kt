@@ -59,132 +59,138 @@ internal fun String.containsAnimalDerivedIngredient(info: String = ""): Boolean 
     return ALTERNATIVE_SEPARATOR.split(ingredientText).any(String::containsAnimalDerivedClause)
 }
 
+/** Mirrors build_local_catalog.py; CatalogContractDeviceTest checks every bundled row. */
 private fun String.containsAnimalDerivedClause(): Boolean {
-    val localText = normalizedCatalogToken()
-    val words = localText.split(' ').filter(String::isNotBlank)
-    if (words.isEmpty()) return false
-
-    fun hasAnyPrefix(prefixes: Set<String>): Boolean =
-        words.any { word -> prefixes.any(word::startsWith) }
-
-    val hasVeganQualifier = hasAnyPrefix(VEGAN_QUALIFIER_PREFIXES)
-    if (hasAnyPrefix(FLESH_AND_SEAFOOD_PREFIXES)) return true
-
-    val hasEggProduct = hasAnyPrefix(GREEK_EGG_PREFIXES) ||
-        hasAnyPrefix(MAYONNAISE_PREFIXES) ||
-        words.any { it == "egg" || it == "eggs" }
-    if (hasEggProduct &&
-        !hasVeganQualifier &&
-        !localText.containsAnyPhrase(WITHOUT_EGG_PHRASES)
-    ) return true
-
-    if (hasAnyPrefix(MILK_PREFIXES) &&
-        !localText.containsAnyPhrase(PLANT_MILK_PHRASES)
-    ) return true
-    if ((hasAnyPrefix(CHEESE_PREFIXES) || words.any(DIRECT_CHEESE_WORDS::contains)) &&
-        !localText.containsAnyPhrase(PLANT_CHEESE_PHRASES) &&
-        !localText.containsAnyPhrase(WITHOUT_CHEESE_PHRASES)
-    ) return true
-    if (hasAnyPrefix(BUTTER_PREFIXES) &&
-        !localText.containsAnyPhrase(PLANT_BUTTER_PHRASES)
-    ) return true
-    if (hasAnyPrefix(YOGURT_PREFIXES) &&
-        !localText.containsAnyPhrase(PLANT_YOGURT_PHRASES)
-    ) return true
-    if (hasAnyPrefix(CREAM_PREFIXES) &&
-        !localText.containsAnyPhrase(PLANT_CREAM_PHRASES)
-    ) return true
-
-    if (hasAnyPrefix(BROTH_PREFIXES) &&
-        !hasVeganQualifier &&
-        !hasAnyPrefix(PLANT_BROTH_PREFIXES)
-    ) return true
-    if (hasAnyPrefix(PESTO_PREFIXES) &&
-        !hasVeganQualifier &&
-        !localText.containsAnyPhrase(WITHOUT_CHEESE_PHRASES)
-    ) return true
-
-    return words.any { it == "μελι" || it == "μελιου" || it == "honey" } ||
-        hasAnyPrefix(OTHER_ANIMAL_PRODUCT_PREFIXES)
+    val words = normalizedCatalogToken().split(' ').filter(String::isNotBlank)
+    return words.indices.any { index ->
+        val kind = animalKind(words[index], words.getOrNull(index - 1)) ?: return@any false
+        val nearby = words.subList(maxOf(0, index - 3), minOf(words.size, index + 4))
+        val directlyNegated = words.getOrNull(index - 1)?.hasStem(NEGATION_STEMS) == true
+        val negatedKind = if (kind == "pesto") "cheese" else kind
+        val relevantKindNegated = words.indices.any { other ->
+            other > 0 && words[other - 1].hasStem(NEGATION_STEMS) &&
+                animalKind(words[other], words[other - 1]) == negatedKind
+        }
+        val explicitlyVegan = nearby.any { it.hasStem(UNIVERSAL_VEGAN_QUALIFIER_STEMS) }
+        val plantBases = when (kind) {
+            "milk", "cheese", "yogurt", "dairy" -> PLANT_DAIRY_BASE_STEMS
+            "butter" -> PLANT_BUTTER_BASE_STEMS
+            "broth" -> PLANT_BROTH_BASE_STEMS
+            else -> emptySet()
+        }
+        val hasPlantBase = nearby.any { it.hasStem(plantBases) }
+        !(directlyNegated || relevantKindNegated || explicitlyVegan || hasPlantBase)
+    }
 }
 
-private fun String.containsAnyPhrase(phrases: Set<String>): Boolean {
-    val padded = " $this "
-    return phrases.any { phrase -> " $phrase " in padded }
-}
+private fun String.hasStem(stems: Set<String>): Boolean = stems.any(::startsWith)
 
-private val RECOGNIZED_VEGAN_LABELS = setOf(
-    "vegan",
-    "αυστηρα χορτοφαγικη vegan",
-)
+private fun animalKind(token: String, previous: String?): String? =
+    ANIMAL_EXACT_TOKENS.entries.firstOrNull { (kind, exact) ->
+        // "σε φέτα" describes a slice, rather than feta cheese.
+        !(kind == "cheese" && token in setOf("φετα", "φετασ") && previous == "σε") &&
+            (token in exact || token.hasStem(ANIMAL_TOKEN_STEMS[kind].orEmpty()))
+    }?.key
 
-private val ANIMAL_CATEGORIES = setOf("meat", "poultry", "fish")
+private val ALTERNATIVE_SEPARATOR = Regex("""(?<![\p{L}\p{N}_])(?:ή|or)(?![\p{L}\p{N}_])""", RegexOption.IGNORE_CASE)
 
-private val ALTERNATIVE_SEPARATOR = Regex("""\b(?:ή|or)\b""", RegexOption.IGNORE_CASE)
+private val RECOGNIZED_VEGAN_LABELS = setOf("vegan", "αυστηρα χορτοφαγικη vegan")
+private val ANIMAL_CATEGORIES = setOf("fish", "meat", "poultry")
 
-private val FLESH_AND_SEAFOOD_PREFIXES = setOf(
-    "κρεασ", "κρεατ", "μοσχαρ", "βοδιν", "χοιριν", "αρνι", "κατσικ",
-    "κοτοπουλ", "κοτα", "γαλοπουλ", "παπια", "μπεικον", "ζαμπον", "λουκανικ",
-    "ψαρ", "σολομ", "τονοσ", "τονου", "μπακαλιαρ", "γαυρ", "σαρδελ", "αντζουγ", "πεστροφ", "ρεγγ",
-    "χταποδ", "καλαμαρ", "γαριδ", "καβουρ", "μυδι", "στρειδ", "σουπι", "αστακ",
-    "θαλασσιν", "meat", "beef", "veal", "pork", "lamb", "goat", "chicken",
-    "turkey", "duck", "bacon", "ham", "sausage", "fish", "salmon", "tuna",
-    "cod", "anchov", "sardine", "trout", "octopus", "squid", "shrimp", "prawn",
-    "crab", "mussel", "oyster", "lobster", "seafood", "herring", "worcester",
-)
-
-private val GREEK_EGG_PREFIXES = setOf("αυγ", "αβγ")
-private val MAYONNAISE_PREFIXES = setOf("μαγιονεζ", "mayonnaise", "mayo", "αγιολι", "aioli")
-private val VEGAN_QUALIFIER_PREFIXES = setOf("φυτικ", "vegan", "νηστισιμ", "νηστει")
-private val WITHOUT_EGG_PHRASES = setOf(
-    "χωρισ αυγο", "χωρισ αυγα", "χωρισ αβγο", "χωρισ αβγα", "without egg", "without eggs",
-    "eggless",
-)
-
-private val MILK_PREFIXES = setOf("γαλα", "γαλακτ", "milk", "dairy")
-private val CHEESE_PREFIXES = setOf(
-    "τυρ", "παρμεζαν", "μοτσαρελ", "γραβιερα", "κασερι", "κεφαλοτυρ", "μανουρ",
-    "ανθοτυρ", "μυζηθρ", "ρικοτα", "cheese", "parmesan", "mozzarella", "cheddar",
-    "ricotta",
-)
-private val DIRECT_CHEESE_WORDS = setOf("φετα", "φετασ", "feta")
-private val BUTTER_PREFIXES = setOf("βουτυρ", "butter")
-private val YOGURT_PREFIXES = setOf("γιαουρτ", "yogurt", "yoghurt")
-private val CREAM_PREFIXES = setOf("κρεμα", "cream", "whey", "casein")
-private val BROTH_PREFIXES = setOf("ζωμ", "broth", "stock", "bouillon")
-private val PLANT_BROTH_PREFIXES = setOf(
-    "λαχανικ", "μανιταρ", "vegetable", "veggie", "mushroom",
-)
-private val PESTO_PREFIXES = setOf("πεστο", "pesto")
-private val WITHOUT_CHEESE_PHRASES = setOf(
-    "χωρισ τυρι", "χωρισ παρμεζανα", "διχωσ τυρι", "without cheese", "no cheese",
-)
-
-private val PLANT_MILK_PHRASES = setOf(
-    "γαλα καρυδασ", "γαλα σογιασ", "γαλα βρωμησ", "γαλα αμυγδαλου", "γαλα ρυζιου",
-    "φυτικο γαλα", "νηστισιμο γαλα", "vegan γαλα", "coconut milk", "soy milk",
-    "soya milk", "oat milk", "almond milk", "rice milk", "cashew milk", "plant milk",
-    "vegan milk", "non dairy milk", "dairy free milk",
-)
-private val PLANT_CHEESE_PHRASES = setOf(
-    "φυτικο τυρι", "τυρι φυτικο", "νηστισιμο τυρι", "τυρι νηστισιμο", "vegan τυρι",
-    "plant cheese", "vegan cheese", "non dairy cheese", "dairy free cheese",
-)
-private val PLANT_BUTTER_PHRASES = setOf(
-    "βουτυρο κακαο", "βουτυρο καρυδασ", "βουτυρο φιστικιου", "βουτυρο αμυγδαλου",
-    "φυτικο βουτυρο", "νηστισιμο βουτυρο", "vegan βουτυρο", "cocoa butter",
-    "coconut butter", "peanut butter", "almond butter", "plant butter", "vegan butter",
-)
-private val PLANT_YOGURT_PHRASES = setOf(
-    "γιαουρτι καρυδασ", "γιαουρτι σογιασ", "γιαουρτι αμυγδαλου", "φυτικο γιαουρτι",
-    "νηστισιμο γιαουρτι", "vegan γιαουρτι", "coconut yogurt", "soy yogurt",
-    "almond yogurt", "plant yogurt", "vegan yogurt",
-)
-private val PLANT_CREAM_PHRASES = setOf(
-    "κρεμα καρυδασ", "κρεμα σογιασ", "κρεμα βρωμησ", "φυτικη κρεμα", "νηστισιμη κρεμα",
-    "vegan κρεμα", "coconut cream", "soy cream", "oat cream", "plant cream", "vegan cream",
+private val ANIMAL_EXACT_TOKENS = mapOf(
+    "meat" to setOf(
+        "bacon", "beef", "chicken", "duck", "goat", "ham", "lamb", "meat", "pork", "sausage",
+        "turkey", "veal", "κοτα", "κοτασ", "κοτεσ", "κοτων", "κρεασ", "κρεατα", "κρεατοσ",
+    ),
+    "fish" to setOf(
+        "anchovies", "anchovy", "cod", "crab", "fish", "herring", "lobster", "mussel", "mussels",
+        "octopus", "oyster", "oysters", "prawn", "prawns", "salmon", "sardine", "sardines",
+        "seafood", "shrimp", "shrimps", "squid", "trout", "tuna", "καβουρι", "καβουρια",
+        "καβουριου", "μυδι", "μυδια", "μυδιων", "σουπια", "τονο", "τονοσ", "τονου", "τσιπουρα",
+        "ψαρι", "ψαρια", "ψαριου", "ψαριων",
+    ),
+    "egg" to setOf(
+        "egg", "eggs", "αυγα", "αυγο", "αυγου", "αυγων",
+    ),
+    "milk" to setOf(
+        "casein", "dairy", "milk", "whey", "γαλα", "γαλακτοσ", "γαλατα",
+    ),
+    "cheese" to setOf(
+        "brie", "cheddar", "cheese", "cheeses", "feta", "gouda", "halloumi", "mascarpone",
+        "mozzarella", "parmesan", "ricotta", "τυρι", "τυρια", "τυριου", "τυριων", "φετα", "φετασ",
+    ),
+    "butter" to setOf(
+        "butter", "βουτυρα", "βουτυρο", "βουτυρου",
+    ),
+    "yogurt" to setOf(
+        "yoghurt", "yogurt",
+    ),
+    "dairy" to setOf(
+        "cream", "creme", "smetana", "κεφιρ", "κρεμα", "κρεμασ", "ξινοκρεμα", "σαντιγι",
+    ),
+    "honey" to setOf(
+        "honey", "μελι", "μελιου",
+    ),
+    "broth" to setOf(
+        "bouillon", "broth", "stock",
+    ),
+    "pesto" to setOf(
+        "pesto", "πεστο",
+    ),
+    "other_animal_product" to setOf(
+        "gelatin", "gelatine", "lard",
+    ),
 )
 
-private val OTHER_ANIMAL_PRODUCT_PREFIXES = setOf(
-    "ζελατιν", "λαρδι", "gelatin", "gelatine", "lard",
+private val ANIMAL_TOKEN_STEMS = mapOf(
+    "meat" to setOf(
+        "αρνι", "βοδιν", "γαλοπουλ", "ζαμπον", "κατσικ", "κοκορ", "κοτοπουλ", "κουνελ", "λαρδι",
+        "λουκανικ", "μορταδελ", "μοσχαρ", "πανσετ", "παπι", "προσιουτ", "προσουτ", "σαλαμι",
+        "χοιριν",
+    ),
+    "fish" to setOf(
+        "worcester", "αθεριν", "αντζουγ", "αστακ", "αυγοταραχ", "γαριδ", "γαυρ", "καλαμαρ",
+        "καραβιδ", "κουτσομουρ", "λαβρακ", "μπακαλιαρ", "παλαμιδ", "πεστροφ", "ρεγγ", "σαρδελ",
+        "σκουμπρ", "σολομ", "σουριμ", "στρειδ", "συναγριδ", "ταραμ", "χαβιαρ", "χταποδ",
+    ),
+    "egg" to setOf(
+        "aioli", "mayo", "mayonnaise", "αβγ", "αγιολι", "αυγ", "μαγιονεζ",
+    ),
+    "cheese" to setOf(
+        "ανθοτυρ", "γαλοτυρ", "γκουντ", "γραβιερ", "κασερ", "κασσερ", "κεφαλοτυρ", "μανουρ",
+        "μασκαρπον", "μοτσαρελ", "μυζηθρ", "ξινομυζηθρ", "παρμεζ", "πεκοριν", "ρικοτ", "ροκφορ",
+        "χαλουμ",
+    ),
+    "yogurt" to setOf(
+        "γιαουρτ",
+    ),
+    "broth" to setOf(
+        "ζωμ",
+    ),
+    "other_animal_product" to setOf(
+        "ζελατιν", "λαρδι",
+    ),
+)
+
+private val UNIVERSAL_VEGAN_QUALIFIER_STEMS = setOf(
+    "vegan", "νηστει", "νηστισιμ", "φυτικ",
+)
+
+private val NEGATION_STEMS = setOf(
+    "no", "without", "διχωσ", "χωρισ",
+)
+
+private val PLANT_DAIRY_BASE_STEMS = setOf(
+    "almond", "cashew", "coconut", "hazelnut", "hemp", "macadamia", "oat", "pea", "rice", "soy",
+    "soya", "αμυγδαλ", "βρωμη", "κανναβ", "καρυδ", "κασι", "μακανταμ", "μπιζελ", "ρυζ", "σογι",
+    "φουντουκ",
+)
+
+private val PLANT_BUTTER_BASE_STEMS = setOf(
+    "almond", "cashew", "cocoa", "coconut", "hazelnut", "peanut", "sesame", "tahini", "αμυγδαλ",
+    "ελαιολ", "κακαο", "καρυδ", "κασι", "ξηρων", "σησαμ", "ταχιν", "φιστικ", "φουντουκ", "φυστικ",
+)
+
+private val PLANT_BROTH_BASE_STEMS = setOf(
+    "mushroom", "vegetable", "veggie", "λαχανικ", "μανιταρ",
 )

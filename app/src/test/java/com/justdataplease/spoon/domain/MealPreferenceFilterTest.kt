@@ -115,6 +115,10 @@ class MealPreferenceFilterTest {
             "καπνιστός σολομός",
             "γαρίδες καθαρισμένες",
             "2 αυγά",
+            "αβγά",
+            "κρέμα",
+            "tuna",
+            "duck",
             "γάλα πλήρες",
             "τυρί φέτα",
             "βούτυρο",
@@ -180,6 +184,22 @@ class MealPreferenceFilterTest {
                 veganRecipe.withIngredient(title, info).matchesMealPreferences(veganOnly),
             )
         }
+    }
+
+    @Test
+    fun `local plant qualifiers and slice descriptions do not reject vegan recipes`() {
+        listOf(
+            "τυρί" to "φυτικό προϊόν",
+            "γάλα" to "από αμύγδαλα",
+            "ψωμί" to "σε φέτα",
+        ).forEach { (title, info) ->
+            assertTrue("$title $info", veganRecipe.withIngredient(title, info).matchesMealPreferences(veganOnly))
+        }
+    }
+
+    @Test
+    fun `animal ingredient tags veto vegan eligibility even with plant raw ingredients`() {
+        assertFalse(veganRecipe.copy(ingredientLabels = listOf("Αυγά")).matchesMealPreferences(veganOnly))
     }
 
     private fun Recipe.withIngredient(title: String, info: String = ""): Recipe = copy(

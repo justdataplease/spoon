@@ -3,6 +3,10 @@
 The expanded review found missing taxonomy mappings beyond chicken. Release 0.7.6
 (version code 16) contains the full corrections and replaces 0.7.5 at `dist/spoon.apk`.
 
+Later device verification found app/database filter disagreements that the Python
+index audit could not detect. Release 0.7.7 corrects them; see the
+[full device verification report](device-catalog-audit-2026-09-05.md).
+
 ## Scope and findings
 
 Every one of the 20,861 records was compared with its preserved publisher evidence:

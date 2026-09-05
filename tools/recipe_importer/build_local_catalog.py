@@ -222,7 +222,7 @@ _ANIMAL_EXACT_TOKENS: Mapping[str, frozenset[str]] = {
     "meat": frozenset({
         "κρεασ", "κρεατα", "κρεατοσ", "κοτα", "κοτασ", "κοτεσ", "κοτων",
         "meat", "chicken", "turkey",
-        "beef", "pork", "lamb", "bacon", "ham",
+        "beef", "pork", "lamb", "bacon", "ham", "veal", "goat", "duck", "sausage",
     }),
     "fish": frozenset({
         "ψαρι", "ψαρια", "ψαριου", "ψαριων", "τονοσ", "τονο", "τονου",
@@ -230,7 +230,7 @@ _ANIMAL_EXACT_TOKENS: Mapping[str, frozenset[str]] = {
         "σουπια", "τσιπουρα", "fish", "salmon", "anchovy", "anchovies",
         "sardine", "sardines", "shrimp", "shrimps", "prawn", "prawns",
         "octopus", "squid", "mussel", "mussels", "crab", "lobster",
-        "seafood",
+        "seafood", "tuna", "cod", "herring", "trout", "oyster", "oysters",
     }),
     "egg": frozenset({"αυγο", "αυγα", "αυγου", "αυγων", "egg", "eggs"}),
     "milk": frozenset({
@@ -244,7 +244,7 @@ _ANIMAL_EXACT_TOKENS: Mapping[str, frozenset[str]] = {
     "butter": frozenset({"βουτυρο", "βουτυρου", "βουτυρα", "butter"}),
     "yogurt": frozenset({"yogurt", "yoghurt"}),
     "dairy": frozenset({
-        "σαντιγι", "ξινοκρεμα", "smetana", "cream", "creme", "κεφιρ",
+        "σαντιγι", "ξινοκρεμα", "smetana", "cream", "creme", "κεφιρ", "κρεμα", "κρεμασ",
     }),
     "honey": frozenset({"μελι", "μελιου", "honey"}),
     "broth": frozenset({"broth", "stock", "bouillon"}),
@@ -265,7 +265,7 @@ _ANIMAL_TOKEN_STEMS: Mapping[str, tuple[str, ...]] = {
         "συναγριδ", "ρεγγ", "ταραμ", "αυγοταραχ", "χαβιαρ", "σουριμ",
         "worcester",
     ),
-    "egg": ("μαγιονεζ", "mayonnaise", "mayo", "αγιολι", "aioli"),
+    "egg": ("αβγ", "αυγ", "μαγιονεζ", "mayonnaise", "mayo", "αγιολι", "aioli"),
     "cheese": (
         "ανθοτυρ", "γαλοτυρ", "κεφαλοτυρ", "παρμεζ", "γραβιερ", "κασσερ",
         "κασερ", "μοτσαρελ", "ρικοτ", "μανουρ", "γκουντ", "χαλουμ",
@@ -557,6 +557,13 @@ def _is_vegan_eligible(
     if VEGAN_DIET_TOKENS.isdisjoint(facet_tokens["diet"]):
         return False
     if normalize_search_token(category) in VEGAN_VETO_CATEGORIES:
+        return False
+    # Facet evidence must veto animal ingredients just like raw title/info does.
+    # Keep aligned with MealPreferenceFilter.kt and the full-catalog device test.
+    if any(
+        _ingredient_has_unqualified_animal_product(label, "")
+        for label in record.get("ingredientLabels", [])
+    ):
         return False
     return not any(
         _ingredient_has_unqualified_animal_product(title, info)

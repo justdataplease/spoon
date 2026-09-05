@@ -5,7 +5,7 @@ import com.justdataplease.spoon.data.model.EaseLevel
 import com.justdataplease.spoon.data.model.MealCategory
 import com.justdataplease.spoon.data.model.Recipe
 import com.justdataplease.spoon.data.preferences.MealPreferenceSettings
-import java.text.Normalizer
+import com.justdataplease.spoon.data.local.normalizedCatalogToken
 import java.util.Locale
 
 /** All constraints used by the recipe explorer. Empty values leave that facet unconstrained. */
@@ -155,12 +155,7 @@ internal fun Recipe.isActiveGreekRecipe(): Boolean {
 
 private fun String.normalizedKey(): String = trim().lowercase(Locale.ROOT)
 
-private fun String.normalizedSearchText(): String =
-    Normalizer.normalize(this, Normalizer.Form.NFD)
-        .filterNot { Character.getType(it) == Character.NON_SPACING_MARK.toInt() }
-        .lowercase(Locale.ROOT)
-        .replace('ς', 'σ')
-        .trim()
+private fun String.normalizedSearchText(): String = normalizedCatalogToken()
 
 private data class RankedRecipe(
     val recipe: Recipe,
