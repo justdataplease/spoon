@@ -437,3 +437,24 @@ That status change does not mutate an installed APK. After all provider refreshe
 succeed, rebuild the SQLite asset with
 `python tools/recipe_importer/build_local_catalog.py`, verify its counts/hashes,
 build the optimized signed release, and distribute the new `dist/spoon.apk`.
+
+
+## Full category and tag audit
+
+Run both audits after changing taxonomy mappings or rebuilding the catalog:
+
+```powershell
+python -m tools.recipe_importer.audit_source_taxonomy --output tools/recipe_importer/output/source-taxonomy-audit.json
+python tools/recipe_importer/audit_catalog_quality.py
+```
+
+The source audit visits every record in the three complete artifacts. It compares
+primary/secondary categories and all six facet families plus general tags with
+preserved publisher taxonomy. It reports missing tag families and inventories
+every ingredient label; category drift, tag drift, or unreadable source evidence
+makes it fail. This verifies reproducibility of the reviewed mappings. It does
+not certify that every publisher tag is complete or culinarily correct.
+
+The bundled audit independently checks compressed recipe payloads against SQLite
+category, title, facet, ingredient-text, effort, rating, time, quick, and vegan
+indexes. Rebuild and distribute an APK to deliver corrected public data to phones.

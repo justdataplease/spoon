@@ -159,6 +159,7 @@ _CATEGORY_LABEL_MAP = {
     "poultry": {
         "πουλερικα", "κοτοπουλο", "γαλοπουλα", "παπια", "poultry", "chicken",
         "poulerika", "kotopoulo", "galopoula", "papia",
+        "κιμάς κοτόπουλου", "kimas-kotopoulou",
     },
     "meat": {
         "κρεας", "μοσχαρι", "χοιρινο", "αρνι", "κατσικι", "κουνελι", "meat",
@@ -173,8 +174,41 @@ _CATEGORY_LABEL_MAP = {
         "patates",
     },
 }
+# Reviewed exact publisher labels from the complete ingredient taxonomy. These
+# extend category evidence, not substring matching against recipe prose. Pantry
+# ingredients (flour, dairy, sugar, oils, fruit, herbs) do not identify a main meal.
+_REVIEWED_MAIN_INGREDIENT_LABELS = {
+    "fish": {
+        "Γαρίδες", "Μπακαλιάρος", "Χταπόδι", "Καλαμάρι / Θράψαλο", "Μύδια",
+        "Σουπιές", "Γαύρος", "Σολομός", "Σαρδέλα", "Τόνος", "Πέστροφα",
+        "Καβούρι", "Κυδώνια / Όστρακα", "Γλώσσα", "Λαβράκι", "Τσιπούρα",
+        "Πεσκανδρίτσα", "Σκορπίνα", "Καραβίδες", "Ρέγκα", "Μπαρμπούνια",
+        "Αστακός", "Κολιός", "Πέρκα", "Παλαμίδα", "Ροφός",
+        "Αθερίνα / Μαρίδα", "Λακέρδα", "Βραστόψαρα", "Μαγιάτικο", "Σαλάχι",
+        "Χριστόψαρο", "Συναγρίδα", "Γόπες", "Κουτσομούρες", "Κέφαλος",
+        "Σαφρίδια", "Χάνος", "Κοκκινόψαρο",
+    },
+    "legumes": {"Ρεβύθια", "Γίγαντες", "Μαυρομάτικα φασόλια", "Κουκιά"},
+    "poultry": {"Κόκορας", "Κιμάς γαλοπούλας", "Φασιανός"},
+    "meat": {
+        "Μοσχαρίσιος κιμάς", "Χοιρινός κιμάς", "Αρνίσιος κιμάς", "Ανάμεικτος κιμάς",
+        "Κιμάς", "Λουκάνικα", "Αλλαντικά", "Μπέικον", "Συκώτι", "Αγριογούρουνο",
+        "Απάκι", "Προβατίνα", "Ελάφι",
+    },
+    "pasta_rice": {"Πλιγούρι", "Κινόα", "Τραχανάς", "Χυλοπίτες", "Κους κους", "Νουντλς"},
+    "vegetables": {
+        "Ντομάτα", "Μανιτάρια", "Πιπεριές", "Κολοκυθάκια", "Καρότα", "Μελιτζάνες",
+        "Σπανάκι", "Κολοκύθα", "Πράσα", "Λάχανο", "Αρακάς", "Αγκινάρες",
+        "Φασολάκια", "Αβοκάντο", "Παντζάρια", "Μαρούλι", "Αγγούρι",
+        "Κουνουπίδι", "Διάφορα χόρτα εποχής", "Σπαράγγια", "Μπρόκολο", "Μπάμιες",
+        "Σέσκουλα", "Γλυκοπατάτα", "Σελινόριζα", "Βλίτα", "Φινόκιο", "Ραδίκια", "Αντίδια",
+    },
+}
+for _group, _labels in _REVIEWED_MAIN_INGREDIENT_LABELS.items():
+    _CATEGORY_LABEL_MAP[_group].update(_labels)
+
 _TERMINAL_OTHER = {
-    "ροφημα", "ροφηματα", "ποτο", "ποτα", "cocktail", "cocktails", "smoothie",
+    "ροφημα", "ροφηματα", "ποτο", "ποτα", "κοκτέιλ", "cocktail", "cocktails", "smoothie",
     "smoothies", "χυμοι", "μαρμελαδες", "σαλτσες", "ντιπ", "ψωμια", "ζυμες",
     "rofima", "rofimata", "poto", "pota", "chymoi", "marmelades", "saltses",
     "ntip", "psomia", "zymes",
@@ -437,6 +471,12 @@ def _normalized_label(value: object) -> str:
     normalized = unicodedata.normalize("NFKD", plain_text(value).casefold())
     without_accents = "".join(char for char in normalized if not unicodedata.combining(char))
     return " ".join(re.sub(r"[^\w]+", " ", without_accents).split())
+
+
+_CATEGORY_MATCH_KEYS = {
+    key: frozenset(_normalized_label(label) for label in labels)
+    for key, labels in _CATEGORY_LABEL_MAP.items()
+}
 
 
 def _dedupe_labels(values: Iterable[object]) -> list[str]:
@@ -1019,7 +1059,7 @@ def _category_matches(values: Iterable[object]) -> list[str]:
     normalized = {_normalized_label(value) for value in values}
     return [
         key for key in _CATEGORY_ORDER
-        if normalized & {_normalized_label(item) for item in _CATEGORY_LABEL_MAP[key]}
+        if normalized & _CATEGORY_MATCH_KEYS[key]
     ]
 
 

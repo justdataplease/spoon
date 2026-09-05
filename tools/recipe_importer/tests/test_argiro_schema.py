@@ -961,3 +961,20 @@ def test_missing_normal_dom_leaf_is_recovered_from_ordered_jsonld_anchors():
 )
 def test_iso_duration_parsing(value, minutes):
     assert parse_iso8601_minutes(value) == minutes
+
+
+@pytest.mark.parametrize("path, category", [
+    ("dimitriaka/kinoa", "pasta_rice"), ("dimitriaka/pligouri", "pasta_rice"),
+    ("frouta/avokanto", "vegetables"),
+])
+def test_reviewed_ingredient_paths_preserve_terminal_recipe_families(path, category):
+    from tools.recipe_importer.argiro_schema import derive_argiro_taxonomy
+    payload = {
+        "htmlMetadata": {"tagLinks": [{
+            "href": f"https://www.argiro.gr/basic-ingredient/{path}/", "label": "Fixture",
+        }]},
+        "jsonLd": {"recipeCategory": ["Κυρίως"]},
+    }
+    assert derive_argiro_taxonomy(payload)["category"] == category
+    payload["jsonLd"]["recipeCategory"] = ["Γλυκά"]
+    assert derive_argiro_taxonomy(payload)["category"] == "dessert"

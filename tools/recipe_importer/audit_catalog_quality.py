@@ -24,7 +24,7 @@ try:
         _is_vegan_eligible,
         normalize_search_token,
     )
-    from .helpers import canonical_category
+    from .helpers import canonical_category, classify_ease
 except ImportError:  # pragma: no cover - direct script execution
     from build_local_catalog import (
         FACET_FIELDS,
@@ -32,7 +32,7 @@ except ImportError:  # pragma: no cover - direct script execution
         _is_vegan_eligible,
         normalize_search_token,
     )
-    from helpers import canonical_category
+    from helpers import canonical_category, classify_ease
 
 
 KNOWN_SOURCES = {"akis", "argiro", "gastronomos"}
@@ -222,7 +222,8 @@ def audit_catalog(database_path: Path, *, sample_limit: int = 20) -> dict[str, A
 
         rows = connection.execute(
             """
-            SELECT id, source_key, category, title_normalized, vegan_eligible, recipe_json
+            SELECT id, source_key, category, title_normalized, vegan_eligible,
+                   ease, rating, prep_minutes, quick_recipe, recipe_json
             FROM recipes
             ORDER BY source_key, id
             """
@@ -377,10 +378,25 @@ def audit_catalog(database_path: Path, *, sample_limit: int = 20) -> dict[str, A
                 for facet_type, expected in expected_facets.items()
                 if expected != actual_facets.get(facet_type, set())
             }
+            expected_planner_values = {
+                "ease": classify_ease(
+                    recipe.get("preparationCount", 0), recipe.get("stepCount", 0),
+                    recipe.get("totalMinutes", 0),
+                ),
+                "rating": recipe.get("rating", 0.0),
+                "prep_minutes": recipe.get("prepMinutes", 0),
+                "quick_recipe": int(recipe.get("quickRecipe", False)),
+            }
+            planner_differences = {
+                field: {"expected": expected, "actual": row[field]}
+                for field, expected in expected_planner_values.items()
+                if expected != row[field]
+            }
             expected_ingredients = _expected_ingredient_texts(recipe)
             actual_ingredients = indexed_ingredients.get(recipe_id, set())
             if (
                 facet_differences
+                or planner_differences
                 or expected_ingredients != actual_ingredients
                 or normalized_title != row["title_normalized"]
                 or recipe.get("category") != category
@@ -391,6 +407,7 @@ def audit_catalog(database_path: Path, *, sample_limit: int = 20) -> dict[str, A
                         "id": recipe_id,
                         "source": source,
                         "facetDifferences": facet_differences,
+                        "plannerDifferences": planner_differences,
                         "ingredientTextMismatch": expected_ingredients != actual_ingredients,
                         "titleMismatch": normalized_title != row["title_normalized"],
                         "categoryMismatch": recipe.get("category") != category,

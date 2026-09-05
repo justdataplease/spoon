@@ -16,7 +16,8 @@ data.
   λαχανικά, κρέας, ψάρι, βρώμικο, and ζυμαρικά/ρύζι.
 - Independent random reroll for one day or the whole week. Every matching recipe
   has the same selection probability across Akis, Argiro, Gastronomos, and custom
-  recipes; no provider receives priority.
+  recipes; no provider receives priority. Current selections, other days/weeks, and
+  cooked history never remove recipes from the random pool.
 - Per-day constraints for category, difficulty, minimum rating on a 0–10 scale,
   and maximum hands-on preparation time.
 - A clear «Ευκολάκι» effort index based on preparation sections and method steps:

@@ -55,6 +55,33 @@ class RecipeCatalogTest {
     }
 
     @Test
+    fun `every Explore category binds the stored machine key unchanged`() {
+        MealCategory.entries.filterNot { it == MealCategory.ANY }.forEach { category ->
+            val sql = CatalogSqlBuilder.forExplore(ExploreCriteria(category = category.key))
+            assertEquals(category.key, listOf(category.key), sql.arguments)
+        }
+    }
+
+    @Test
+    fun `chicken-only SQL excludes every other stored category including compound keys`() {
+        val excluded = MealCategory.entries
+            .filterNot { it == MealCategory.ANY || it == MealCategory.POULTRY }
+            .map(MealCategory::key).toSet()
+        val preferences = MealPreferenceSettings(excludedCategories = excluded)
+        val selections = listOf(
+            CatalogSqlBuilder.forExplore(ExploreCriteria(), preferences),
+            CatalogSqlBuilder.forPlanner(RecipeFilters(category = "any"), null, preferences),
+        )
+        selections.forEach { sql ->
+            val survivingCategories = MealCategory.entries
+                .filterNot { it == MealCategory.ANY || it.key in sql.arguments }
+            assertEquals(listOf(MealCategory.POULTRY), survivingCategories)
+            assertEquals(excluded, sql.arguments.toSet())
+            assertFalse(sql.whereSql.contains("r.id !="))
+        }
+    }
+
+    @Test
     fun `Explore ingredient facet expands reviewed aliases in one OR predicate`() {
         val sql = CatalogSqlBuilder.forExplore(
             ExploreCriteria(ingredientLabels = setOf("Αυγό")),

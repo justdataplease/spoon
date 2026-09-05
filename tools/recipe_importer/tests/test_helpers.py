@@ -208,3 +208,13 @@ def test_random_key_is_stable_and_bounded():
     assert stable_random_key("13") == stable_random_key("13")
     assert stable_random_key("13") != stable_random_key("14")
     assert 0 <= stable_random_key("13") < 1
+
+
+def test_non_meal_source_families_override_main_ingredient_facets():
+    from tools.recipe_importer.helpers import classify_official_category_keys
+    for slug in ("psomia", "zymes", "ntip-saltses", "marinades", "i-vasis-tis-maghirikis"):
+        result = classify_official_category_keys(
+            {"id": "999", "slug": slug},
+            {"ingredient": [{"id": "135", "title": "Chicken"}]},
+        )
+        assert result[0] == "other"

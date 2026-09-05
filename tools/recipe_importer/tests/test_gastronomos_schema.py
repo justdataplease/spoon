@@ -666,7 +666,7 @@ def test_audited_archive_navigation_labels_never_become_recipe_facets_or_tags():
 
     assert record["mealTypeLabels"] == ["ΚΟΚΤΕΙΛ", "Κυρίως Γεύμα"]
     assert record["ingredientLabels"] == ["ΖΥΜΑΡΙΚΑ"]
-    assert record["categoryKeys"] == ["pasta_rice"]
+    assert record["categoryKeys"] == ["other", "pasta_rice"]
     assert all(label not in record["tags"] for label in navigation_labels)
     assert all(
         label not in values
@@ -734,3 +734,68 @@ def test_html_ingredient_groups_are_used_only_when_they_align_with_jsonld():
 )
 def test_duration_parsing(value, minutes):
     assert parse_duration_minutes(value) == minutes
+
+
+@pytest.mark.parametrize("label", ["Κιμάς κοτόπουλου", "ΚΙΜΑΣ ΚΟΤΟΠΟΥΛΟΥ", "kimas-kotopoulou"])
+def test_official_chicken_mince_tag_is_poultry(label):
+    payload = {
+        "htmlMetadata": {"facetLinks": []},
+        "jsonLd": {"recipeCategory": ["Κυρίως Γεύμα"], "keywords": label},
+    }
+    assert derive_gastronomos_taxonomy(payload)["category"] == "poultry"
+    payload["jsonLd"]["recipeCategory"] = ["Σάντουιτς"]
+    assert derive_gastronomos_taxonomy(payload)["category"] == "street_food"
+    payload["jsonLd"]["recipeCategory"] = ["Γλυκό"]
+    assert derive_gastronomos_taxonomy(payload)["category"] == "dessert"
+
+
+def test_chicken_mince_prose_alone_does_not_reclassify_a_recipe():
+    payload = {
+        "htmlMetadata": {"facetLinks": []},
+        "jsonLd": {
+            "recipeCategory": ["Κυρίως Γεύμα"],
+            "name": "Κιμάς κοτόπουλου",
+            "recipeIngredient": ["Κιμάς κοτόπουλου"],
+            "keywords": "ζωμός κοτόπουλου",
+        },
+    }
+    assert derive_gastronomos_taxonomy(payload)["category"] == "other"
+
+
+@pytest.mark.parametrize("label, category", [
+    ("Γαρίδες", "fish"), ("Καλαμάρι / Θράψαλο", "fish"), ("Μπακαλιάρος", "fish"),
+    ("Κυδώνια / Όστρακα", "fish"), ("Ρεβύθια", "legumes"), ("Κουκιά", "legumes"),
+    ("Κόκορας", "poultry"), ("Κιμάς γαλοπούλας", "poultry"),
+    ("Μοσχαρίσιος κιμάς", "meat"), ("Χοιρινός κιμάς", "meat"),
+    ("Πλιγούρι", "pasta_rice"), ("Χυλοπίτες", "pasta_rice"),
+    ("Μανιτάρια", "vegetables"), ("Φασολάκια", "vegetables"),
+])
+def test_reviewed_main_ingredient_categories_preserve_dish_precedence(label, category):
+    payload = {
+        "htmlMetadata": {"facetLinks": [
+            {"family": "vasiko-yliko", "slug": "fixture", "label": label},
+        ]},
+        "jsonLd": {"recipeCategory": ["Κυρίως Γεύμα"]},
+    }
+    assert derive_gastronomos_taxonomy(payload)["category"] == category
+    for explicit, expected in [("Γλυκά", "dessert"), ("Ποτά", "other"), ("Σάντουιτς", "street_food")]:
+        payload["jsonLd"]["recipeCategory"] = [explicit]
+        assert derive_gastronomos_taxonomy(payload)["category"] == expected
+    payload["htmlMetadata"]["facetLinks"] = []
+    payload["jsonLd"] = {"recipeCategory": ["Κυρίως Γεύμα"], "name": label, "recipeIngredient": [label]}
+    assert derive_gastronomos_taxonomy(payload)["category"] == "other"
+
+
+@pytest.mark.parametrize("label", ["Κυδώνι", "Γάλα Ρυζιού", "Αλεύρι (ζύμες)", "Σοκολάτα", "Ζάχαρη", "Μαϊντανός"])
+def test_pantry_and_ambiguous_food_labels_do_not_imply_main_meal_categories(label):
+    payload = {"htmlMetadata": {"facetLinks": []}, "jsonLd": {"keywords": label}}
+    assert derive_gastronomos_taxonomy(payload)["category"] == "other"
+
+
+def test_greek_cocktail_category_cannot_become_vegetables_from_tomato_tag():
+    payload = {
+        "htmlMetadata": {"facetLinks": [
+            {"family": "vasiko-yliko", "slug": "tomato", "label": "Ντομάτα"},
+        ]}, "jsonLd": {"recipeCategory": ["Κοκτέιλ"]},
+    }
+    assert derive_gastronomos_taxonomy(payload)["category"] == "other"

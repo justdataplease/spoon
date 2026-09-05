@@ -137,12 +137,12 @@ class MealPlanner @Inject constructor(
         // the resulting personal write is queued to Firestore by the repository.
         val existing = repository.mealPlans.first().firstOrNull { it.date == date.toString() }
         val requestedFilters = filters ?: existing?.filters ?: WeeklyPlanDefaults.filtersFor(date)
-        val excludedId = existing?.recipeId.orEmpty()
         val preferences = mealPreferenceSettings.first()
         var effectiveFilters = requestedFilters
+        // Every draw includes the full matching pool, including current and past selections.
         var selected = selectEligibleRecipe(
             filters = requestedFilters,
-            excludingRecipeId = excludedId.ifBlank { null },
+            excludingRecipeId = null,
             randomSeed = random.nextLong(),
             preferences = preferences,
         )
@@ -155,12 +155,12 @@ class MealPlanner @Inject constructor(
             effectiveFilters = requestedFilters.copy(category = MealCategory.ANY.key)
             selected = selectEligibleRecipe(
                 filters = effectiveFilters,
-                excludingRecipeId = excludedId.ifBlank { null },
+                excludingRecipeId = null,
                 randomSeed = random.nextLong(),
                 preferences = preferences,
             )
         }
-        selected ?: return MealPlanSelection.NoMatch(date, effectiveFilters, excludedId)
+        selected ?: return MealPlanSelection.NoMatch(date, effectiveFilters)
 
         val plan = newPlan(date, effectiveFilters, selected)
         repository.upsertMealPlan(plan)

@@ -96,6 +96,7 @@ _SOURCE_CATEGORY_KEYS = {
 # one of the app's main-meal groups, even if an official ingredient facet is
 # present (for example rice pudding or a vegetable-based cake).
 _TERMINAL_OTHER_SOURCE_CATEGORIES = {
+    "psomia", "zymes", "ntip-saltses", "marinades", "i-vasis-tis-maghirikis",
     "marmelades",
     "rofimata-pota",
     "smoothies",

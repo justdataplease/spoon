@@ -477,3 +477,20 @@ def test_rejects_incomplete_manifest_and_non_derived_ease(tmp_path):
 )
 def test_search_normalization_is_accent_and_case_insensitive(value, expected):
     assert normalize_search_token(value) == expected
+
+
+@pytest.mark.parametrize("column, bad_value", [
+    ("ease", "involved"), ("rating", 1.0), ("prep_minutes", 999), ("quick_recipe", 1),
+])
+def test_catalog_audit_detects_planner_predicate_drift(tmp_path, column, bad_value):
+    from tools.recipe_importer.audit_catalog_quality import audit_catalog
+
+    artifact = _artifact(tmp_path, "fixture", [_record("fixture_1", "fixture", title="Test")])
+    output = tmp_path / "catalog.db"
+    build_catalog([artifact], output)
+    assert audit_catalog(output)["indexMismatchCount"] == 0
+    with sqlite3.connect(output) as database:
+        database.execute(f"UPDATE recipes SET {column} = ?", (bad_value,))
+    report = audit_catalog(output)
+    assert report["indexMismatchCount"] == 1
+    assert column in report["indexMismatchSamples"][0]["plannerDifferences"]

@@ -81,9 +81,10 @@ _CATEGORY_SLUGS = {
         "kouneli",
     },
     "poultry": {"kotopoulo", "galopoula", "kokoras", "poulika"},
-    "vegetables": {"lachanika", "laxanika", "ladera", "patata"},
+    "vegetables": {"lachanika", "laxanika", "ladera", "patata", "avokanto"},
     "pasta_rice": {
         "zymarika", "makaronia", "ryzi", "rizi", "risotto", "kritharaki",
+        "kinoa", "pligouri",
     },
 }
 _CATEGORY_KEY_PRECEDENCE = (

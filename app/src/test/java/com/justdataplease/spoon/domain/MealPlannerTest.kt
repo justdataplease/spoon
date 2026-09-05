@@ -122,6 +122,65 @@ class MealPlannerTest {
     }
 
     @Test
+    fun `repeated chicken rolls can reuse current other-day and other-week recipes`() = runBlocking {
+        val date = LocalDate.of(2026, 8, 31)
+        val chicken = Recipe(id = "chicken", title = "Chicken", category = "poultry")
+        val existing = listOf(date.minusWeeks(1), date, date.plusDays(1), date.plusWeeks(1))
+            .map { day ->
+                DayMealPlan(
+                    id = day.toString(), date = day.toString(),
+                    category = "any", recipeId = chicken.id, recipeTitle = chicken.title,
+                    filters = RecipeFilters(category = "any"),
+                )
+            }
+        val repository = FakeRepository(
+            initialRecipes = listOf(chicken),
+            initialPlans = existing,
+            initialHistory = listOf(CookedMeal(
+                id = "cooked_chicken", date = date.minusWeeks(1).toString(),
+                recipeId = chicken.id, recipeTitle = chicken.title, completedAtEpochMillis = 1L,
+            )),
+            initialPreferences = MealPreferenceSettings(
+                excludedCategories = MealCategory.entries
+                    .filterNot { it == MealCategory.ANY || it == MealCategory.POULTRY }
+                    .map(MealCategory::key).toSet(),
+            ),
+        )
+        val planner = MealPlanner(repository, RecipeSelector())
+        repeat(100) { seed ->
+            val result = planner.reroll(date, random = kotlin.random.Random(seed))
+            assertTrue("Roll $seed must not exhaust the catalog", result is MealPlanSelection.Selected)
+            assertEquals(chicken.id, (result as MealPlanSelection.Selected).recipe.id)
+        }
+        assertEquals(existing.filterNot { it.date == date.toString() },
+            repository.plans.value.filterNot { it.date == date.toString() })
+        assertEquals(1, repository.history.value.size)
+        val explicit = planner.updateFilters(date, RecipeFilters(category = "poultry"))
+        assertTrue(explicit is MealPlanSelection.Selected)
+    }
+
+    @Test
+    fun `every category stays selectable across repeated global preference rolls`() = runBlocking {
+        val date = LocalDate.of(2026, 8, 31)
+        val categories = MealCategory.entries.filterNot { it == MealCategory.ANY }
+        val recipes = categories.map { Recipe(id = it.key, title = it.key, category = it.key) }
+        categories.forEach { category ->
+            val repository = FakeRepository(
+                initialRecipes = recipes,
+                initialPreferences = MealPreferenceSettings(
+                    excludedCategories = categories.filterNot { it == category }.map(MealCategory::key).toSet(),
+                ),
+            )
+            val planner = MealPlanner(repository, RecipeSelector())
+            repeat(25) { seed ->
+                val result = planner.reroll(date, random = kotlin.random.Random(seed))
+                assertTrue("${category.key} roll $seed must succeed", result is MealPlanSelection.Selected)
+                assertEquals(category.key, (result as MealPlanSelection.Selected).recipe.category)
+            }
+        }
+    }
+
+    @Test
     fun ensure_week_uses_one_preference_snapshot_and_replaces_unfinished_excluded_recipe() = runBlocking {
         val monday = LocalDate.of(2026, 8, 31)
         val legumes = DemoRecipeCatalog.recipes.first {

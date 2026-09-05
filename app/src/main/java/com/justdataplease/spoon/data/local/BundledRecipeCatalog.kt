@@ -417,7 +417,7 @@ internal object CatalogSqlBuilder {
     ): CatalogSql {
         val predicates = mutableListOf<String>()
         val arguments = mutableListOf<String>()
-        criteria.category.normalizedCatalogToken()
+        criteria.category.trim().lowercase(java.util.Locale.ROOT)
             .takeUnless { it.isBlank() || it == MealCategory.ANY.key }
             ?.let {
                 predicates += "r.category = ?"
@@ -498,7 +498,12 @@ internal object CatalogSqlBuilder {
         arguments: MutableList<String>,
         preferences: MealPreferenceSettings,
     ) {
-        val excludedCategories = preferences.excludedCategories.normalizedTokens()
+        // Category values are stable machine keys, not searchable labels. Text
+        // normalization turns pasta_rice/street_food into values absent from SQLite.
+        val excludedCategories = preferences.excludedCategories
+            .map { it.trim().lowercase(java.util.Locale.ROOT) }
+            .filter(String::isNotBlank)
+            .distinct()
         if (excludedCategories.isNotEmpty()) {
             predicates += "r.category NOT IN (${placeholders(excludedCategories.size)})"
             arguments += excludedCategories

@@ -709,8 +709,8 @@ class SpoonViewModel @Inject constructor(
         ) { misses ->
             message.value = when {
                 misses == 0 -> "Έτοιμη η νέα εβδομάδα!"
-                misses == 1 -> "Μία μέρα δεν είχε άλλη πρόταση με αυτά τα φίλτρα."
-                else -> "$misses μέρες δεν είχαν άλλη πρόταση με αυτά τα φίλτρα."
+                misses == 1 -> "Μία μέρα δεν είχε πρόταση με αυτά τα φίλτρα."
+                else -> "$misses μέρες δεν είχαν πρόταση με αυτά τα φίλτρα."
             }
         }
     }
@@ -1009,7 +1009,7 @@ class SpoonViewModel @Inject constructor(
             when (selection) {
                 is MealPlanSelection.Selected -> Unit
                 is MealPlanSelection.NoMatch -> {
-                    message.value = "Δεν βρέθηκε άλλη συνταγή που να ταιριάζει σε όλα τα φίλτρα."
+                    message.value = "Δεν βρέθηκε συνταγή που να ταιριάζει σε όλα τα φίλτρα."
                 }
             }
         }
