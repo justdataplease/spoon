@@ -151,13 +151,15 @@ class CatalogContractDeviceTest {
         val planner = MealPlanner(repository, selector)
         val day = LocalDate.of(2026, 9, 7)
         for (category in MealCategory.entries.filterNot { it == MealCategory.ANY }) {
-            repository.updateMealPreferenceSettings(only(category))
+            repository.updateMealPreferenceSettings(only(category).copy(
+                weekdayCategories = java.time.DayOfWeek.entries.associate { it.name to category.key },
+            ))
             for (week in listOf(day.minusWeeks(1), day, day.plusWeeks(1))) {
-                val plan = planner.ensureWeek(week)
+                val plan = planner.ensureWeek(week, resetWeekdays = java.time.DayOfWeek.entries.toSet())
                 assertTrue(category.key, plan.all { it.recipeId.isNotBlank() })
             }
             repeat(20) { seed ->
-                val result = planner.reroll(day, random = Random(seed))
+                val result = planner.reroll(day, filters = RecipeFilters(category = category.key), random = Random(seed))
                 assertTrue("${category.key}/$seed", result is MealPlanSelection.Selected)
                 assertEquals(category.key, (result as MealPlanSelection.Selected).recipe.category)
             }
@@ -174,7 +176,56 @@ class CatalogContractDeviceTest {
         val original = reopened.mealPlans.first()
         val noMatch = MealPlanner(reopened, selector).updateFilters(day, RecipeFilters(category = "poultry", minRating = 9.99, maxPrepMinutes = 1))
         assertTrue(noMatch is MealPlanSelection.NoMatch)
-        assertEquals(original, reopened.mealPlans.first())
+        val after = reopened.mealPlans.first()
+        assertEquals(original.filterNot { it.date == day.toString() }, after.filterNot { it.date == day.toString() })
+        assertTrue(after.single { it.date == day.toString() }.recipeId.isBlank())
+        assertEquals(history, reopened.cookedHistory.first())
+    }
+
+    @Test fun favoritesOnlyWeekPersistsUnavailableDaysAndRecoversAfterAddingFavorite() = runBlocking {
+        catalog.ensureReady()
+        val preferences = context.getSharedPreferences("favorites-planner-test", Context.MODE_PRIVATE)
+        preferences.edit().clear().commit()
+        val repository = LocalSpoonRepository(preferences, json, catalog)
+        val planner = MealPlanner(repository, selector)
+        val monday = LocalDate.of(2026, 9, 7)
+        val meat = catalog.queryRecipes(ExploreCriteria(category = "meat"), 1, 0, MealPreferenceSettings()).recipes.single()
+        val legumes = catalog.queryRecipes(ExploreCriteria(category = "legumes"), 1, 0, MealPreferenceSettings()).recipes.single()
+        planner.toggleFavorite(meat.id)
+        planner.toggleFavorite(legumes.id)
+        repository.updateMealPreferenceSettings(MealPreferenceSettings(favoritesOnly = true))
+        val week = planner.ensureWeek(monday)
+        assertEquals(legumes.id, week[0].recipeId)
+        assertEquals(meat.id, week[3].recipeId)
+        assertEquals(5, week.count { it.recipeId.isBlank() })
+        assertEquals(week, LocalSpoonRepository(preferences, json, catalog).mealPlans.first())
+        val fish = catalog.queryRecipes(ExploreCriteria(category = "fish"), 1, 0, MealPreferenceSettings()).recipes.single()
+        planner.toggleFavorite(fish.id)
+        assertEquals(fish.id, planner.ensureWeek(monday)[4].recipeId)
+        repository.updateMealPreferenceSettings(MealPreferenceSettings(
+            favoritesOnly = true,
+            weekdayCategories = java.time.DayOfWeek.entries.associate { it.name to "meat" },
+        ))
+        assertTrue(planner.ensureWeek(monday, resetWeekdays = java.time.DayOfWeek.entries.toSet()).all { it.recipeId == meat.id })
+    }
+
+    @Test fun lockedAndCookedRecipesSurviveRegenerationAndRepositoryReopen() = runBlocking {
+        val preferences = context.getSharedPreferences("locks-planner-test", Context.MODE_PRIVATE)
+        preferences.edit().clear().commit()
+        val repository = LocalSpoonRepository(preferences, json, catalog)
+        val planner = MealPlanner(repository, selector)
+        val monday = LocalDate.of(2026, 9, 7)
+        planner.ensureWeek(monday)
+        planner.setLocked(monday, true)
+        planner.setCompleted(monday.plusDays(1), true)
+        val protected = repository.mealPlans.first().filter { it.locked || it.completed }
+        val history = repository.cookedHistory.first()
+        val reopened = LocalSpoonRepository(preferences, json, catalog)
+        assertEquals(protected, reopened.mealPlans.first().filter { it.locked || it.completed })
+        reopened.updateMealPreferenceSettings(MealPreferenceSettings(favoritesOnly = true))
+        assertEquals(5, MealPlanner(reopened, selector).rerollWeek(monday).size)
+        assertEquals(protected, reopened.mealPlans.first().filter { it.locked || it.completed })
+        assertEquals(history, reopened.cookedHistory.first())
     }
 
     @Test fun staleInstallStampReinstallsCatalogWithoutTouchingPersonalData() = runBlocking {

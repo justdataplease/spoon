@@ -47,6 +47,7 @@ import com.justdataplease.spoon.ui.more.MoreScreen
 import com.justdataplease.spoon.ui.shopping.ShoppingScreen
 import com.justdataplease.spoon.ui.settings.FoodPreferencesScreen
 import com.justdataplease.spoon.ui.week.WeekScreen
+import com.justdataplease.spoon.ui.week.MealMenuSheet
 
 private enum class PrimaryDestination { WEEK, EXPLORE, FAVORITES, SHOPPING, MORE }
 private enum class MorePage { HUB, CALENDAR, HISTORY, PREFERENCES, ACCOUNT }
@@ -79,6 +80,8 @@ fun SpoonApp(
     val selectedRecipe = state.selectedRecipe
     val customRecipeEditor by viewModel.customRecipeEditor.collectAsStateWithLifecycle()
     val retainedCustomRecipePhoto by viewModel.customRecipeEditorRetainedPhoto.collectAsStateWithLifecycle()
+    val mealMenu by viewModel.mealMenu.collectAsStateWithLifecycle()
+    val favoritesSearch by viewModel.favoritesSearchUiState.collectAsStateWithLifecycle()
     val mealPreferenceSettings by viewModel.mealPreferenceSettings.collectAsStateWithLifecycle()
 
     BackHandler(
@@ -173,6 +176,9 @@ fun SpoonApp(
                     onPreviousWeek = viewModel::previousWeek,
                     onNextWeek = viewModel::nextWeek,
                     onCurrentWeek = viewModel::currentWeek,
+                    favoritesOnly = mealPreferenceSettings.favoritesOnly,
+                    onOpenMenu = viewModel::showMealMenu,
+                    onToggleLock = viewModel::toggleLocked,
                     onReroll = viewModel::reroll,
                     onEdit = viewModel::editFilters,
                     onToggleFavorite = viewModel::toggleFavorite,
@@ -204,7 +210,13 @@ fun SpoonApp(
                 )
 
                 PrimaryDestination.FAVORITES -> FavoritesScreen(
-                    favorites = state.favorites,
+                    favorites = favoritesSearch.favorites,
+                    query = favoritesSearch.query,
+                    filters = favoritesSearch.filters,
+                    options = state.exploreOptions,
+                    totalFavoriteCount = favoritesSearch.totalCount,
+                    onQueryChange = viewModel::updateFavoritesQuery,
+                    onApplyFilters = viewModel::applyFavoritesFilters,
                     onOpenRecipe = viewModel::showRecipeDetails,
                     onRemoveFavorite = viewModel::toggleFavorite,
                     modifier = Modifier.padding(padding),
@@ -269,6 +281,18 @@ fun SpoonApp(
                 }
             }
         }
+    }
+
+    mealMenu?.let { menu ->
+        MealMenuSheet(
+            state = menu,
+            onDismiss = viewModel::dismissMealMenu,
+            onOpenRecipe = { recipeId ->
+                viewModel.dismissMealMenu()
+                viewModel.showRecipeDetails(recipeId)
+            },
+            onRetry = { viewModel.showMealMenu(menu.date) },
+        )
     }
 
     state.favoriteReplacementDate?.let { date ->

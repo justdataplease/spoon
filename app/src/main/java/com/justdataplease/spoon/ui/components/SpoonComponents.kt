@@ -20,7 +20,9 @@ import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.Schedule
+import androidx.compose.material.icons.outlined.RestaurantMenu
 import androidx.compose.material3.Button
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
@@ -158,6 +160,9 @@ fun EmptyRecipeCard(
     plan: DayPlanUi,
     onPick: () -> Unit,
     modifier: Modifier = Modifier,
+    onEdit: () -> Unit = {},
+    favoritesOnly: Boolean = false,
+    onOpenMenu: () -> Unit = {},
 ) {
     Card(
         modifier = modifier.fillMaxWidth(),
@@ -177,9 +182,20 @@ fun EmptyRecipeCard(
                 CategoryPill(plan.category.emoji, plan.category.label)
             }
             Text(
-                "Δεν έχει επιλεγεί ακόμα συνταγή με αυτά τα φίλτρα.",
+                "Μη διαθέσιμη συνταγή",
                 style = MaterialTheme.typography.bodyLarge,
             )
+            Text(
+                if (favoritesOnly) "Δεν υπάρχει αγαπημένη συνταγή που να ταιριάζει στην κατηγορία και στα φίλτρα αυτής της ημέρας."
+                else "Δεν υπάρχει συνταγή που να ταιριάζει στην κατηγορία και στα φίλτρα αυτής της ημέρας.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            TextButton(onClick = onEdit) { Text("Αλλαγή κατηγορίας / φίλτρων") }
+            TextButton(onClick = onOpenMenu) {
+                Icon(Icons.Outlined.RestaurantMenu, contentDescription = null)
+                Spacer(Modifier.size(8.dp))
+                Text("Πλήρες μενού")
+            }
             Button(onClick = onPick) {
                 Icon(Icons.Outlined.AutoAwesome, contentDescription = null)
                 Spacer(Modifier.size(8.dp))

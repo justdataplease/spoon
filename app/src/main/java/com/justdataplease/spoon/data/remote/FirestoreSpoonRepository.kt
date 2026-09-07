@@ -1478,6 +1478,7 @@ internal fun DayMealPlan.toFirestoreDocument(): Map<String, Any> = mapOf(
         "maxPrepMinutes" to filters.maxPrepMinutes,
     ),
     "completed" to completed,
+    "locked" to locked,
     "completionEventId" to completionEventId,
     "updatedAtEpochMillis" to updatedAtEpochMillis,
 )

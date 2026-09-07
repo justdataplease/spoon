@@ -86,6 +86,7 @@ data class DayPlanUi(
     val language: String = "el",
     val isFavorite: Boolean = false,
     val isCompleted: Boolean = false,
+    val isLocked: Boolean = false,
     val filters: FiltersUi = FiltersUi(categoryKey = categoryKey),
 ) {
     val category: CategoryUi

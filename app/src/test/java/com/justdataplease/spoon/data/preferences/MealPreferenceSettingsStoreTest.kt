@@ -283,6 +283,25 @@ class MealPreferenceSettingsStoreTest {
         assertNull(store.readPendingForNextOwner())
     }
 
+    @Test
+    fun `weekday defaults and favorites source persist claim pending owner and reset safely`() = runTest {
+        val store = newStore()
+        val settings = MealPreferenceSettings(
+            weekdayCategories = mapOf("MONDAY" to "meat", "WEDNESDAY" to "any"),
+            favoritesOnly = true,
+            updatedAtEpochMillis = 42L,
+        )
+        store.replacePendingForNextOwner(settings)
+        assertEquals(settings, store.readPendingForNextOwner())
+        assertEquals(settings, store.readForOwner("owner-a"))
+        assertEquals(settings, store.settings.first())
+        assertEquals(MealPreferenceSettings(), store.readForOwner("owner-b"))
+        store.update { settings }
+        assertEquals(settings, store.settings.first())
+        store.clear()
+        assertEquals(MealPreferenceSettings(), store.settings.first())
+    }
+
     private fun kotlinx.coroutines.test.TestScope.newStore(): MealPreferenceSettingsStore {
         val file = File.createTempFile("meal_preference_settings_", ".preferences_pb")
             .also(File::deleteOnExit)

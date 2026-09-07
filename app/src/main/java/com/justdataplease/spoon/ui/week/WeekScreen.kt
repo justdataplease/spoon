@@ -20,6 +20,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.RestaurantMenu
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.outlined.AutoAwesome
@@ -39,6 +40,9 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconToggleButton
+import androidx.compose.material.icons.outlined.Lock
+import androidx.compose.material.icons.outlined.LockOpen
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
@@ -99,6 +103,9 @@ fun WeekScreen(
     onDismissEditor: () -> Unit,
     onChooseFavorite: (LocalDate) -> Unit,
     modifier: Modifier = Modifier,
+    favoritesOnly: Boolean = false,
+    onToggleLock: (LocalDate) -> Unit = {},
+    onOpenMenu: (LocalDate) -> Unit = {},
 ) {
     val editingPlan = state.editingDate?.let { date -> state.weekPlans.firstOrNull { it.date == date } }
 
@@ -117,6 +124,21 @@ fun WeekScreen(
                     onShuffleWeek = onShuffleWeek,
                 )
             }
+            item {
+                Text(
+                    if (favoritesOnly) "Προτάσεις μόνο από αγαπημένες · επιτρέπονται επαναλήψεις"
+                    else "Προτάσεις από όλες τις συνταγές",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            item {
+                Text(
+                    "Οι κλειδωμένες και μαγειρεμένες συνταγές δεν αλλάζουν στην ανανέωση της εβδομάδας.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             item { StatusBanner(backendState = state.backendState) }
             if (state.isLoading && state.weekPlans.isEmpty()) {
                 item {
@@ -127,11 +149,19 @@ fun WeekScreen(
             } else {
                 items(state.weekPlans, key = { it.date.toString() }) { plan ->
                     if (plan.recipeId.isBlank()) {
-                        EmptyRecipeCard(plan = plan, onPick = { onReroll(plan.date) })
+                        EmptyRecipeCard(
+                            plan = plan,
+                            onPick = { onReroll(plan.date) },
+                            onEdit = { onEdit(plan.date) },
+                            favoritesOnly = favoritesOnly,
+                            onOpenMenu = { onOpenMenu(plan.date) },
+                        )
                     } else {
                         DayRecipeCard(
                             plan = plan,
                             isToday = plan.date == LocalDate.now(),
+                            onOpenMenu = { onOpenMenu(plan.date) },
+                            onToggleLock = { onToggleLock(plan.date) },
                             onReroll = { onReroll(plan.date) },
                             onEdit = { onEdit(plan.date) },
                             onToggleFavorite = { onToggleFavorite(plan.recipeId) },
@@ -240,6 +270,8 @@ private fun DayRecipeCard(
     onToggleCompleted: () -> Unit,
     onOpenRecipe: () -> Unit,
     onChooseFavorite: () -> Unit,
+    onToggleLock: () -> Unit,
+    onOpenMenu: () -> Unit,
 ) {
     Card(
         onClick = onOpenRecipe,
@@ -257,7 +289,7 @@ private fun DayRecipeCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     DayDateHeader(plan.date)
                     if (isToday) {
                         Surface(color = MaterialTheme.colorScheme.primary, contentColor = MaterialTheme.colorScheme.onPrimary, shape = CircleShape) {
@@ -266,6 +298,20 @@ private fun DayRecipeCard(
                     }
                 }
                 Row {
+                    IconToggleButton(
+                        checked = plan.isLocked || plan.isCompleted,
+                        onCheckedChange = { onToggleLock() },
+                        enabled = !plan.isCompleted,
+                    ) {
+                        Icon(
+                            if (plan.isLocked || plan.isCompleted) Icons.Outlined.Lock else Icons.Outlined.LockOpen,
+                            contentDescription = when {
+                                plan.isCompleted -> "Μαγειρεμένη: διατηρείται στην ανανέωση εβδομάδας"
+                                plan.isLocked -> "Ξεκλείδωμα συνταγής"
+                                else -> "Κλείδωμα συνταγής για την ανανέωση εβδομάδας"
+                            },
+                        )
+                    }
                     IconButton(onClick = onEdit) { Icon(Icons.Outlined.Edit, contentDescription = "Αλλαγή φίλτρων") }
                     IconButton(onClick = onToggleFavorite) {
                         Icon(
@@ -288,7 +334,12 @@ private fun DayRecipeCard(
                     modifier = Modifier.size(102.dp).clip(RoundedCornerShape(18.dp)),
                 )
                 Column(modifier = Modifier.weight(1f)) {
-                    CategoryPill(plan.category.emoji, plan.category.label)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) { CategoryPill(plan.category.emoji, plan.category.label) }
+                        IconButton(onClick = onOpenMenu) {
+                            Icon(Icons.Outlined.RestaurantMenu, contentDescription = "Πλήρες μενού: κυρίως, συνοδευτικό και γλυκό")
+                        }
+                    }
                     Spacer(Modifier.height(10.dp))
                     AnimatedContent(targetState = plan.recipeTitle, label = "recipeTitle") { title ->
                         Text(

@@ -16,4 +16,5 @@ data class DayMealPlan(
     /** Id of the immutable history event representing this exact completion. */
     val completionEventId: String = "",
     val updatedAtEpochMillis: Long = 0L,
+    val locked: Boolean = false,
 )

@@ -5,6 +5,7 @@ import com.justdataplease.spoon.data.model.MealPreferenceDocument
 import com.justdataplease.spoon.data.preferences.MAX_MEAL_PREFERENCE_EPOCH_MILLIS
 import com.justdataplease.spoon.data.preferences.MealPreferenceSettings
 import com.justdataplease.spoon.data.preferences.nextMealPreferenceTimestamp
+import com.justdataplease.spoon.data.preferences.validWeekdayCategories
 
 internal const val MEAL_PREFERENCE_DOCUMENT_ID = "meal"
 internal const val MAX_EXCLUDED_INGREDIENT_TERMS = 40
@@ -33,12 +34,15 @@ internal fun MealPreferenceSettings.toFirestoreDocument(): Map<String, Any> {
         "veganOnly" to veganOnly,
         "excludedIngredientTerms" to ingredients,
         "updatedAtEpochMillis" to updatedAtEpochMillis,
+        "weekdayCategories" to weekdayCategories.validWeekdayCategories(),
+        "favoritesOnly" to favoritesOnly,
     )
 }
 
 internal fun MealPreferenceDocument.toSettingsOrNull(): MealPreferenceSettings? {
     if (id.isNotBlank() && id != MEAL_PREFERENCE_DOCUMENT_ID) return null
     if (updatedAtEpochMillis !in 1L..MAX_MEAL_PREFERENCE_EPOCH_MILLIS) return null
+    if (weekdayCategories != weekdayCategories.validWeekdayCategories()) return null
     if (
         excludedCategories.size > AllowedExcludedCategories.size ||
         excludedCategories.any { it !in AllowedExcludedCategories } ||
@@ -57,6 +61,8 @@ internal fun MealPreferenceDocument.toSettingsOrNull(): MealPreferenceSettings? 
         veganOnly = veganOnly,
         excludedIngredientTerms = ingredients.toSet(),
         updatedAtEpochMillis = updatedAtEpochMillis,
+        weekdayCategories = weekdayCategories,
+        favoritesOnly = favoritesOnly,
     )
 }
 
@@ -69,6 +75,8 @@ internal fun MealPreferenceSettings.normalizedForSync(timestamp: Long): MealPref
         excludedIngredientTerms =
             (document.getValue("excludedIngredientTerms") as List<String>).toSet(),
         updatedAtEpochMillis = timestamp,
+        weekdayCategories = weekdayCategories.validWeekdayCategories(),
+        favoritesOnly = favoritesOnly,
     )
 }
 

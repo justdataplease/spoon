@@ -1,6 +1,8 @@
 package com.justdataplease.spoon.data.preferences
 
 import android.content.Context
+import com.justdataplease.spoon.data.model.MealCategory
+import java.time.DayOfWeek
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
@@ -32,9 +34,12 @@ data class MealPreferenceSettings(
     val veganOnly: Boolean = false,
     val excludedIngredientTerms: Set<String> = emptySet(),
     val updatedAtEpochMillis: Long = 0L,
+    val weekdayCategories: Map<String, String> = emptyMap(),
+    val favoritesOnly: Boolean = false,
 ) {
     fun hasActiveSelections(): Boolean =
-        excludedCategories.isNotEmpty() || veganOnly || excludedIngredientTerms.isNotEmpty()
+        excludedCategories.isNotEmpty() || veganOnly || excludedIngredientTerms.isNotEmpty() ||
+            weekdayCategories.isNotEmpty() || favoritesOnly
 }
 
 internal const val MAX_MEAL_PREFERENCE_EPOCH_MILLIS = 253_402_300_799_999L
@@ -91,6 +96,8 @@ class MealPreferenceSettingsStore internal constructor(
             preferences.remove(VEGAN_ONLY)
             preferences.remove(EXCLUDED_INGREDIENT_TERMS)
             preferences.remove(UPDATED_AT_EPOCH_MILLIS)
+            preferences.remove(WEEKDAY_CATEGORIES)
+            preferences.remove(FAVORITES_ONLY)
             clearPending(preferences)
         }
     }
@@ -106,6 +113,8 @@ class MealPreferenceSettingsStore internal constructor(
             preferences[PENDING_EXCLUDED_CATEGORIES] =
                 settings.excludedCategories.cleanedPreferenceValues()
             preferences[PENDING_VEGAN_ONLY] = settings.veganOnly
+            preferences[PENDING_WEEKDAY_CATEGORIES] = settings.weekdayCategories.encodedWeekdayCategories()
+            preferences[PENDING_FAVORITES_ONLY] = settings.favoritesOnly
             preferences[PENDING_EXCLUDED_INGREDIENT_TERMS] =
                 settings.excludedIngredientTerms.cleanedPreferenceValues()
             preferences[PENDING_UPDATED_AT_EPOCH_MILLIS] = settings.updatedAtEpochMillis
@@ -174,6 +183,8 @@ class MealPreferenceSettingsStore internal constructor(
 
         private val EXCLUDED_CATEGORIES = stringSetPreferencesKey("excluded_categories")
         private val VEGAN_ONLY = booleanPreferencesKey("vegan_only")
+        private val WEEKDAY_CATEGORIES = stringSetPreferencesKey("weekday_categories")
+        private val FAVORITES_ONLY = booleanPreferencesKey("favorites_only")
         private val EXCLUDED_INGREDIENT_TERMS = stringSetPreferencesKey("excluded_ingredient_terms")
         private val UPDATED_AT_EPOCH_MILLIS = longPreferencesKey("updated_at_epoch_millis")
         private val OWNER_UID = stringPreferencesKey("owner_uid")
@@ -181,6 +192,8 @@ class MealPreferenceSettingsStore internal constructor(
         private val PENDING_EXCLUDED_CATEGORIES =
             stringSetPreferencesKey("pending_excluded_categories")
         private val PENDING_VEGAN_ONLY = booleanPreferencesKey("pending_vegan_only")
+        private val PENDING_WEEKDAY_CATEGORIES = stringSetPreferencesKey("pending_weekday_categories")
+        private val PENDING_FAVORITES_ONLY = booleanPreferencesKey("pending_favorites_only")
         private val PENDING_EXCLUDED_INGREDIENT_TERMS =
             stringSetPreferencesKey("pending_excluded_ingredient_terms")
         private val PENDING_UPDATED_AT_EPOCH_MILLIS =
@@ -189,6 +202,8 @@ class MealPreferenceSettingsStore internal constructor(
         fun decode(preferences: Preferences): MealPreferenceSettings = MealPreferenceSettings(
             excludedCategories = preferences[EXCLUDED_CATEGORIES].orEmpty().cleanedPreferenceValues(),
             veganOnly = preferences[VEGAN_ONLY] ?: false,
+            weekdayCategories = preferences[WEEKDAY_CATEGORIES].orEmpty().decodedWeekdayCategories(),
+            favoritesOnly = preferences[FAVORITES_ONLY] ?: false,
             excludedIngredientTerms = preferences[EXCLUDED_INGREDIENT_TERMS]
                 .orEmpty()
                 .cleanedPreferenceValues(),
@@ -202,6 +217,8 @@ class MealPreferenceSettingsStore internal constructor(
         ) {
             preferences[EXCLUDED_CATEGORIES] = settings.excludedCategories.cleanedPreferenceValues()
             preferences[VEGAN_ONLY] = settings.veganOnly
+            preferences[WEEKDAY_CATEGORIES] = settings.weekdayCategories.encodedWeekdayCategories()
+            preferences[FAVORITES_ONLY] = settings.favoritesOnly
             preferences[EXCLUDED_INGREDIENT_TERMS] = settings.excludedIngredientTerms
                 .cleanedPreferenceValues()
             preferences[UPDATED_AT_EPOCH_MILLIS] = settings.updatedAtEpochMillis
@@ -215,6 +232,8 @@ class MealPreferenceSettingsStore internal constructor(
                     .orEmpty()
                     .cleanedPreferenceValues(),
                 veganOnly = preferences[PENDING_VEGAN_ONLY] ?: false,
+                weekdayCategories = preferences[PENDING_WEEKDAY_CATEGORIES].orEmpty().decodedWeekdayCategories(),
+                favoritesOnly = preferences[PENDING_FAVORITES_ONLY] ?: false,
                 excludedIngredientTerms = preferences[PENDING_EXCLUDED_INGREDIENT_TERMS]
                     .orEmpty()
                     .cleanedPreferenceValues(),
@@ -230,6 +249,8 @@ class MealPreferenceSettingsStore internal constructor(
             preferences.remove(HAS_PENDING_SETTINGS)
             preferences.remove(PENDING_EXCLUDED_CATEGORIES)
             preferences.remove(PENDING_VEGAN_ONLY)
+            preferences.remove(PENDING_WEEKDAY_CATEGORIES)
+            preferences.remove(PENDING_FAVORITES_ONLY)
             preferences.remove(PENDING_EXCLUDED_INGREDIENT_TERMS)
             preferences.remove(PENDING_UPDATED_AT_EPOCH_MILLIS)
         }
@@ -256,3 +277,15 @@ private fun Set<String>.cleanedPreferenceValues(): Set<String> = asSequence()
     .toSet()
 
 private val Whitespace = Regex("\\s+")
+
+internal fun Map<String, String>.validWeekdayCategories(): Map<String, String> = filter { (day, category) ->
+    DayOfWeek.entries.any { it.name == day } && MealCategory.fromKey(category) != null
+}
+
+private fun Map<String, String>.encodedWeekdayCategories(): Set<String> =
+    validWeekdayCategories().map { (day, category) -> "$day=$category" }.toSet()
+
+private fun Set<String>.decodedWeekdayCategories(): Map<String, String> = mapNotNull { entry ->
+    val parts = entry.split('=', limit = 2)
+    if (parts.size == 2) parts[0] to parts[1] else null
+}.toMap().validWeekdayCategories()

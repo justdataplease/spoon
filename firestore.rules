@@ -67,6 +67,18 @@ service cloud.firestore {
         );
     }
 
+    function validWeekdayCategories(values) {
+      return values is map &&
+        values.keys().hasOnly(['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY']) &&
+        validCategory(values.get('MONDAY', 'any')) &&
+        validCategory(values.get('TUESDAY', 'any')) &&
+        validCategory(values.get('WEDNESDAY', 'any')) &&
+        validCategory(values.get('THURSDAY', 'any')) &&
+        validCategory(values.get('FRIDAY', 'any')) &&
+        validCategory(values.get('SATURDAY', 'any')) &&
+        validCategory(values.get('SUNDAY', 'any'));
+    }
+
     function validMealPreferences(data) {
       return data.keys().hasAll([
           'excludedCategories',
@@ -78,8 +90,12 @@ service cloud.firestore {
           'excludedCategories',
           'veganOnly',
           'excludedIngredientTerms',
-          'updatedAtEpochMillis'
+          'updatedAtEpochMillis',
+          'weekdayCategories',
+          'favoritesOnly'
         ]) &&
+        validWeekdayCategories(data.get('weekdayCategories', {})) &&
+        data.get('favoritesOnly', false) is bool &&
         data.excludedCategories is list &&
         data.excludedCategories.size() <= 9 &&
         data.excludedCategories.size() == data.excludedCategories.toSet().size() &&
@@ -323,18 +339,22 @@ service cloud.firestore {
           'filters',
           'completed',
           'completionEventId',
-          'updatedAtEpochMillis'
+          'updatedAtEpochMillis',
+          'locked'
         ]) &&
+        data.get('locked', false) is bool &&
         validPlanId(planId) &&
         data.date is string &&
         data.date == planId &&
         data.category is string &&
         validCategory(data.category) &&
         data.recipeId is string &&
-        validRecipeId(data.recipeId) &&
         data.recipeTitle is string &&
-        data.recipeTitle.size() > 0 &&
-        data.recipeTitle.size() <= 300 &&
+        (
+          (validRecipeId(data.recipeId) && validText(data.recipeTitle, 1, 300)) ||
+          (data.recipeId == '' && data.recipeTitle == '' &&
+            data.completed == false && data.completionEventId == '')
+        ) &&
         validFilters(data.filters, data.category) &&
         data.completed is bool &&
         data.completionEventId is string &&

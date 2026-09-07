@@ -14,15 +14,29 @@ data.
 
 - Monday-to-Sunday planning with default main-food groups such as όσπρια, κοτόπουλο,
   λαχανικά, κρέας, ψάρι, βρώμικο, and ζυμαρικά/ρύζι.
+- Preferences let you choose a default category for each weekday, Monday through
+  Sunday, and generate new proposals only from favorites. Matching favorites can
+  repeat across days and weeks; missing categories show an unavailable recipe card
+  with an action to edit that day's category or filters.
+- The main recipe stays visible on each day card. The optional «Πλήρες μενού»
+  button opens main, side, and dessert suggestions without replacing the saved
+  main dish. Extra courses respect the recipe source, food preferences, and day
+  filters, and show unavailable when no match exists. Dessert remains an explicit
+  category choice; the preset weekly rhythm uses main-dish categories.
+- Lock a recipe at the top of its day card to keep it during weekly regeneration.
+  Already-cooked meals are automatically kept too. Locks persist offline and sync
+  with the plan; unlocking makes the day eligible for weekly regeneration again.
 - Independent random reroll for one day or the whole week. Every matching recipe
   has the same selection probability across Akis, Argiro, Gastronomos, and custom
-  recipes; no provider receives priority. Current selections, other days/weeks, and
-  cooked history never remove recipes from the random pool.
+  recipes; no provider receives priority. Existing selections, other days/weeks,
+  and cooked history do not remove recipes from the pool for eligible days.
 - Per-day constraints for category, difficulty, minimum rating on a 0–10 scale,
   and maximum hands-on preparation time.
 - A clear «Ευκολάκι» effort index based on preparation sections and method steps:
   unknown when both are absent, easy for at most one preparation and 1–5 steps,
   demanding for at least three preparations or ten steps, and moderate otherwise.
+- Favorites share Explore's Greek text search and complete combined filters, with
+  independent search state, an active-filter count, and clear/reset actions.
 - Favorites, cooked/not-cooked tracking, a dedicated cooking history, previous/next
   weeks, and a month calendar.
 - Replacement of an existing day's suggestion with any saved favorite.
@@ -49,8 +63,11 @@ data.
   owner's plans, favorites, history, notes, shopping list, and custom recipes remain
   attached to the account and sync across phones.
 
-Strict filters are never silently relaxed. If no recipe matches, the current plan
-is preserved and the app explains that no alternative was found.
+Strict filters are never silently relaxed. If no recipe matches a valid request,
+the day is saved as unavailable, keeping its category and filters for the next
+attempt. Adding a matching favorite allows the day to recover. Changing weekday
+defaults updates unfinished days of the selected week; completed meals and their
+cooking history remain intact during preference reconciliation.
 
 ## Architecture
 
@@ -117,6 +134,14 @@ python -m pytest tools/recipe_importer/tests -q
 python tools/recipe_importer/audit_catalog_quality.py
 ```
 
+For changes to personal planning and preference validation, run the isolated
+Firestore rules contract (a local demo project; no production writes):
+
+```powershell
+firebase emulators:exec --only firestore --project demo-spoon-planning `
+  --config firebase.planning-test.json "python tools/test_firestore_planning_rules.py"
+```
+
 This executes production SQLite queries and Kotlin filters against all bundled
 recipes, checks every published facet, repeated planning across every category,
 cache eviction, saved-state reopening, and catalog replacement on upgrade.
@@ -172,6 +197,7 @@ spoon_recipe_payloads/{recipeId}         source audit envelope; backend only
 spoon_catalog/status                     last complete backend import checkpoint
 spoon/{uid}/mealPlans/{yyyy-MM-dd}       owner-only daily plan/filter/completion
 spoon/{uid}/favorites/{recipeId}         owner-only favorite marker
+spoon/{uid}/preferences/meal              food exclusions, weekday defaults, favorites-only source
 spoon/{uid}/shoppingItems/{itemId}       owner-only shopping-list item
 spoon/{uid}/recipeNotes/{recipeId}       owner-only private recipe note
 spoon/{uid}/customRecipes/{recipeId}     owner-only manually authored recipe
