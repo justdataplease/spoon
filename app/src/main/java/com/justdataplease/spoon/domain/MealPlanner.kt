@@ -17,6 +17,7 @@ import com.justdataplease.spoon.domain.repository.CatalogFacetOptions
 import com.justdataplease.spoon.domain.repository.RecipePage
 import com.justdataplease.spoon.domain.repository.SpoonRepository
 import java.time.LocalDate
+import java.time.DayOfWeek
 import javax.inject.Inject
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -51,6 +52,13 @@ sealed interface FavoriteReplacementResult {
         val recipeId: String,
     ) : FavoriteReplacementResult
 }
+
+/** Extra courses are optional suggestions and never replace the saved main dish. */
+data class MealMenuProposal(
+    val main: Recipe?,
+    val side: Recipe?,
+    val dessert: Recipe?,
+)
 
 class MealPlanner @Inject constructor(
     private val repository: SpoonRepository,
@@ -95,11 +103,13 @@ class MealPlanner @Inject constructor(
     suspend fun ensureWeek(
         containingDate: LocalDate = LocalDate.now(),
         random: Random = Random.Default,
+        resetWeekdays: Set<DayOfWeek> = emptySet(),
     ): List<DayMealPlan> {
         repository.ensureReady()
         // Keep one coherent preference snapshot for the entire refresh. A cloud/cache update
         // arriving halfway through the loop must not produce a week with mixed policies.
         val preferences = mealPreferenceSettings.first()
+        val favorites = favoritePool(preferences)
         val existing = repository.mealPlans.first().associateBy(DayMealPlan::date)
         val recipesById = repository.getRecipesByIds(
             existing.values.mapNotNullTo(mutableSetOf()) { it.recipeId.takeIf(String::isNotBlank) },
@@ -107,21 +117,23 @@ class MealPlanner @Inject constructor(
 
         return WeeklyPlanDefaults.dates(containingDate).map { date ->
             val current = existing[date.toString()]
-            if (current != null && current.isUsable(recipesById, preferences)) {
+            val resetCategory = date.dayOfWeek in resetWeekdays && current?.completed != true && current?.locked != true
+            if (current != null && !resetCategory && current.isUsable(recipesById, preferences, favorites)) {
                 current
             } else {
                 val replacement = createDay(
                     date = date,
                     random = random,
-                    previous = current,
+                    previous = if (resetCategory) current?.copy(
+                        filters = current.filters.copy(category = WeeklyPlanDefaults.categoryFor(date.dayOfWeek, preferences).key),
+                    ) else current,
                     preferences = preferences,
+                    favorites = favorites,
                 )
-                when {
-                    replacement.recipeId.isNotBlank() -> replacement.also {
-                        repository.upsertMealPlan(it)
-                    }
-                    current != null -> current
-                    else -> replacement
+                if (current?.recipeId == "" && replacement.recipeId.isBlank() && current.filters == replacement.filters && !current.completed) {
+                    current
+                } else {
+                    replacement.also { repository.upsertMealPlan(it) }
                 }
             }
         }
@@ -132,39 +144,104 @@ class MealPlanner @Inject constructor(
         filters: RecipeFilters? = null,
         random: Random = Random.Default,
     ): MealPlanSelection {
-        // A reroll is an explicit user action and recipe selection is served by the bundled
-        // catalog. Do not wait for every Firestore owner listener before searching locally;
-        // the resulting personal write is queued to Firestore by the repository.
-        val existing = repository.mealPlans.first().firstOrNull { it.date == date.toString() }
-        val requestedFilters = filters ?: existing?.filters ?: WeeklyPlanDefaults.filtersFor(date)
         val preferences = mealPreferenceSettings.first()
-        var effectiveFilters = requestedFilters
-        // Every draw includes the full matching pool, including current and past selections.
-        var selected = selectEligibleRecipe(
+        return rerollDay(date, filters, random, preferences, favoritePool(preferences))
+    }
+
+    /** One source and preference snapshot for every day; repeats remain eligible. */
+    suspend fun rerollWeek(
+        containingDate: LocalDate,
+        random: Random = Random.Default,
+    ): List<MealPlanSelection> {
+        val preferences = mealPreferenceSettings.first()
+        val favorites = favoritePool(preferences)
+        val plansByDate = repository.mealPlans.first().associateBy(DayMealPlan::date)
+        return WeeklyPlanDefaults.dates(containingDate).mapNotNull { date ->
+            val plan = plansByDate[date.toString()]
+            if (plan?.locked == true || plan?.completed == true) null
+            else rerollDay(date, null, random, preferences, favorites)
+        }
+    }
+
+    private suspend fun rerollDay(
+        date: LocalDate,
+        filters: RecipeFilters?,
+        random: Random,
+        preferences: MealPreferenceSettings,
+        favorites: List<Recipe>?,
+    ): MealPlanSelection {
+        // Explicit selection uses local recipes; the repository queues the personal write.
+        val existing = repository.mealPlans.first().firstOrNull { it.date == date.toString() }
+        val requestedFilters = filters ?: existing?.filters ?: WeeklyPlanDefaults.filtersFor(date, preferences)
+        if (!requestedFilters.isValid()) return MealPlanSelection.NoMatch(date, requestedFilters)
+        val selected = selectEligibleRecipe(
             filters = requestedFilters,
             excludingRecipeId = null,
             randomSeed = random.nextLong(),
             preferences = preferences,
+            favorites = favorites,
         )
-        if (
-            selected == null &&
-            filters == null &&
-            preferences.hasActiveSelections() &&
-            requestedFilters.category != MealCategory.ANY.key
-        ) {
-            effectiveFilters = requestedFilters.copy(category = MealCategory.ANY.key)
-            selected = selectEligibleRecipe(
-                filters = effectiveFilters,
-                excludingRecipeId = null,
-                randomSeed = random.nextLong(),
-                preferences = preferences,
-            )
-        }
-        selected ?: return MealPlanSelection.NoMatch(date, effectiveFilters)
-
-        val plan = newPlan(date, effectiveFilters, selected)
+        val plan = newPlan(date, requestedFilters, selected)
         repository.upsertMealPlan(plan)
-        return MealPlanSelection.Selected(plan, selected)
+        return if (selected == null) MealPlanSelection.NoMatch(date, requestedFilters)
+        else MealPlanSelection.Selected(plan, selected)
+    }
+
+    suspend fun suggestMenu(
+        date: LocalDate,
+        random: Random = Random.Default,
+    ): MealMenuProposal {
+        repository.ensureReady()
+        val preferences = mealPreferenceSettings.first()
+        val favorites = favoritePool(preferences)
+        val plan = repository.mealPlans.first().firstOrNull { it.date == date.toString() }
+        val main = plan?.recipeId?.takeIf(String::isNotBlank)
+            ?.let { repository.getRecipesByIds(setOf(it)).firstOrNull() }
+        val filters = plan?.filters ?: WeeklyPlanDefaults.filtersFor(date, preferences)
+        val criteria = ExploreCriteria(
+            easeLevel = filters.easeLevel,
+            minRating = filters.minRating,
+            maxPrepMinutes = filters.maxPrepMinutes,
+        )
+        val excludedIds = setOfNotNull(plan?.recipeId?.takeIf(String::isNotBlank))
+        val side = selectMenuRecipe(
+            criteria = criteria.copy(mealTypeLabels = setOf("Συνοδευτικά", "Σαλάτα", "Σαλάτες", "Ορεκτικά", "Ορεκτικό μεζές")),
+            preferences = preferences.copy(excludedCategories = preferences.excludedCategories + MealCategory.DESSERT.key),
+            favorites = favorites,
+            excludedIds = excludedIds,
+            random = random,
+        )
+        val dessert = selectMenuRecipe(
+            criteria = criteria.copy(category = MealCategory.DESSERT.key),
+            preferences = preferences,
+            favorites = favorites,
+            excludedIds = excludedIds,
+            random = random,
+        )
+        return MealMenuProposal(main, side, dessert)
+    }
+
+    private suspend fun selectMenuRecipe(
+        criteria: ExploreCriteria,
+        preferences: MealPreferenceSettings,
+        favorites: List<Recipe>?,
+        excludedIds: Set<String>,
+        random: Random,
+    ): Recipe? {
+        if (favorites != null) {
+            return ExploreRecipeFilter.filter(favorites, criteria, preferences)
+                .filterNot { it.id in excludedIds }.randomOrNull(random)
+        }
+        val first = repository.queryRecipes(criteria, 1, 0, preferences)
+        if (first.totalCount == 0) return null
+        val start = random.nextInt(first.totalCount)
+        // At most one main-dish id can be skipped; paging keeps the full catalog out of memory.
+        repeat(minOf(first.totalCount, excludedIds.size + 1)) { attempt ->
+            val offset = (start + attempt) % first.totalCount
+            val page = if (offset == 0) first else repository.queryRecipes(criteria, 1, offset, preferences)
+            page.recipes.firstOrNull { it.id !in excludedIds }?.let { return it }
+        }
+        return null
     }
 
     suspend fun updateFilters(
@@ -172,6 +249,17 @@ class MealPlanner @Inject constructor(
         filters: RecipeFilters,
         random: Random = Random.Default,
     ): MealPlanSelection = reroll(date, filters, random)
+
+    suspend fun setLocked(date: LocalDate, locked: Boolean) {
+        repository.ensureReady()
+        val plan = repository.mealPlans.first().firstOrNull { it.date == date.toString() } ?: return
+        // Completed meals are automatically protected; their completion event stays untouched.
+        if (plan.completed || plan.recipeId.isBlank() || plan.locked == locked) return
+        repository.upsertMealPlan(plan.copy(
+            locked = locked,
+            updatedAtEpochMillis = maxOf(System.currentTimeMillis(), plan.updatedAtEpochMillis + 1),
+        ))
+    }
 
     suspend fun setCompleted(date: LocalDate, completed: Boolean) {
         repository.ensureReady()
@@ -288,32 +376,28 @@ class MealPlanner @Inject constructor(
         random: Random,
         previous: DayMealPlan? = null,
         preferences: MealPreferenceSettings,
+        favorites: List<Recipe>?,
     ): DayMealPlan {
         val filters = previous?.filters
             ?.takeIf(RecipeFilters::isValid)
-            ?: WeeklyPlanDefaults.filtersFor(date)
-        var effectiveFilters = filters
-        var recipe = selectEligibleRecipe(
+            ?: WeeklyPlanDefaults.filtersFor(date, preferences)
+        val recipe = selectEligibleRecipe(
             filters = filters,
             excludingRecipeId = null,
             randomSeed = random.nextLong(),
             preferences = preferences,
+            favorites = favorites,
         )
-        if (
-            recipe == null &&
-            preferences.hasActiveSelections() &&
-            filters.category != MealCategory.ANY.key
-        ) {
-            effectiveFilters = filters.copy(category = MealCategory.ANY.key)
-            recipe = selectEligibleRecipe(
-                filters = effectiveFilters,
-                excludingRecipeId = null,
-                randomSeed = random.nextLong(),
-                preferences = preferences,
-            )
-        }
-        return newPlan(date, effectiveFilters, recipe)
+        return newPlan(date, filters, recipe)
     }
+
+    /** Null means the full catalog; an empty list means no available favorites. */
+    private suspend fun favoritePool(preferences: MealPreferenceSettings): List<Recipe>? =
+        if (preferences.favoritesOnly) {
+            repository.ensureReady()
+            repository.getRecipesByIds(repository.favoriteRecipeIds.first())
+                .filter { it.isActiveGreekRecipe() && it.matchesMealPreferences(preferences) }
+        } else null
 
     /** Defends the planner contract even if a repository implementation returns a bad row. */
     private suspend fun selectEligibleRecipe(
@@ -321,15 +405,17 @@ class MealPlanner @Inject constructor(
         excludingRecipeId: String?,
         randomSeed: Long,
         preferences: MealPreferenceSettings,
-    ): Recipe? = repository.selectRandomRecipe(
-        filters = filters,
-        excludingRecipeId = excludingRecipeId,
-        randomSeed = randomSeed,
-        preferences = preferences,
-    )?.takeIf { recipe ->
-        recipe.id != excludingRecipeId &&
-            selector.matches(recipe, filters) &&
-            recipe.matchesMealPreferences(preferences)
+        favorites: List<Recipe>?,
+    ): Recipe? {
+        val selected = if (favorites != null) {
+            selector.select(favorites, filters, excludingRecipeId, Random(randomSeed))
+        } else {
+            repository.selectRandomRecipe(filters, excludingRecipeId, randomSeed, preferences)
+        }
+        return selected?.takeIf { recipe ->
+            recipe.id != excludingRecipeId && selector.matches(recipe, filters) &&
+                recipe.matchesMealPreferences(preferences)
+        }
     }
 
     private fun newPlan(date: LocalDate, filters: RecipeFilters, recipe: Recipe?): DayMealPlan =
@@ -349,12 +435,14 @@ class MealPlanner @Inject constructor(
     private fun DayMealPlan.isUsable(
         recipesById: Map<String, Recipe>,
         preferences: MealPreferenceSettings,
+        favorites: List<Recipe>?,
     ): Boolean {
         val structurallyValid = date.isNotBlank() &&
             isSafeRecipeDocumentId(recipeId) &&
             recipeTitle.isNotBlank()
-        if (completed && structurallyValid) return true
+        if ((completed || locked) && structurallyValid) return true
         if (!structurallyValid || category != filters.category || !filters.isValid()) return false
+        if (favorites != null && favorites.none { it.id == recipeId }) return false
         val currentRecipe = recipesById[recipeId]
             ?: return recipeId.isCustomRecipeId()
         return selector.matches(currentRecipe, filters) &&

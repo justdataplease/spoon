@@ -10,6 +10,26 @@ import org.junit.Test
 
 class MealPreferenceFirestoreTest {
     @Test
+    fun `weekday and favorites settings survive cloud serialization with legacy defaults`() {
+        val settings = MealPreferenceSettings(
+            weekdayCategories = mapOf("MONDAY" to "meat", "SUNDAY" to "any"),
+            favoritesOnly = true,
+            updatedAtEpochMillis = 123L,
+        )
+        val fields = settings.toFirestoreDocument()
+        assertEquals(settings.weekdayCategories, fields["weekdayCategories"])
+        assertEquals(true, fields["favoritesOnly"])
+        assertEquals(settings, MealPreferenceDocument(
+            weekdayCategories = settings.weekdayCategories,
+            favoritesOnly = true,
+            updatedAtEpochMillis = 123L,
+        ).toSettingsOrNull())
+        assertEquals(MealPreferenceSettings(updatedAtEpochMillis = 1L), MealPreferenceDocument(updatedAtEpochMillis = 1L).toSettingsOrNull())
+        assertNull(MealPreferenceDocument(weekdayCategories = mapOf("FUNDAY" to "meat"), updatedAtEpochMillis = 1L).toSettingsOrNull())
+        assertNull(MealPreferenceDocument(weekdayCategories = mapOf("MONDAY" to "invalid"), updatedAtEpochMillis = 1L).toSettingsOrNull())
+    }
+
+    @Test
     fun `serializer emits exact deterministic and sanitized Firestore fields`() {
         val document = MealPreferenceSettings(
             excludedCategories = setOf("meat", " fish ", "any", "unknown"),
@@ -29,6 +49,8 @@ class MealPreferenceFirestoreTest {
                 "veganOnly",
                 "excludedIngredientTerms",
                 "updatedAtEpochMillis",
+                "weekdayCategories",
+                "favoritesOnly",
             ),
             document.keys,
         )

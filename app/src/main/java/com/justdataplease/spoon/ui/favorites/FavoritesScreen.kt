@@ -16,6 +16,16 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.material3.TextButton
+import com.justdataplease.spoon.ui.explore.ExploreFiltersUi
+import com.justdataplease.spoon.ui.explore.ExploreFacetOptionsUi
+import com.justdataplease.spoon.ui.explore.ExploreFilterSheet
+import com.justdataplease.spoon.ui.explore.ActiveFilterSummary
+import com.justdataplease.spoon.ui.explore.RecipeSearchControls
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -28,8 +38,15 @@ fun FavoritesScreen(
     onOpenRecipe: (String) -> Unit,
     onRemoveFavorite: (String) -> Unit,
     modifier: Modifier = Modifier,
+    query: String = "",
+    filters: ExploreFiltersUi = ExploreFiltersUi(),
+    options: ExploreFacetOptionsUi = ExploreFacetOptionsUi(),
+    totalFavoriteCount: Int = favorites.size,
+    onQueryChange: (String) -> Unit = {},
+    onApplyFilters: (ExploreFiltersUi) -> Unit = {},
 ) {
-    if (favorites.isEmpty()) {
+    var showFilters by remember { mutableStateOf(false) }
+    if (totalFavoriteCount == 0 && query.isBlank() && filters.activeCount == 0) {
         Box(modifier = modifier.fillMaxSize().padding(28.dp), contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Surface(
@@ -68,6 +85,33 @@ fun FavoritesScreen(
                 modifier = Modifier.padding(top = 4.dp, bottom = 10.dp),
             )
         }
+        item {
+            RecipeSearchControls(
+                query = query,
+                filters = filters,
+                onQueryChange = onQueryChange,
+                onShowFilters = { showFilters = true },
+                filterDescription = "Φίλτρα αγαπημένων",
+            )
+        }
+        if (filters.activeCount > 0) {
+            item { ActiveFilterSummary(filters, onClear = { onApplyFilters(ExploreFiltersUi()) }) }
+        }
+        if (favorites.isEmpty()) {
+            item {
+                Column(Modifier.fillMaxWidth().padding(vertical = 24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Δεν βρέθηκαν αγαπημένες συνταγές", style = MaterialTheme.typography.titleLarge)
+                    Text(
+                        "Δοκίμασε άλλη αναζήτηση ή άλλα φίλτρα. Ισχύουν και οι προτιμήσεις φαγητού σου.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    TextButton(onClick = {
+                        onQueryChange("")
+                        onApplyFilters(ExploreFiltersUi())
+                    }) { Text("Καθαρισμός αναζήτησης και φίλτρων") }
+                }
+            }
+        }
         items(favorites, key = { it.recipeId }) { favorite ->
             CompactFavoriteCard(
                 emoji = favorite.category.emoji,
@@ -82,7 +126,25 @@ fun FavoritesScreen(
             )
         }
     }
+    if (showFilters) {
+        ExploreFilterSheet(
+            current = filters,
+            options = options,
+            onDismiss = { showFilters = false },
+            onApply = {
+                onApplyFilters(it)
+                showFilters = false
+            },
+        )
+    }
 }
+
+data class FavoritesSearchUiState(
+    val query: String = "",
+    val filters: ExploreFiltersUi = ExploreFiltersUi(),
+    val favorites: List<FavoriteUi> = emptyList(),
+    val totalCount: Int = 0,
+)
 
 internal fun favoriteRecipeSummary(recipeCount: Int): String =
     if (recipeCount == 1) {

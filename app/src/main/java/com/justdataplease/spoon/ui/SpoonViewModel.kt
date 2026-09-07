@@ -20,6 +20,7 @@ import com.justdataplease.spoon.data.preferences.MealPreferenceSettings
 import com.justdataplease.spoon.domain.MealPlanSelection
 import com.justdataplease.spoon.domain.MealPlanner
 import com.justdataplease.spoon.domain.ExploreCriteria
+import com.justdataplease.spoon.domain.ExploreRecipeFilter
 import com.justdataplease.spoon.domain.FavoriteReplacementResult
 import com.justdataplease.spoon.domain.WeeklyPlanDefaults
 import com.justdataplease.spoon.domain.isActiveGreekRecipe
@@ -58,6 +59,9 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.text.Normalizer
 import java.time.LocalDate
+import java.time.DayOfWeek
+import com.justdataplease.spoon.ui.favorites.FavoritesSearchUiState
+import com.justdataplease.spoon.ui.week.MealMenuUiState
 import java.time.YearMonth
 import java.util.Locale
 import java.util.UUID
@@ -160,6 +164,8 @@ class SpoonViewModel @Inject constructor(
 ) : ViewModel() {
     private val computationScope = CoroutineScope(viewModelScope.coroutineContext + Dispatchers.Default)
     private val exploreSearchState = ExploreSearchState(computationScope)
+    private val favoritesSearchState = ExploreSearchState(computationScope)
+    private val favoritesFilters = MutableStateFlow(ExploreFiltersUi())
     private val customRecipeEditorStore = CustomRecipeEditorStore(savedStateHandle)
     val customRecipeEditor = customRecipeEditorStore.state
     val mealPreferenceSettings = mealPlanner.mealPreferenceSettings.stateIn(
@@ -203,6 +209,9 @@ class SpoonViewModel @Inject constructor(
     private val accountError = MutableStateFlow<String?>(null)
     private val accountOwnerTracker = AccountOwnerTracker()
     private val catalogWeekRetryGate = CatalogWeekRetryGate()
+    private val mutableMealMenu = MutableStateFlow<MealMenuUiState?>(null)
+    val mealMenu: kotlinx.coroutines.flow.StateFlow<MealMenuUiState?> = mutableMealMenu
+    private var mealMenuJob: Job? = null
     private var recipeDetailsJob: Job? = null
     private var recipeDetailsGeneration = 0L
     private var weekEnsureJob: Job? = null
@@ -248,6 +257,22 @@ class SpoonViewModel @Inject constructor(
     ) { catalog, plans, favorites, backendState, userContent ->
         PlannerSnapshot(catalog, plans, favorites, backendState, userContent)
     }
+
+    val favoritesSearchUiState = combine(
+        plannerSnapshot,
+        exploreFilterInputs(favoritesSearchState.filterQuery, favoritesFilters),
+        favoritesSearchState.visibleQuery,
+        mealPreferenceSettings,
+    ) { snapshot, input, query, preferences ->
+        val favorites = snapshot.favoriteIds.mapNotNull(snapshot.catalog.recipesById::get)
+        FavoritesSearchUiState(
+            query = query,
+            filters = input.filters,
+            favorites = ExploreRecipeFilter.filter(favorites, input.filters.toDomain(input.query), preferences)
+                .map(Recipe::toFavoriteUi),
+            totalCount = snapshot.favoriteIds.size,
+        )
+    }.stateIn(computationScope, SharingStarted.WhileSubscribed(5_000), FavoritesSearchUiState())
 
     private val recipeSelection = combine(
         selectedRecipeId,
@@ -350,7 +375,7 @@ class SpoonViewModel @Inject constructor(
         val plansByDate = snapshot.plans.associateBy(DayMealPlan::date)
         val weekPlans = WeeklyPlanDefaults.dates(dates.weekStart).map { date ->
             val stored = plansByDate[date.toString()]
-            val filters = stored?.filters ?: WeeklyPlanDefaults.filtersFor(date)
+            val filters = stored?.filters ?: WeeklyPlanDefaults.filtersFor(date, mealPreferenceSettings.value)
             val recipe = stored?.recipeId?.let(recipesById::get)
             DayPlanUi(
                 date = date,
@@ -375,12 +400,14 @@ class SpoonViewModel @Inject constructor(
                 language = recipe?.language ?: "el",
                 isFavorite = stored?.recipeId?.let(snapshot.favoriteIds::contains) == true,
                 isCompleted = stored?.completed == true,
+                isLocked = stored?.locked == true,
                 filters = filters.toUi(),
             )
         }
         val favoriteRecipes = snapshot.favoriteIds.mapNotNull(recipesById::get).map(Recipe::toFavoriteUi)
         val calendarMeals = snapshot.plans.mapNotNull { plan ->
             val date = runCatching { LocalDate.parse(plan.date) }.getOrNull() ?: return@mapNotNull null
+            if (plan.recipeId.isBlank()) return@mapNotNull null
             if (YearMonth.from(date) != dates.month) return@mapNotNull null
             val recipe = recipesById[plan.recipeId]
             CalendarMealUi(
@@ -555,6 +582,12 @@ class SpoonViewModel @Inject constructor(
         exploreSearchState.update(query)
     }
 
+    fun updateFavoritesQuery(query: String) = favoritesSearchState.update(query)
+
+    fun applyFavoritesFilters(filters: ExploreFiltersUi) {
+        favoritesFilters.value = filters
+    }
+
     fun applyExploreFilters(filters: ExploreFiltersUi) {
         exploreFilters.value = filters
     }
@@ -564,11 +597,17 @@ class SpoonViewModel @Inject constructor(
         onSaved: () -> Unit = {},
     ) {
         launchWorking(
-            work = { mealPlanner.saveMealPreferenceSettings(settings) },
-        ) {
+            work = {
+                val previous = mealPreferenceSettings.value
+                val changedDays = DayOfWeek.entries.filterTo(mutableSetOf()) { day ->
+                    WeeklyPlanDefaults.categoryFor(day, previous) != WeeklyPlanDefaults.categoryFor(day, settings)
+                }
+                mealPlanner.saveMealPreferenceSettings(settings)
+                changedDays
+            },
+        ) { changedDays ->
             message.value = "Οι προτιμήσεις φαγητού αποθηκεύτηκαν."
-            // Unfinished cards must be reconciled against the newly saved preferences.
-            ensureWeek(selectedWeekStart.value, force = true)
+            ensureWeek(selectedWeekStart.value, force = true, resetWeekdays = changedDays)
             onSaved()
         }
     }
@@ -690,6 +729,38 @@ class SpoonViewModel @Inject constructor(
         }
     }
 
+    fun showMealMenu(date: LocalDate) {
+        mealMenuJob?.cancel()
+        val initial = MealMenuUiState(date = date, favoritesOnly = mealPreferenceSettings.value.favoritesOnly)
+        mutableMealMenu.value = initial
+        mealMenuJob = viewModelScope.launch {
+            try {
+                val menu = withUserActionTimeout { withContext(Dispatchers.Default) { mealPlanner.suggestMenu(date) } }
+                mutableMealMenu.value = initial.copy(
+                    isLoading = false,
+                    main = menu.main?.toExploreRecipeUi(false),
+                    side = menu.side?.toExploreRecipeUi(false),
+                    dessert = menu.dessert?.toExploreRecipeUi(false),
+                )
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                mutableMealMenu.value = initial.copy(isLoading = false, error = error.userMessage())
+            }
+        }
+    }
+
+    fun dismissMealMenu() {
+        mealMenuJob?.cancel()
+        mealMenuJob = null
+        mutableMealMenu.value = null
+    }
+
+    fun toggleLocked(date: LocalDate) {
+        val plan = uiState.value.weekPlans.firstOrNull { it.date == date } ?: return
+        launchReporting { mealPlanner.setLocked(date, !plan.isLocked) }
+    }
+
     fun reroll(date: LocalDate) = launchSelection { mealPlanner.reroll(date) }
 
     fun saveFilters(date: LocalDate, filters: FiltersUi) {
@@ -700,11 +771,7 @@ class SpoonViewModel @Inject constructor(
     fun shuffleWeek() {
         launchWorking(
             work = {
-                var misses = 0
-                WeeklyPlanDefaults.dates(selectedWeekStart.value).forEach { date ->
-                    if (mealPlanner.reroll(date) is MealPlanSelection.NoMatch) misses++
-                }
-                misses
+                mealPlanner.rerollWeek(selectedWeekStart.value).count { it is MealPlanSelection.NoMatch }
             },
         ) { misses ->
             message.value = when {
@@ -950,7 +1017,7 @@ class SpoonViewModel @Inject constructor(
         }
     }
 
-    private fun ensureWeek(date: LocalDate, force: Boolean = false) {
+    private fun ensureWeek(date: LocalDate, force: Boolean = false, resetWeekdays: Set<DayOfWeek> = emptySet()) {
         val weekStart = WeeklyPlanDefaults.weekStart(date)
         if (
             !shouldStartWeekEnsure(
@@ -961,7 +1028,7 @@ class SpoonViewModel @Inject constructor(
             )
         ) return
         catalogWeekRetryGate.onDirectRequest(weekStart)
-        startWeekEnsure(weekStart, isCatalogRetry = false)
+        startWeekEnsure(weekStart, isCatalogRetry = false, resetWeekdays = resetWeekdays)
     }
 
     private fun retryWeekAfterCatalog(weekStart: LocalDate) {
@@ -973,6 +1040,7 @@ class SpoonViewModel @Inject constructor(
     private fun startWeekEnsure(
         weekStart: LocalDate,
         isCatalogRetry: Boolean,
+        resetWeekdays: Set<DayOfWeek> = emptySet(),
     ) {
         if (!isCatalogRetry) weekEnsureJob?.cancel()
         val generation = ++weekEnsureGeneration
@@ -981,7 +1049,7 @@ class SpoonViewModel @Inject constructor(
         val job = viewModelScope.launch(start = CoroutineStart.LAZY) {
             try {
                 val plans = withUserActionTimeout {
-                    withContext(Dispatchers.Default) { mealPlanner.ensureWeek(weekStart) }
+                    withContext(Dispatchers.Default) { mealPlanner.ensureWeek(weekStart, resetWeekdays = resetWeekdays) }
                 }
                 if (plans.isNotEmpty() && plans.all { it.recipeId.isNotBlank() }) {
                     catalogWeekRetryGate.onAttemptSucceeded(weekStart)
@@ -1391,7 +1459,7 @@ private fun String.facetDisplayQuality(): Int =
 
 private val FacetWhitespace = Regex("\\s+")
 
-private fun ExploreFiltersUi.toDomain(query: String) = ExploreCriteria(
+internal fun ExploreFiltersUi.toDomain(query: String) = ExploreCriteria(
     query = query,
     category = categoryKey.toDomainCategoryKey(),
     easeLevel = ease.toDomainEaseKey(),

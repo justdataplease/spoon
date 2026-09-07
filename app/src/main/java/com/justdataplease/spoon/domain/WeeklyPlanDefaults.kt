@@ -2,6 +2,7 @@ package com.justdataplease.spoon.domain
 
 import com.justdataplease.spoon.data.model.MealCategory
 import com.justdataplease.spoon.data.model.RecipeFilters
+import com.justdataplease.spoon.data.preferences.MealPreferenceSettings
 import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.temporal.TemporalAdjusters
@@ -26,10 +27,15 @@ object WeeklyPlanDefaults {
         return (0L..6L).map(monday::plusDays)
     }
 
-    fun categoryFor(dayOfWeek: DayOfWeek): MealCategory =
-        checkNotNull(categoriesByDay[dayOfWeek])
+    fun categoryFor(
+        dayOfWeek: DayOfWeek,
+        preferences: MealPreferenceSettings = MealPreferenceSettings(),
+    ): MealCategory = preferences.weekdayCategories[dayOfWeek.name]
+        ?.let(MealCategory::fromKey) ?: checkNotNull(categoriesByDay[dayOfWeek])
 
-    fun filtersFor(date: LocalDate): RecipeFilters =
-        RecipeFilters(category = categoryFor(date.dayOfWeek).key)
+    fun filtersFor(
+        date: LocalDate,
+        preferences: MealPreferenceSettings = MealPreferenceSettings(),
+    ): RecipeFilters = RecipeFilters(category = categoryFor(date.dayOfWeek, preferences).key)
 }
 

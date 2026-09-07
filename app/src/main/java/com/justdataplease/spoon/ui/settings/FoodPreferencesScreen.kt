@@ -54,6 +54,13 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.justdataplease.spoon.data.preferences.MealPreferenceSettings
+import com.justdataplease.spoon.data.model.MealCategory
+import com.justdataplease.spoon.domain.WeeklyPlanDefaults
+import com.justdataplease.spoon.ui.components.GreekLocale
+import java.time.DayOfWeek
+import java.time.format.TextStyle
+import androidx.compose.material.icons.outlined.CalendarMonth
+import androidx.compose.material.icons.outlined.FavoriteBorder
 import com.justdataplease.spoon.ui.components.ProviderLabelKind
 import com.justdataplease.spoon.ui.components.greekProviderLabel
 import com.justdataplease.spoon.ui.model.AvailableCategories
@@ -134,9 +141,72 @@ fun FoodPreferencesScreen(
                         Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                             Text("Όλα περιλαμβάνονται αρχικά", fontWeight = FontWeight.Bold)
                             Text(
-                                "Οι αποκλεισμοί ισχύουν στην Εξερεύνηση και στις νέες προτάσεις εβδομάδας.",
+                                "Οι αποκλεισμοί ισχύουν στην Εξερεύνηση, στις Αγαπημένες και στις νέες προτάσεις εβδομάδας.",
                                 style = MaterialTheme.typography.bodyMedium,
                             )
+                        }
+                    }
+                }
+            }
+
+            item {
+                PreferenceCard(
+                    title = "Προτάσεις εβδομάδας",
+                    subtitle = "Διάλεξε από πού θα βρίσκουμε τις συνταγές σου.",
+                    icon = Icons.Outlined.FavoriteBorder,
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Μόνο από αγαπημένες", style = MaterialTheme.typography.titleMedium)
+                            Text(
+                                "Οι συνταγές μπορούν να επαναλαμβάνονται. Αν καμία δεν ταιριάζει στην κατηγορία και στα φίλτρα της ημέρας, θα εμφανίζεται μη διαθέσιμη συνταγή.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(
+                            checked = draft.favoritesOnly,
+                            onCheckedChange = { draft = draft.copy(favoritesOnly = it) },
+                        )
+                    }
+                }
+            }
+
+            item {
+                PreferenceCard(
+                    title = "Κατηγορία ανά ημέρα",
+                    subtitle = "Οι προεπιλογές για κάθε εβδομάδα. Η αποθήκευση ενημερώνει και τις αντίστοιχες αμαγείρευτες ημέρες της επιλεγμένης εβδομάδας.",
+                    icon = Icons.Outlined.CalendarMonth,
+                ) {
+                    DayOfWeek.entries.forEach { day ->
+                        var expanded by remember { mutableStateOf(false) }
+                        val category = WeeklyPlanDefaults.categoryFor(day, draft)
+                        ExposedDropdownMenuBox(
+                            expanded = expanded,
+                            onExpandedChange = { expanded = it },
+                        ) {
+                            OutlinedTextField(
+                                value = category.greekLabel,
+                                onValueChange = {},
+                                readOnly = true,
+                                label = { Text(day.getDisplayName(TextStyle.FULL, GreekLocale).replaceFirstChar { it.titlecase(GreekLocale) }) },
+                                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
+                                modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable).fillMaxWidth(),
+                            )
+                            ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                                MealCategory.entries.forEach { option ->
+                                    DropdownMenuItem(
+                                        text = { Text(option.greekLabel) },
+                                        onClick = {
+                                            val overrides = draft.weekdayCategories - day.name
+                                            draft = draft.copy(weekdayCategories = if (option == WeeklyPlanDefaults.categoryFor(day)) {
+                                                overrides
+                                            } else overrides + (day.name to option.key))
+                                            expanded = false
+                                        },
+                                    )
+                                }
+                            }
                         }
                     }
                 }

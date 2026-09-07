@@ -148,54 +148,12 @@ fun ExploreScreen(
             ExploreHero(resultCount = recipes.size, totalCount = totalRecipeCount, onCreateRecipe = onCreateRecipe)
         }
         item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                OutlinedTextField(
-                    value = query,
-                    onValueChange = onQueryChange,
-                    modifier = Modifier.weight(1f),
-                    singleLine = true,
-                    shape = RoundedCornerShape(18.dp),
-                    leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
-                    trailingIcon = if (query.isNotBlank()) {
-                        {
-                            IconButton(onClick = { onQueryChange("") }) {
-                                Icon(Icons.Outlined.Close, contentDescription = "Καθαρισμός αναζήτησης")
-                            }
-                        }
-                    } else null,
-                    placeholder = { Text("Αναζήτηση συνταγής ή υλικού") },
-                    label = { Text("Αναζήτηση") },
-                )
-                Surface(
-                    onClick = { showFilters = true },
-                    modifier = Modifier.size(58.dp),
-                    shape = RoundedCornerShape(18.dp),
-                    color = if (filters.activeCount > 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-                    contentColor = if (filters.activeCount > 0) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(Icons.Outlined.Tune, contentDescription = "Φίλτρα εξερεύνησης")
-                        if (filters.activeCount > 0) {
-                            Surface(
-                                modifier = Modifier.align(Alignment.TopEnd).padding(4.dp),
-                                shape = CircleShape,
-                                color = MaterialTheme.colorScheme.tertiary,
-                                contentColor = MaterialTheme.colorScheme.onTertiary,
-                            ) {
-                                Text(
-                                    filters.activeCount.toString(),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp),
-                                )
-                            }
-                        }
-                    }
-                }
-            }
+            RecipeSearchControls(
+                query = query,
+                filters = filters,
+                onQueryChange = onQueryChange,
+                onShowFilters = { showFilters = true },
+            )
         }
         if (filters.activeCount > 0) {
             item {
@@ -363,7 +321,7 @@ private fun SmallMetric(text: String) {
 }
 
 @Composable
-private fun ActiveFilterSummary(filters: ExploreFiltersUi, onClear: () -> Unit) {
+internal fun ActiveFilterSummary(filters: ExploreFiltersUi, onClear: () -> Unit) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
@@ -400,7 +358,7 @@ private fun EmptyExploreState(onClear: () -> Unit) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ExploreFilterSheet(
+internal fun ExploreFilterSheet(
     current: ExploreFiltersUi,
     options: ExploreFacetOptionsUi,
     onDismiss: () -> Unit,
@@ -679,3 +637,62 @@ private fun FilterTitle(text: String) {
 
 private fun Set<String>.toggled(value: String): Set<String> =
     if (value in this) this - value else this + value
+
+/** Shared search field, filter button, and active count for Explore and Favorites. */
+@Composable
+internal fun RecipeSearchControls(
+    query: String,
+    filters: ExploreFiltersUi,
+    onQueryChange: (String) -> Unit,
+    onShowFilters: () -> Unit,
+    filterDescription: String = "Φίλτρα εξερεύνησης",
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        OutlinedTextField(
+            value = query,
+            onValueChange = onQueryChange,
+            modifier = Modifier.weight(1f),
+            singleLine = true,
+            shape = RoundedCornerShape(18.dp),
+            leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
+            trailingIcon = if (query.isNotBlank()) {
+                {
+                    IconButton(onClick = { onQueryChange("") }) {
+                        Icon(Icons.Outlined.Close, contentDescription = "Καθαρισμός αναζήτησης")
+                    }
+                }
+            } else null,
+            placeholder = { Text("Αναζήτηση συνταγής ή υλικού") },
+            label = { Text("Αναζήτηση") },
+        )
+        Surface(
+            onClick = onShowFilters,
+            modifier = Modifier.size(58.dp),
+            shape = RoundedCornerShape(18.dp),
+            color = if (filters.activeCount > 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+            contentColor = if (filters.activeCount > 0) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(Icons.Outlined.Tune, contentDescription = filterDescription)
+                if (filters.activeCount > 0) {
+                    Surface(
+                        modifier = Modifier.align(Alignment.TopEnd).padding(4.dp),
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.tertiary,
+                        contentColor = MaterialTheme.colorScheme.onTertiary,
+                    ) {
+                        Text(
+                            filters.activeCount.toString(),
+                            style = MaterialTheme.typography.labelSmall,
+                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp),
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
