@@ -19,10 +19,12 @@ data.
   repeat across days and weeks; missing categories show an unavailable recipe card
   with an action to edit that day's category or filters.
 - The main recipe stays visible on each day card. The optional «Πλήρες μενού»
-  button opens main, side, and dessert suggestions without replacing the saved
-  main dish. Extra courses respect the recipe source, food preferences, and day
-  filters, and show unavailable when no match exists. Dessert remains an explicit
-  category choice; the preset weekly rhythm uses main-dish categories.
+  button opens a dedicated screen with saved main, side, and dessert courses.
+  Each course supports filters, favorites, replacement, locks, and cooking history.
+  Reopening the screen and regenerating weekly mains preserve saved extras. Only
+  an explicit course replacement changes them. New courses respect the selected
+  source and food preferences; missing matches show unavailable. Dessert remains
+  an explicit category choice; the preset week uses main-dish categories.
 - Lock a recipe at the top of its day card to keep it during weekly regeneration.
   Already-cooked meals are automatically kept too. Locks persist offline and sync
   with the plan; unlocking makes the day eligible for weekly regeneration again.
@@ -37,8 +39,8 @@ data.
   demanding for at least three preparations or ten steps, and moderate otherwise.
 - Favorites share Explore's Greek text search and complete combined filters, with
   independent search state, an active-filter count, and clear/reset actions.
-- Favorites, cooked/not-cooked tracking, a dedicated cooking history, previous/next
-  weeks, and a month calendar.
+- Favorites, cooked/not-cooked tracking for each course, a dedicated «Ιστορικό»
+  bottom tab, previous/next weeks, and a month calendar.
 - Replacement of an existing day's suggestion with any saved favorite.
 - A persistent shopping list. Add every ingredient from a recipe in one tap, add
   manual items, tick them off, remove them, or clear everything completed.
@@ -61,7 +63,9 @@ data.
 - Anonymous Firebase Authentication plus optional email/password account linking,
   sign-in, sign-out, and password reset. Linking upgrades the same UID so the
   owner's plans, favorites, history, notes, shopping list, and custom recipes remain
-  attached to the account and sync across phones.
+  attached to the account and sync across phones. Account metadata checks are
+  throttled to once per 15 seconds; failed connections retry after 5, 10, 20, then
+  30 seconds. Live personal-data listeners and queued saves remain immediate.
 
 Strict filters are never silently relaxed. If no recipe matches a valid request,
 the day is saved as unavailable, keeping its category and filters for the next

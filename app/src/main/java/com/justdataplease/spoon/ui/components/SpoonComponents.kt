@@ -162,7 +162,8 @@ fun EmptyRecipeCard(
     modifier: Modifier = Modifier,
     onEdit: () -> Unit = {},
     favoritesOnly: Boolean = false,
-    onOpenMenu: () -> Unit = {},
+    onOpenMenu: (() -> Unit)? = null,
+    title: String? = null,
 ) {
     Card(
         modifier = modifier.fillMaxWidth(),
@@ -178,7 +179,7 @@ fun EmptyRecipeCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                DayDateHeader(plan.date)
+                if (title == null) DayDateHeader(plan.date) else Text(title, style = MaterialTheme.typography.titleLarge)
                 CategoryPill(plan.category.emoji, plan.category.label)
             }
             Text(
@@ -191,10 +192,12 @@ fun EmptyRecipeCard(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             TextButton(onClick = onEdit) { Text("Αλλαγή κατηγορίας / φίλτρων") }
-            TextButton(onClick = onOpenMenu) {
-                Icon(Icons.Outlined.RestaurantMenu, contentDescription = null)
-                Spacer(Modifier.size(8.dp))
-                Text("Πλήρες μενού")
+            if (onOpenMenu != null) {
+                TextButton(onClick = onOpenMenu) {
+                    Icon(Icons.Outlined.RestaurantMenu, contentDescription = null)
+                    Spacer(Modifier.size(8.dp))
+                    Text("Πλήρες μενού")
+                }
             }
             Button(onClick = onPick) {
                 Icon(Icons.Outlined.AutoAwesome, contentDescription = null)

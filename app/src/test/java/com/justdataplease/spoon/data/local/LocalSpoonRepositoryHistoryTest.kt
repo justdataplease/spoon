@@ -2,6 +2,8 @@ package com.justdataplease.spoon.data.local
 
 import android.content.SharedPreferences
 import com.justdataplease.spoon.data.model.CookedMeal
+import com.justdataplease.spoon.data.model.MealCourse
+import com.justdataplease.spoon.data.model.MealCoursePlan
 import com.justdataplease.spoon.data.model.DayMealPlan
 import com.justdataplease.spoon.data.model.MealCategory
 import com.justdataplease.spoon.data.model.Recipe
@@ -137,6 +139,38 @@ class LocalSpoonRepositoryHistoryTest {
         assertTrue(repository.cookedHistory.first().isEmpty())
         assertFalse(repository.mealPlans.first().single().completed)
         assertEquals("", repository.mealPlans.first().single().completionEventId)
+    }
+
+    @Test
+    fun menu_courses_survive_restart_and_have_independent_history() = runBlocking {
+        val memory = MemoryPreferences()
+        val repository = LocalSpoonRepository(memory.preferences, Json)
+        val date = "2026-09-07"
+        repository.upsertMealPlan(DayMealPlan(date = date, recipeId = "main", recipeTitle = "Main",
+            side = MealCoursePlan(recipeId = "side", recipeTitle = "Side", locked = true),
+            dessert = MealCoursePlan(recipeId = "dessert", recipeTitle = "Dessert")))
+        repository.setMealCompleted(date, true)
+        val mainEvent = repository.cookedHistory.first().single()
+        repository.setCourseCompleted(date, MealCourse.SIDE, true)
+        repository.setCourseCompleted(date, MealCourse.DESSERT, true)
+        assertEquals(3, repository.cookedHistory.first().size)
+        assertEquals(mainEvent, repository.cookedHistory.first().first { it.recipeId == "main" })
+        val restarted = LocalSpoonRepository(memory.preferences, Json)
+        val plan = restarted.mealPlans.first().single()
+        assertTrue(plan.completed && plan.side!!.completed && plan.dessert!!.completed)
+        assertTrue(plan.side!!.locked)
+        assertEquals(mainEvent.completedAtEpochMillis, plan.completedAtEpochMillis)
+        assertEquals(repository.cookedHistory.first(), restarted.cookedHistory.first())
+        val sideEvent = restarted.cookedHistory.first().first { it.recipeId == "side" }
+        restarted.deleteCookedHistoryEntry(sideEvent.id)
+        val afterDelete = restarted.mealPlans.first().single()
+        assertTrue(afterDelete.completed && afterDelete.dessert!!.completed)
+        assertFalse(afterDelete.side!!.completed)
+        assertTrue(afterDelete.side!!.locked)
+        assertEquals(2, restarted.cookedHistory.first().size)
+        restarted.setCourseCompleted(date, MealCourse.DESSERT, false)
+        assertEquals(listOf(mainEvent), restarted.cookedHistory.first())
+        assertTrue(restarted.mealPlans.first().single().completed)
     }
 
     private class MemoryPreferences(

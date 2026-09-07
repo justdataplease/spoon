@@ -34,10 +34,10 @@ internal fun mergeCookedHistory(
 ): List<CookedMeal> {
     val normalizedStored = storedHistory.map(CookedMeal::withStableId)
     val storedKeys = normalizedStored.mapTo(mutableSetOf(), CookedMeal::completionKey)
-    val legacyEvents = plans.asSequence()
+    val legacyEvents = plans.asSequence().flatMap { it.allCourses().asSequence() }
         .filter { plan -> plan.completed && plan.recipeId.isNotBlank() && plan.updatedAtEpochMillis > 0L }
         .filter { plan ->
-            Triple(plan.date, plan.recipeId, plan.updatedAtEpochMillis) !in storedKeys
+            Triple(plan.date, plan.recipeId, plan.completionTimestamp) !in storedKeys
         }
         .map { plan -> plan.toCookedMeal() }
     return (normalizedStored.asSequence() + legacyEvents)
@@ -51,14 +51,14 @@ internal fun DayMealPlan.toCookedMeal(): CookedMeal = CookedMeal(
     date = date,
     recipeId = recipeId,
     recipeTitle = recipeTitle,
-    completedAtEpochMillis = updatedAtEpochMillis,
+    completedAtEpochMillis = completionTimestamp,
 )
 
 internal fun CookedMeal.matchesActiveCompletion(plan: DayMealPlan): Boolean =
     plan.completed &&
         date == plan.date &&
         recipeId == plan.recipeId &&
-        completedAtEpochMillis == plan.updatedAtEpochMillis &&
+        completedAtEpochMillis == plan.completionTimestamp &&
         (plan.completionEventId.isBlank() || id == plan.completionEventId)
 
 private fun CookedMeal.withStableId(): CookedMeal =

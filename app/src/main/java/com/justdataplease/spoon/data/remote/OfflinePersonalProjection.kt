@@ -2,6 +2,9 @@ package com.justdataplease.spoon.data.remote
 
 import com.justdataplease.spoon.data.model.CookedMeal
 import com.justdataplease.spoon.data.model.DayMealPlan
+import com.justdataplease.spoon.data.model.MealCourse
+import com.justdataplease.spoon.data.model.coursePlan
+import com.justdataplease.spoon.data.model.withCourse
 import com.justdataplease.spoon.data.model.matchesActiveCompletion
 import com.justdataplease.spoon.data.model.mergeCookedHistory
 import com.justdataplease.spoon.data.model.toCookedMeal
@@ -25,10 +28,13 @@ internal fun projectMealCompletion(
     completed: Boolean,
     nowEpochMillis: Long,
     newCompletionEventId: String,
+    course: MealCourse = MealCourse.MAIN,
 ): MealCompletionProjection {
-    val current = checkNotNull(plans.firstOrNull { it.date == date }) {
+    val parent = checkNotNull(plans.firstOrNull { it.date == date }) {
         "Cannot complete a meal plan that does not exist: $date"
     }
+    val current = checkNotNull(parent.coursePlan(course))
+    require(!completed || current.recipeId.isNotBlank()) { "Cannot cook an unavailable course" }
     if (current.completed == completed) {
         return MealCompletionProjection(
             plans = plans,
@@ -44,8 +50,10 @@ internal fun projectMealCompletion(
         completed = completed,
         completionEventId = if (completed) newCompletionEventId else "",
         updatedAtEpochMillis = nowEpochMillis,
+        completedAtEpochMillis = if (completed) nowEpochMillis else 0L,
     )
-    val updatedPlans = (plans.filterNot { it.date == date } + changed)
+    val changedParent = parent.withCourse(course, changed)
+    val updatedPlans = (plans.filterNot { it.date == date } + changedParent)
         .sortedBy(DayMealPlan::date)
 
     if (completed) {
@@ -54,7 +62,7 @@ internal fun projectMealCompletion(
             plans = updatedPlans,
             storedHistory = (storedHistory.filterNot { it.id == history.id } + history)
                 .sortedByDescending(CookedMeal::completedAtEpochMillis),
-            changedPlan = changed,
+            changedPlan = changedParent,
             historyToCreate = history,
             historyIdsToDelete = emptySet(),
         )
@@ -72,7 +80,7 @@ internal fun projectMealCompletion(
     return MealCompletionProjection(
         plans = updatedPlans,
         storedHistory = storedHistory.filterNot { it.id in matchingStoredIds },
-        changedPlan = changed,
+        changedPlan = changedParent,
         historyToCreate = null,
         historyIdsToDelete = matchingStoredIds,
     )
@@ -96,22 +104,22 @@ internal fun projectHistoryDeletion(
         .firstOrNull { it.id == historyId }
         ?: return HistoryDeletionProjection(plans, storedHistory, null, null)
     val currentPlan = plans.firstOrNull { it.date == visibleEvent.date }
-    val changedPlan = currentPlan
-        ?.takeIf(visibleEvent::matchesActiveCompletion)
-        ?.copy(
-            id = currentPlan.id.ifBlank { currentPlan.date },
-            completed = false,
-            completionEventId = "",
+    val activeCourse = currentPlan?.let { plan ->
+        MealCourse.entries.firstOrNull { course -> plan.coursePlan(course)?.let(visibleEvent::matchesActiveCompletion) == true }
+    }
+    val changedPlan = if (currentPlan != null && activeCourse != null) {
+        currentPlan.withCourse(activeCourse, checkNotNull(currentPlan.coursePlan(activeCourse)).copy(
+            completed = false, completionEventId = "", completedAtEpochMillis = 0L,
             updatedAtEpochMillis = nowEpochMillis,
-        )
+        ))
+    } else null
     val updatedPlans = if (changedPlan == null) {
         plans
     } else {
         plans.map { plan -> if (plan.date == changedPlan.date) changedPlan else plan }
     }
     val storedRowExists = storedHistory.any { it.id == historyId }
-    val serverRowGuaranteed = currentPlan?.completionEventId
-        ?.takeIf(String::isNotBlank) == historyId
+    val serverRowGuaranteed = activeCourse?.let { currentPlan?.coursePlan(it)?.completionEventId } == historyId
 
     return HistoryDeletionProjection(
         plans = updatedPlans,

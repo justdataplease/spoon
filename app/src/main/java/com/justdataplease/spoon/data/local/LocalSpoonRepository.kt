@@ -6,6 +6,10 @@ import com.justdataplease.spoon.data.isSafeRecipeDocumentId
 import com.justdataplease.spoon.data.model.CookedMeal
 import com.justdataplease.spoon.data.model.CustomRecipe
 import com.justdataplease.spoon.data.model.DayMealPlan
+import com.justdataplease.spoon.data.model.MealCourse
+import com.justdataplease.spoon.data.model.allCourses
+import com.justdataplease.spoon.data.remote.projectMealCompletion
+import com.justdataplease.spoon.data.remote.projectHistoryDeletion
 import com.justdataplease.spoon.data.model.MAX_SHOPPING_ITEMS_PER_WRITE
 import com.justdataplease.spoon.data.model.Recipe
 import com.justdataplease.spoon.data.model.RecipeFilters
@@ -156,38 +160,23 @@ class LocalSpoonRepository(
         }
     }
 
-    override suspend fun setMealCompleted(date: String, completed: Boolean) {
-        require(date.isNotBlank()) { "A meal plan needs an ISO date" }
+    override suspend fun setMealCompleted(date: String, completed: Boolean) =
+        setCourseCompleted(date, MealCourse.MAIN, completed)
+
+    override suspend fun setCourseCompleted(date: String, course: MealCourse, completed: Boolean) {
         withContext(Dispatchers.IO) {
             mutationMutex.withLock {
-                val current = checkNotNull(_mealPlans.value.firstOrNull { it.date == date }) {
-                    "Cannot complete a meal plan that does not exist: $date"
-                }
-                if (current.completed == completed) return@withLock
-                val historyBefore = mergeCookedHistory(_mealPlans.value, _cookedHistory.value)
-                val now = System.currentTimeMillis()
-                val completionEventId = if (completed) {
-                    newCookedMealEventId()
-                } else {
-                    ""
-                }
-                val changed = current.copy(
-                    completed = completed,
-                    completionEventId = completionEventId,
-                    updatedAtEpochMillis = now,
+                val projection = projectMealCompletion(
+                    plans = _mealPlans.value,
+                    storedHistory = mergeCookedHistory(_mealPlans.value, _cookedHistory.value),
+                    date = date, completed = completed,
+                    nowEpochMillis = System.currentTimeMillis(), newCompletionEventId = newCookedMealEventId(),
+                    course = course,
                 )
-                val updated = (_mealPlans.value.filterNot { it.date == date } + changed)
-                    .sortedBy(DayMealPlan::date)
-                val history = if (completed) {
-                    (historyBefore + changed.toCookedMeal())
-                        .distinctBy(CookedMeal::id)
-                        .sortedByDescending(CookedMeal::completedAtEpochMillis)
-                } else {
-                    historyBefore.filterNot { event -> event.matchesActiveCompletion(current) }
-                }
-                persistPlansAndHistory(updated, history)
-                _mealPlans.value = updated
-                _cookedHistory.value = history
+                if (projection.changedPlan == null) return@withLock
+                persistPlansAndHistory(projection.plans, projection.storedHistory)
+                _mealPlans.value = projection.plans
+                _cookedHistory.value = projection.storedHistory
             }
         }
     }
@@ -196,28 +185,11 @@ class LocalSpoonRepository(
         requireSafeRecipeDocumentId(historyId)
         withContext(Dispatchers.IO) {
             mutationMutex.withLock {
-                val historyBefore = mergeCookedHistory(_mealPlans.value, _cookedHistory.value)
-                val event = historyBefore.firstOrNull { it.id == historyId } ?: return@withLock
-                val currentPlan = _mealPlans.value.firstOrNull { it.date == event.date }
-                val updatedPlans = if (currentPlan != null && event.matchesActiveCompletion(currentPlan)) {
-                    _mealPlans.value.map { plan ->
-                        if (plan.date == currentPlan.date) {
-                            plan.copy(
-                                completed = false,
-                                completionEventId = "",
-                                updatedAtEpochMillis = System.currentTimeMillis(),
-                            )
-                        } else {
-                            plan
-                        }
-                    }
-                } else {
-                    _mealPlans.value
-                }
-                val history = historyBefore.filterNot { it.id == historyId }
-                persistPlansAndHistory(updatedPlans, history)
-                _mealPlans.value = updatedPlans
-                _cookedHistory.value = history
+                val projection = projectHistoryDeletion(_mealPlans.value,
+                    mergeCookedHistory(_mealPlans.value, _cookedHistory.value), historyId, System.currentTimeMillis())
+                persistPlansAndHistory(projection.plans, projection.storedHistory)
+                _mealPlans.value = projection.plans
+                _cookedHistory.value = projection.storedHistory
             }
         }
     }
@@ -418,7 +390,7 @@ internal fun boundedReferencedRecipeIds(
     favoriteIds: Set<String>,
     history: List<CookedMeal>,
 ): Set<String> = sequence {
-    plans.forEach { yield(it.recipeId) }
+    plans.forEach { plan -> plan.allCourses().forEach { yield(it.recipeId) } }
     favoriteIds.forEach { yield(it) }
     history.forEach { yield(it.recipeId) }
 }.filter(::isSafeRecipeDocumentId)

@@ -250,117 +250,105 @@ service cloud.firestore {
         validEpochMillis(data.completedAtEpochMillis);
     }
 
-    function planHasConsistentHistory(uid, plan) {
-      let safeEventId = plan.completionEventId == '' ? 'none' : plan.completionEventId;
-      let historyPath = /databases/$(database)/documents/spoon/$(uid)/cookedHistory/$(safeEventId);
-      return (plan.completed == false && plan.completionEventId == '') ||
-        (
-          plan.completed == true &&
-          validHistoryId(plan.completionEventId) &&
-          existsAfter(historyPath) &&
-          getAfter(historyPath).data.date == plan.date &&
-          getAfter(historyPath).data.recipeId == plan.recipeId &&
-          getAfter(historyPath).data.recipeTitle == plan.recipeTitle &&
-          getAfter(historyPath).data.completedAtEpochMillis == plan.updatedAtEpochMillis
-        );
+    function completionTime(course) {
+      let saved = course.get('completedAtEpochMillis', 0);
+      return saved > 0 ? saved : course.updatedAtEpochMillis;
+    }
+
+    function historyConfirmsCourse(uid, course, date) {
+      let historyPath = /databases/$(database)/documents/spoon/$(uid)/cookedHistory/$(course.completionEventId);
+      let history = getAfter(historyPath).data;
+      return history.date == date && history.recipeId == course.recipeId &&
+        history.recipeTitle == course.recipeTitle &&
+        history.completedAtEpochMillis == completionTime(course);
+    }
+
+    function courseMatchesHistory(course, history, historyId) {
+      return course.get('completed', false) == true &&
+        course.get('completionEventId', '') == historyId &&
+        course.recipeId == history.recipeId &&
+        course.recipeTitle == history.recipeTitle &&
+        completionTime(course) == history.completedAtEpochMillis;
     }
 
     function historyMatchesCompletedPlan(uid, history, historyId) {
       let planPath = /databases/$(database)/documents/spoon/$(uid)/mealPlans/$(history.date);
-      return existsAfter(planPath) &&
-        getAfter(planPath).data.completed == true &&
-        getAfter(planPath).data.completionEventId == historyId &&
-        getAfter(planPath).data.date == history.date &&
-        getAfter(planPath).data.recipeId == history.recipeId &&
-        getAfter(planPath).data.recipeTitle == history.recipeTitle &&
-        getAfter(planPath).data.updatedAtEpochMillis == history.completedAtEpochMillis;
+      let plan = getAfter(planPath).data;
+      return existsAfter(planPath) && plan.date == history.date && (
+        courseMatchesHistory(plan, history, historyId) ||
+        courseMatchesHistory(plan.get('side', {}), history, historyId) ||
+        courseMatchesHistory(plan.get('dessert', {}), history, historyId)
+      );
+    }
+
+    function courseProtectsHistory(course, history, historyId) {
+      return course.get('completed', false) == true && (
+        course.get('completionEventId', '') == historyId ||
+        (course.get('completionEventId', '') == '' &&
+          course.recipeId == history.recipeId &&
+          completionTime(course) == history.completedAtEpochMillis)
+      );
     }
 
     function historyCanBeDeleted(uid, history, historyId) {
       let planPath = /databases/$(database)/documents/spoon/$(uid)/mealPlans/$(history.date);
-      return !existsAfter(planPath) ||
-        getAfter(planPath).data.completed == false ||
-        (
-          getAfter(planPath).data.get('completionEventId', '') != '' &&
-          getAfter(planPath).data.get('completionEventId', '') != historyId
-        ) ||
-        (
-          getAfter(planPath).data.get('completionEventId', '') == '' &&
-          (
-            getAfter(planPath).data.recipeId != history.recipeId ||
-            getAfter(planPath).data.updatedAtEpochMillis != history.completedAtEpochMillis
-          )
-        );
+      return !existsAfter(planPath) || (
+        !courseProtectsHistory(getAfter(planPath).data, history, historyId) &&
+        !courseProtectsHistory(getAfter(planPath).data.get('side', {}), history, historyId) &&
+        !courseProtectsHistory(getAfter(planPath).data.get('dessert', {}), history, historyId)
+      );
     }
 
     function validFilters(filters, planCategory) {
-      return filters is map &&
-        filters.keys().hasAll([
-          'category',
-          'easeLevel',
-          'minRating',
-          'maxPrepMinutes'
-        ]) &&
-        filters.keys().hasOnly([
-          'category',
-          'easeLevel',
-          'minRating',
-          'maxPrepMinutes'
-        ]) &&
-        filters.category is string &&
-        filters.category == planCategory &&
-        validCategory(filters.category) &&
-        filters.easeLevel is string &&
+      let category = filters.category;
+      let rating = filters.minRating;
+      let minutes = filters.maxPrepMinutes;
+      return filters.keys().hasOnly(['category', 'easeLevel', 'minRating', 'maxPrepMinutes']) &&
+        category == planCategory && validCategory(category) &&
         filters.easeLevel in ['', 'easy', 'moderate', 'involved', 'unknown'] &&
-        filters.minRating is number &&
-        filters.minRating >= 0 &&
-        filters.minRating <= 10 &&
-        filters.maxPrepMinutes is int &&
-        filters.maxPrepMinutes >= 0 &&
-        filters.maxPrepMinutes <= 10080;
+        rating is number && rating >= 0 && rating <= 10 &&
+        minutes is int && minutes >= 0 && minutes <= 10080;
+    }
+
+    function validCourse(data, date, uid) {
+      let recipeId = data.recipeId;
+      let title = data.recipeTitle;
+      let completed = data.completed;
+      let eventId = data.completionEventId;
+      let completedAt = data.get('completedAtEpochMillis', 0);
+      return data.get('locked', false) is bool && completed is bool &&
+        (
+          (validRecipeId(recipeId) && validText(title, 1, 300)) ||
+          (recipeId == '' && title == '' && completed == false)
+        ) &&
+        validFilters(data.filters, data.category) &&
+        completedAt is int &&
+        (completedAt == 0 || (completed && validEpochMillis(completedAt))) &&
+        ((!completed && eventId == '') ||
+          (completed && validHistoryId(eventId) && historyConfirmsCourse(uid, data, date))) &&
+        validEpochMillis(data.updatedAtEpochMillis);
+    }
+
+    function validExtraCourse(data, date, uid) {
+      return validCourse(data, date, uid) && data.keys().hasOnly([
+        'category', 'recipeId', 'recipeTitle', 'filters', 'completed', 'locked',
+        'completionEventId', 'completedAtEpochMillis', 'updatedAtEpochMillis'
+      ]);
     }
 
     function validMealPlan(data, planId, uid) {
-      return data.keys().hasAll([
-          'date',
-          'category',
-          'recipeId',
-          'recipeTitle',
-          'filters',
-          'completed',
-          'completionEventId',
-          'updatedAtEpochMillis'
-        ]) &&
+      let side = data.get('side', null);
+      let dessert = data.get('dessert', null);
+      return data.keys().hasAll(['date']) &&
         data.keys().hasOnly([
-          'date',
-          'category',
-          'recipeId',
-          'recipeTitle',
-          'filters',
-          'completed',
-          'completionEventId',
-          'updatedAtEpochMillis',
-          'locked'
+          'date', 'category', 'recipeId', 'recipeTitle', 'filters', 'completed',
+          'completionEventId', 'updatedAtEpochMillis', 'locked',
+          'completedAtEpochMillis', 'side', 'dessert'
         ]) &&
-        data.get('locked', false) is bool &&
-        validPlanId(planId) &&
-        data.date is string &&
-        data.date == planId &&
-        data.category is string &&
-        validCategory(data.category) &&
-        data.recipeId is string &&
-        data.recipeTitle is string &&
-        (
-          (validRecipeId(data.recipeId) && validText(data.recipeTitle, 1, 300)) ||
-          (data.recipeId == '' && data.recipeTitle == '' &&
-            data.completed == false && data.completionEventId == '')
-        ) &&
-        validFilters(data.filters, data.category) &&
-        data.completed is bool &&
-        data.completionEventId is string &&
-        (data.completionEventId == '' || validHistoryId(data.completionEventId)) &&
-        planHasConsistentHistory(uid, data) &&
-        validEpochMillis(data.updatedAtEpochMillis);
+        validPlanId(planId) && data.date is string && data.date == planId &&
+        validCourse(data, planId, uid) &&
+        (!('side' in data) || validExtraCourse(side, planId, uid)) &&
+        (!('dessert' in data) || validExtraCourse(dessert, planId, uid));
     }
 
     function validFavorite(data, favoriteId) {

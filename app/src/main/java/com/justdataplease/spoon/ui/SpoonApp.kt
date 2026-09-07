@@ -47,10 +47,12 @@ import com.justdataplease.spoon.ui.more.MoreScreen
 import com.justdataplease.spoon.ui.shopping.ShoppingScreen
 import com.justdataplease.spoon.ui.settings.FoodPreferencesScreen
 import com.justdataplease.spoon.ui.week.WeekScreen
-import com.justdataplease.spoon.ui.week.MealMenuSheet
+import com.justdataplease.spoon.ui.week.MealMenuScreen
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.outlined.History
 
-private enum class PrimaryDestination { WEEK, EXPLORE, FAVORITES, SHOPPING, MORE }
-private enum class MorePage { HUB, CALENDAR, HISTORY, PREFERENCES, ACCOUNT }
+private enum class PrimaryDestination { WEEK, EXPLORE, FAVORITES, SHOPPING, HISTORY, MORE }
+private enum class MorePage { HUB, CALENDAR, PREFERENCES, ACCOUNT }
 
 private data class Destination(
     val key: PrimaryDestination,
@@ -64,6 +66,7 @@ private val Destinations = listOf(
     Destination(PrimaryDestination.EXPLORE, "Βρες", Icons.Filled.Search, Icons.Outlined.Search),
     Destination(PrimaryDestination.FAVORITES, "Αγαπημένα", Icons.Filled.Favorite, Icons.Outlined.FavoriteBorder),
     Destination(PrimaryDestination.SHOPPING, "Αγορές", Icons.Filled.ShoppingBasket, Icons.Outlined.ShoppingBasket),
+    Destination(PrimaryDestination.HISTORY, "Ιστορικό", Icons.Filled.History, Icons.Outlined.History),
     Destination(PrimaryDestination.MORE, "Μενού", Icons.Filled.MoreHoriz, Icons.Outlined.Menu),
 )
 
@@ -85,7 +88,7 @@ fun SpoonApp(
     val mealPreferenceSettings by viewModel.mealPreferenceSettings.collectAsStateWithLifecycle()
 
     BackHandler(
-        enabled = selectedRecipe != null ||
+        enabled = mealMenu != null || selectedRecipe != null ||
             state.favoriteReplacementDate != null ||
             customRecipeEditor.isOpen ||
             (Destinations[selectedDestination].key == PrimaryDestination.MORE && morePage != MorePage.HUB) ||
@@ -95,6 +98,7 @@ fun SpoonApp(
             customRecipeEditor.isOpen -> viewModel.dismissCustomRecipeEditor()
             selectedRecipe != null -> viewModel.dismissRecipeDetails()
             state.favoriteReplacementDate != null -> viewModel.dismissFavoriteReplacement()
+            mealMenu != null -> viewModel.dismissMealMenu()
             Destinations[selectedDestination].key == PrimaryDestination.MORE && morePage != MorePage.HUB -> {
                 morePage = MorePage.HUB
             }
@@ -116,12 +120,13 @@ fun SpoonApp(
         containerColor = MaterialTheme.colorScheme.background,
         snackbarHost = { SnackbarHost(snackbarHostState) },
         bottomBar = {
-            if (selectedRecipe == null && !customRecipeEditor.isOpen) {
+            if (selectedRecipe == null && !customRecipeEditor.isOpen && mealMenu == null) {
                 NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
                     Destinations.forEachIndexed { index, destination ->
                         val selected = selectedDestination == index
                         NavigationBarItem(
                             selected = selected,
+                            alwaysShowLabel = false,
                             onClick = {
                                 selectedDestination = index
                                 if (destination.key == PrimaryDestination.MORE) morePage = MorePage.HUB
@@ -170,6 +175,20 @@ fun SpoonApp(
                 modifier = Modifier.padding(padding),
             )
 
+            mealMenu != null -> MealMenuScreen(
+                state = mealMenu!!,
+                onBack = viewModel::dismissMealMenu,
+                onOpenRecipe = viewModel::showRecipeDetails,
+                onRetry = { viewModel.showMealMenu(mealMenu!!.date) },
+                onReroll = viewModel::rerollMenuCourse,
+                onToggleFavorite = viewModel::toggleFavorite,
+                onChooseFavorite = { viewModel.showFavoriteReplacement(mealMenu!!.date, it) },
+                onToggleLock = viewModel::toggleMenuLock,
+                onToggleCompleted = viewModel::toggleMenuCompleted,
+                onSaveFilters = viewModel::saveMenuFilters,
+                modifier = Modifier.padding(padding),
+            )
+
             else -> when (Destinations[selectedDestination].key) {
                 PrimaryDestination.WEEK -> WeekScreen(
                     state = state,
@@ -187,7 +206,7 @@ fun SpoonApp(
                     onShuffleWeek = viewModel::shuffleWeek,
                     onSaveFilters = viewModel::saveFilters,
                     onDismissEditor = viewModel::dismissFilters,
-                    onChooseFavorite = viewModel::showFavoriteReplacement,
+                    onChooseFavorite = { viewModel.showFavoriteReplacement(it) },
                     modifier = Modifier.padding(padding),
                 )
 
@@ -231,10 +250,17 @@ fun SpoonApp(
                     modifier = Modifier.padding(padding),
                 )
 
+                PrimaryDestination.HISTORY -> HistoryScreen(
+                    entries = state.historyEntries,
+                    onOpenRecipe = viewModel::showRecipeDetails,
+                    onRemoveEntry = viewModel::removeCookedHistoryEntry,
+                    modifier = Modifier.padding(padding),
+                )
+
                 PrimaryDestination.MORE -> when (morePage) {
                     MorePage.HUB -> MoreScreen(
                         onOpenCalendar = { morePage = MorePage.CALENDAR },
-                        onOpenHistory = { morePage = MorePage.HISTORY },
+                        onOpenHistory = { selectedDestination = Destinations.indexOfFirst { it.key == PrimaryDestination.HISTORY } },
                         onOpenPreferences = { morePage = MorePage.PREFERENCES },
                         onOpenAccount = { morePage = MorePage.ACCOUNT },
                         onCreateRecipe = viewModel::createCustomRecipe,
@@ -248,12 +274,6 @@ fun SpoonApp(
                         onCurrentMonth = viewModel::currentMonth,
                         onOpenRecipe = viewModel::showRecipeDetails,
                         onToggleCompleted = viewModel::toggleCompleted,
-                        modifier = Modifier.padding(padding),
-                    )
-                    MorePage.HISTORY -> HistoryScreen(
-                        entries = state.historyEntries,
-                        onOpenRecipe = viewModel::showRecipeDetails,
-                        onRemoveEntry = viewModel::removeCookedHistoryEntry,
                         modifier = Modifier.padding(padding),
                     )
                     MorePage.PREFERENCES -> FoodPreferencesScreen(
@@ -281,18 +301,6 @@ fun SpoonApp(
                 }
             }
         }
-    }
-
-    mealMenu?.let { menu ->
-        MealMenuSheet(
-            state = menu,
-            onDismiss = viewModel::dismissMealMenu,
-            onOpenRecipe = { recipeId ->
-                viewModel.dismissMealMenu()
-                viewModel.showRecipeDetails(recipeId)
-            },
-            onRetry = { viewModel.showMealMenu(menu.date) },
-        )
     }
 
     state.favoriteReplacementDate?.let { date ->

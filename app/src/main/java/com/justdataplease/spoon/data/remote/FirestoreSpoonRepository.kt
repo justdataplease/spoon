@@ -27,6 +27,9 @@ import com.justdataplease.spoon.data.local.selectIncludingCustomRecipes
 import com.justdataplease.spoon.data.model.CookedMeal
 import com.justdataplease.spoon.data.model.CustomRecipe
 import com.justdataplease.spoon.data.model.DayMealPlan
+import com.justdataplease.spoon.data.model.MealCourse
+import com.justdataplease.spoon.data.model.coursePlan
+import com.justdataplease.spoon.data.model.completionTimestamp
 import com.justdataplease.spoon.data.model.FavoriteRecipe
 import com.justdataplease.spoon.data.model.MAX_SHOPPING_ITEMS_PER_WRITE
 import com.justdataplease.spoon.data.model.MealPreferenceDocument
@@ -103,6 +106,7 @@ class FirestoreSpoonRepository internal constructor(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val authMutex = Mutex()
     private val personalMutationMutex = Mutex()
+    private val accountRefreshGate = AccountRefreshGate()
     private val authJobLock = Any()
     private val ownerSnapshotLock = Any()
     private val uid = MutableStateFlow(auth.currentUser?.uid)
@@ -658,7 +662,10 @@ class FirestoreSpoonRepository internal constructor(
             }
         }
 
-    override suspend fun setMealCompleted(date: String, completed: Boolean) {
+    override suspend fun setMealCompleted(date: String, completed: Boolean) =
+        setCourseCompleted(date, MealCourse.MAIN, completed)
+
+    override suspend fun setCourseCompleted(date: String, course: MealCourse, completed: Boolean) {
         require(date.isNotBlank())
         val currentUid = awaitUid()
         withPersonalMutation(currentUid) {
@@ -669,6 +676,7 @@ class FirestoreSpoonRepository internal constructor(
                 completed = completed,
                 nowEpochMillis = System.currentTimeMillis(),
                 newCompletionEventId = newCookedMealEventId(),
+                course = course,
             )
             val changedPlan = projection.changedPlan ?: return@withPersonalMutation
             val batch = firestore.batch()
@@ -941,12 +949,13 @@ class FirestoreSpoonRepository internal constructor(
     }
 
     /**
-     * Firebase persists a cached user snapshot. Reload it on startup so an account linked by an
+     * Firebase persists a cached user snapshot. Reload it at most every 15 seconds so an account linked by an
      * administrator on the same UID is recognized as email-backed without requiring sign-out.
      */
     private fun refreshCachedUser(user: FirebaseUser) {
         synchronized(authJobLock) {
             if (authRefreshJob?.isActive == true) return
+            if (!accountRefreshGate.shouldRefresh(user.uid, android.os.SystemClock.elapsedRealtime())) return
             authRefreshJob = scope.launch {
                 runCatching { user.reload().await() }
                     .onSuccess {
@@ -1479,9 +1488,13 @@ internal fun DayMealPlan.toFirestoreDocument(): Map<String, Any> = mapOf(
     ),
     "completed" to completed,
     "locked" to locked,
+    "completedAtEpochMillis" to if (completed) completionTimestamp else 0L,
     "completionEventId" to completionEventId,
     "updatedAtEpochMillis" to updatedAtEpochMillis,
-)
+) + buildMap {
+    coursePlan(MealCourse.SIDE)?.let { put("side", it.toFirestoreDocument() - "date") }
+    coursePlan(MealCourse.DESSERT)?.let { put("dessert", it.toFirestoreDocument() - "date") }
+}
 
 internal fun FavoriteRecipe.toFirestoreDocument(): Map<String, Any> = mapOf(
     "recipeId" to recipeId,
@@ -1658,7 +1671,7 @@ private fun authFailure(code: String): BackendFailure = when (code) {
 }
 
 internal fun retryDelayMillis(attempt: Long): Long =
-    (1_000L shl attempt.coerceAtMost(5).toInt()).coerceAtMost(30_000L)
+    (5_000L shl attempt.coerceIn(0, 3).toInt()).coerceAtMost(30_000L)
 
 private data class ObservedObjects<T : Any>(
     val values: List<T>,

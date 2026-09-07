@@ -261,7 +261,7 @@ private fun WeekHero(
 }
 
 @Composable
-private fun DayRecipeCard(
+internal fun DayRecipeCard(
     plan: DayPlanUi,
     isToday: Boolean,
     onReroll: () -> Unit,
@@ -271,7 +271,8 @@ private fun DayRecipeCard(
     onOpenRecipe: () -> Unit,
     onChooseFavorite: () -> Unit,
     onToggleLock: () -> Unit,
-    onOpenMenu: () -> Unit,
+    onOpenMenu: (() -> Unit)? = null,
+    courseTitle: String? = null,
 ) {
     Card(
         onClick = onOpenRecipe,
@@ -290,7 +291,8 @@ private fun DayRecipeCard(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    DayDateHeader(plan.date)
+                    if (courseTitle == null) DayDateHeader(plan.date)
+                    else Text(courseTitle, style = MaterialTheme.typography.titleLarge)
                     if (isToday) {
                         Surface(color = MaterialTheme.colorScheme.primary, contentColor = MaterialTheme.colorScheme.onPrimary, shape = CircleShape) {
                             Text("ΣΗΜΕΡΑ", style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp))
@@ -336,8 +338,10 @@ private fun DayRecipeCard(
                 Column(modifier = Modifier.weight(1f)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) { CategoryPill(plan.category.emoji, plan.category.label) }
-                        IconButton(onClick = onOpenMenu) {
-                            Icon(Icons.Outlined.RestaurantMenu, contentDescription = "Πλήρες μενού: κυρίως, συνοδευτικό και γλυκό")
+                        if (onOpenMenu != null) {
+                            IconButton(onClick = onOpenMenu) {
+                                Icon(Icons.Outlined.RestaurantMenu, contentDescription = "Πλήρες μενού: κυρίως, συνοδευτικό και γλυκό")
+                            }
                         }
                     }
                     Spacer(Modifier.height(10.dp))
@@ -405,7 +409,7 @@ private fun DayRecipeCard(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun FilterEditorSheet(
+internal fun FilterEditorSheet(
     plan: DayPlanUi,
     onDismiss: () -> Unit,
     onSave: (FiltersUi) -> Unit,

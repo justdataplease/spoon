@@ -8,6 +8,8 @@ import com.google.firebase.FirebaseException
 import com.justdataplease.spoon.data.canonicalIngredientDisplayLabel
 import com.justdataplease.spoon.data.canonicalIngredientIdentity
 import com.justdataplease.spoon.data.model.DayMealPlan
+import com.justdataplease.spoon.data.model.MealCourse
+import com.justdataplease.spoon.data.model.coursePlan
 import com.justdataplease.spoon.data.model.CookedMeal
 import com.justdataplease.spoon.data.model.EaseLevel
 import com.justdataplease.spoon.data.model.MAX_SHOPPING_ITEMS_PER_WRITE
@@ -209,8 +211,10 @@ class SpoonViewModel @Inject constructor(
     private val accountError = MutableStateFlow<String?>(null)
     private val accountOwnerTracker = AccountOwnerTracker()
     private val catalogWeekRetryGate = CatalogWeekRetryGate()
-    private val mutableMealMenu = MutableStateFlow<MealMenuUiState?>(null)
-    val mealMenu: kotlinx.coroutines.flow.StateFlow<MealMenuUiState?> = mutableMealMenu
+    private val mealMenuDate = MutableStateFlow<LocalDate?>(null)
+    private val mealMenuLoading = MutableStateFlow(false)
+    private val mealMenuError = MutableStateFlow<String?>(null)
+    private var favoriteReplacementCourse = MealCourse.MAIN
     private var mealMenuJob: Job? = null
     private var recipeDetailsJob: Job? = null
     private var recipeDetailsGeneration = 0L
@@ -273,6 +277,22 @@ class SpoonViewModel @Inject constructor(
             totalCount = snapshot.favoriteIds.size,
         )
     }.stateIn(computationScope, SharingStarted.WhileSubscribed(5_000), FavoritesSearchUiState())
+
+    val mealMenu = combine(
+        mealMenuDate, mealMenuLoading, mealMenuError, plannerSnapshot, mealPreferenceSettings,
+    ) { date, isLoading, error, snapshot, preferences ->
+        date?.let {
+            val parent = snapshot.plans.firstOrNull { it.date == date.toString() }
+            MealMenuUiState(
+                date = date, isLoading = isLoading, error = error, favoritesOnly = preferences.favoritesOnly,
+                plans = MealCourse.entries.mapNotNull { course ->
+                    parent?.coursePlan(course)?.let { plan ->
+                        course to plan.toDayPlanUi(snapshot.catalog.recipesById, snapshot.favoriteIds)
+                    }
+                }.toMap(),
+            )
+        }
+    }.stateIn(computationScope, SharingStarted.WhileSubscribed(5_000), null)
 
     private val recipeSelection = combine(
         selectedRecipeId,
@@ -375,34 +395,8 @@ class SpoonViewModel @Inject constructor(
         val plansByDate = snapshot.plans.associateBy(DayMealPlan::date)
         val weekPlans = WeeklyPlanDefaults.dates(dates.weekStart).map { date ->
             val stored = plansByDate[date.toString()]
-            val filters = stored?.filters ?: WeeklyPlanDefaults.filtersFor(date, mealPreferenceSettings.value)
-            val recipe = stored?.recipeId?.let(recipesById::get)
-            DayPlanUi(
-                date = date,
-                recipeId = stored?.recipeId.orEmpty(),
-                recipeTitle = recipe?.title ?: stored?.recipeTitle.orEmpty(),
-                categoryKey = resolvedUiCategoryKey(
-                    recipeCategory = recipe?.category,
-                    planCategory = stored?.category,
-                    filterCategory = filters.category,
-                ),
-                rating10 = recipe?.rating ?: 0.0,
-                ratingCount = recipe?.ratingCount ?: 0,
-                prepMinutes = recipe?.prepMinutes ?: 0,
-                cookMinutes = recipe?.cookMinutes ?: 0,
-                totalMinutes = recipe?.totalMinutes ?: 0,
-                stepCount = recipe?.stepCount ?: 0,
-                preparationCount = recipe?.preparationCount ?: 0,
-                imageUrl = recipe?.imageUrl.orEmpty(),
-                sourceUrl = recipe?.sourceUrl.orEmpty(),
-                sourceName = recipe?.sourceName.orEmpty(),
-                tags = recipe?.tags.orEmpty(),
-                language = recipe?.language ?: "el",
-                isFavorite = stored?.recipeId?.let(snapshot.favoriteIds::contains) == true,
-                isCompleted = stored?.completed == true,
-                isLocked = stored?.locked == true,
-                filters = filters.toUi(),
-            )
+            (stored ?: DayMealPlan(date = date.toString(), filters = WeeklyPlanDefaults.filtersFor(date, mealPreferenceSettings.value)))
+                .toDayPlanUi(recipesById, snapshot.favoriteIds)
         }
         val favoriteRecipes = snapshot.favoriteIds.mapNotNull(recipesById::get).map(Recipe::toFavoriteUi)
         val calendarMeals = snapshot.plans.mapNotNull { plan ->
@@ -700,7 +694,8 @@ class SpoonViewModel @Inject constructor(
         job.start()
     }
 
-    fun showFavoriteReplacement(date: LocalDate) {
+    fun showFavoriteReplacement(date: LocalDate, course: MealCourse = MealCourse.MAIN) {
+        favoriteReplacementCourse = course
         favoriteReplacementDate.value = date
     }
 
@@ -712,7 +707,7 @@ class SpoonViewModel @Inject constructor(
         val date = favoriteReplacementDate.value ?: return
         if (recipeId.isBlank()) return
         launchWorking(
-            work = { mealPlanner.replaceWithFavorite(date, recipeId) },
+            work = { mealPlanner.replaceWithFavorite(date, recipeId, favoriteReplacementCourse) },
         ) { result ->
             when (result) {
                 is FavoriteReplacementResult.Selected -> {
@@ -731,21 +726,18 @@ class SpoonViewModel @Inject constructor(
 
     fun showMealMenu(date: LocalDate) {
         mealMenuJob?.cancel()
-        val initial = MealMenuUiState(date = date, favoritesOnly = mealPreferenceSettings.value.favoritesOnly)
-        mutableMealMenu.value = initial
+        mealMenuDate.value = date
+        mealMenuLoading.value = true
+        mealMenuError.value = null
         mealMenuJob = viewModelScope.launch {
             try {
-                val menu = withUserActionTimeout { withContext(Dispatchers.Default) { mealPlanner.suggestMenu(date) } }
-                mutableMealMenu.value = initial.copy(
-                    isLoading = false,
-                    main = menu.main?.toExploreRecipeUi(false),
-                    side = menu.side?.toExploreRecipeUi(false),
-                    dessert = menu.dessert?.toExploreRecipeUi(false),
-                )
+                withUserActionTimeout { withContext(Dispatchers.Default) { mealPlanner.suggestMenu(date) } }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
-                mutableMealMenu.value = initial.copy(isLoading = false, error = error.userMessage())
+                mealMenuError.value = error.userMessage()
+            } finally {
+                mealMenuLoading.value = false
             }
         }
     }
@@ -753,7 +745,29 @@ class SpoonViewModel @Inject constructor(
     fun dismissMealMenu() {
         mealMenuJob?.cancel()
         mealMenuJob = null
-        mutableMealMenu.value = null
+        mealMenuDate.value = null
+    }
+
+    fun rerollMenuCourse(course: MealCourse) {
+        val date = mealMenuDate.value ?: return
+        launchSelection { mealPlanner.rerollCourse(date, course) }
+    }
+
+    fun saveMenuFilters(course: MealCourse, filters: FiltersUi) {
+        val date = mealMenuDate.value ?: return
+        launchSelection { mealPlanner.rerollCourse(date, course, filters.toDomain()) }
+    }
+
+    fun toggleMenuLock(course: MealCourse) {
+        val menu = mealMenu.value ?: return
+        val plan = menu.plans[course] ?: return
+        launchReporting { mealPlanner.setLocked(menu.date, !plan.isLocked, course) }
+    }
+
+    fun toggleMenuCompleted(course: MealCourse) {
+        val menu = mealMenu.value ?: return
+        val plan = menu.plans[course] ?: return
+        launchReporting { mealPlanner.setCompleted(menu.date, !plan.isCompleted, course) }
     }
 
     fun toggleLocked(date: LocalDate) {
@@ -989,6 +1003,7 @@ class SpoonViewModel @Inject constructor(
                 if (accountOwnerTracker.onAccountState(account)) {
                     dismissCustomRecipeEditor()
                     dismissRecipeDetails()
+                    dismissMealMenu()
                     resetWeekEnsureForAccountOwner()
                 }
             }
@@ -1540,4 +1555,34 @@ internal fun Throwable.userMessage(): String {
         return "Δεν ολοκληρώθηκε ο συγχρονισμός με το Firebase. Δοκίμασε ξανά."
     }
     return "Κάτι πήγε στραβά. Δοκίμασε ξανά."
+}
+
+private fun DayMealPlan.toDayPlanUi(recipesById: Map<String, Recipe>, favoriteIds: Set<String>): DayPlanUi {
+            val recipe = recipeId.let(recipesById::get)
+            return DayPlanUi(
+                date = LocalDate.parse(date),
+                recipeId = recipeId,
+                recipeTitle = recipe?.title ?: recipeTitle,
+                categoryKey = resolvedUiCategoryKey(
+                    recipeCategory = recipe?.category,
+                    planCategory = category,
+                    filterCategory = filters.category,
+                ),
+                rating10 = recipe?.rating ?: 0.0,
+                ratingCount = recipe?.ratingCount ?: 0,
+                prepMinutes = recipe?.prepMinutes ?: 0,
+                cookMinutes = recipe?.cookMinutes ?: 0,
+                totalMinutes = recipe?.totalMinutes ?: 0,
+                stepCount = recipe?.stepCount ?: 0,
+                preparationCount = recipe?.preparationCount ?: 0,
+                imageUrl = recipe?.imageUrl.orEmpty(),
+                sourceUrl = recipe?.sourceUrl.orEmpty(),
+                sourceName = recipe?.sourceName.orEmpty(),
+                tags = recipe?.tags.orEmpty(),
+                language = recipe?.language ?: "el",
+                isFavorite = recipeId in favoriteIds,
+                isCompleted = completed,
+                isLocked = locked,
+                filters = filters.toUi(),
+            )
 }

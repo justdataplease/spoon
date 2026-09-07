@@ -3,6 +3,7 @@ package com.justdataplease.spoon.domain.repository
 import com.justdataplease.spoon.data.model.CookedMeal
 import com.justdataplease.spoon.data.model.CustomRecipe
 import com.justdataplease.spoon.data.model.DayMealPlan
+import com.justdataplease.spoon.data.model.MealCourse
 import com.justdataplease.spoon.data.model.Recipe
 import com.justdataplease.spoon.data.model.RecipeFilters
 import com.justdataplease.spoon.data.model.RecipeNote
@@ -89,6 +90,9 @@ interface SpoonRepository {
     )
     suspend fun upsertMealPlan(plan: DayMealPlan)
     suspend fun setMealCompleted(date: String, completed: Boolean)
+    suspend fun setCourseCompleted(date: String, course: MealCourse, completed: Boolean) {
+        if (course == MealCourse.MAIN) setMealCompleted(date, completed) else unsupported("course completion")
+    }
     suspend fun deleteCookedHistoryEntry(historyId: String): Unit =
         unsupported("cooked history")
     suspend fun toggleFavorite(recipeId: String): Boolean
