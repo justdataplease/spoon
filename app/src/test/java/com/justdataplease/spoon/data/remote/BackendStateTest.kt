@@ -50,8 +50,10 @@ class BackendStateTest {
 
     @Test
     fun `retry delay is exponentially capped`() {
-        assertEquals(1_000L, retryDelayMillis(0))
-        assertEquals(8_000L, retryDelayMillis(3))
+        assertEquals(5_000L, retryDelayMillis(0))
+        assertEquals(10_000L, retryDelayMillis(1))
+        assertEquals(20_000L, retryDelayMillis(2))
+        assertEquals(30_000L, retryDelayMillis(3))
         assertEquals(30_000L, retryDelayMillis(50))
     }
 

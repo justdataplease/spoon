@@ -3,6 +3,7 @@ package com.justdataplease.spoon.domain
 import com.justdataplease.spoon.data.DemoRecipeCatalog
 import com.justdataplease.spoon.data.model.CookedMeal
 import com.justdataplease.spoon.data.model.CustomRecipe
+import com.justdataplease.spoon.data.model.MealCourse
 import com.justdataplease.spoon.data.model.DayMealPlan
 import com.justdataplease.spoon.data.model.EaseLevel
 import com.justdataplease.spoon.data.model.MealCategory
@@ -849,10 +850,20 @@ class MealPlannerTest {
         )
         val menu = MealPlanner(repository, RecipeSelector()).suggestMenu(monday)
         assertEquals(MealMenuProposal(main, side, dessert), menu)
-        assertEquals(listOf(saved), repository.plans.value)
-        assertEquals(0, repository.upsertCount)
+        val stored = repository.plans.value.single()
+        assertEquals(saved.recipeId, stored.recipeId)
+        assertTrue(stored.locked)
+        assertEquals(side.id, stored.side?.recipeId)
+        assertEquals(dessert.id, stored.dessert?.recipeId)
+        assertEquals(1, repository.upsertCount)
+        val planner = MealPlanner(repository, RecipeSelector())
+        repeat(5) { assertEquals(menu, planner.suggestMenu(monday, kotlin.random.Random(it))) }
+        assertEquals(1, repository.upsertCount)
         (repository.mealPreferenceSettings as MutableStateFlow).value = MealPreferenceSettings(favoritesOnly = true, excludedCategories = setOf("dessert"))
-        assertEquals(null, MealPlanner(repository, RecipeSelector()).suggestMenu(monday).dessert)
+        assertEquals(menu, planner.suggestMenu(monday))
+        assertTrue(planner.rerollCourse(monday, MealCourse.DESSERT) is MealPlanSelection.NoMatch)
+        assertEquals(null, planner.suggestMenu(monday).dessert)
+        assertEquals(stored.side, repository.plans.value.single().side)
     }
 
     @Test
@@ -889,6 +900,39 @@ class MealPlannerTest {
             assertEquals(side, menu.side)
             assertEquals(null, menu.dessert)
         }
+    }
+
+    @Test
+    fun `weekly and main replacements preserve saved courses and favorite replacement targets one course`() = runBlocking {
+        val monday = LocalDate.of(2026, 9, 7)
+        val side = Recipe(id = "side", title = "Salad", category = "vegetables", mealTypeLabels = listOf("Σαλάτα"))
+        val alternate = side.copy(id = "other-side", title = "Other salad")
+        val dessert = Recipe(id = "dessert", title = "Cake", category = "dessert")
+        val repository = FakeRepository(initialRecipes = DemoRecipeCatalog.recipes + listOf(side, alternate, dessert),
+            initialFavorites = setOf(alternate.id))
+        val planner = MealPlanner(repository, RecipeSelector())
+        planner.ensureWeek(monday)
+        planner.suggestMenu(monday)
+        planner.setLocked(monday, true, MealCourse.SIDE)
+        val original = repository.plans.value.first { it.date == monday.toString() }
+        assertTrue(original.side!!.locked)
+        planner.rerollWeek(monday)
+        planner.reroll(monday)
+        val regenerated = repository.plans.value.first { it.date == monday.toString() }
+        assertEquals(original.side, regenerated.side)
+        assertEquals(original.dessert, regenerated.dessert)
+        planner.replaceWithFavorite(monday, alternate.id, MealCourse.SIDE)
+        val replaced = repository.plans.value.first { it.date == monday.toString() }
+        assertEquals(alternate.id, replaced.side?.recipeId)
+        assertEquals(regenerated.recipeId, replaced.recipeId)
+        assertEquals(original.dessert, replaced.dessert)
+        (repository.recipes as MutableStateFlow).value = emptyList()
+        planner.rerollCourse(monday, MealCourse.DESSERT, RecipeFilters(category = "dessert", minRating = 9.9))
+        val unavailable = repository.plans.value.first { it.date == monday.toString() }
+        assertEquals("", unavailable.dessert?.recipeId)
+        assertEquals(9.9, unavailable.dessert?.filters?.minRating)
+        assertEquals(replaced.side, unavailable.side)
+        assertEquals(replaced.recipeId, unavailable.recipeId)
     }
 
     private class FakeRepository(

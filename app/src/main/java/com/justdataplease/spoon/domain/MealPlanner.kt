@@ -3,6 +3,10 @@ package com.justdataplease.spoon.domain
 import com.justdataplease.spoon.data.model.CookedMeal
 import com.justdataplease.spoon.data.model.CustomRecipe
 import com.justdataplease.spoon.data.model.DayMealPlan
+import com.justdataplease.spoon.data.model.MealCourse
+import com.justdataplease.spoon.data.model.coursePlan
+import com.justdataplease.spoon.data.model.withCourse
+import com.justdataplease.spoon.data.model.allCourses
 import com.justdataplease.spoon.data.model.MealCategory
 import com.justdataplease.spoon.data.model.Recipe
 import com.justdataplease.spoon.data.model.RecipeFilters
@@ -19,6 +23,8 @@ import com.justdataplease.spoon.domain.repository.SpoonRepository
 import java.time.LocalDate
 import java.time.DayOfWeek
 import javax.inject.Inject
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlin.random.Random
@@ -64,6 +70,44 @@ class MealPlanner @Inject constructor(
     private val repository: SpoonRepository,
     private val selector: RecipeSelector,
 ) {
+    // Each operation reads and replaces one day document; serialize them to preserve sibling courses.
+    private val planMutationMutex = Mutex()
+
+    suspend fun ensureWeek(containingDate: LocalDate = LocalDate.now(), random: Random = Random.Default,
+        resetWeekdays: Set<DayOfWeek> = emptySet()): List<DayMealPlan> = planMutationMutex.withLock {
+        ensureWeekUnlocked(containingDate, random, resetWeekdays)
+    }
+
+    suspend fun reroll(date: LocalDate, filters: RecipeFilters? = null,
+        random: Random = Random.Default): MealPlanSelection = planMutationMutex.withLock {
+        rerollUnlocked(date, filters, random)
+    }
+
+    suspend fun rerollWeek(containingDate: LocalDate, random: Random = Random.Default): List<MealPlanSelection> =
+        planMutationMutex.withLock { rerollWeekUnlocked(containingDate, random) }
+
+    suspend fun suggestMenu(date: LocalDate, random: Random = Random.Default): MealMenuProposal =
+        planMutationMutex.withLock { suggestMenuUnlocked(date, random) }
+
+    suspend fun rerollCourse(date: LocalDate, course: MealCourse, filters: RecipeFilters? = null,
+        random: Random = Random.Default): MealPlanSelection = planMutationMutex.withLock {
+        rerollCourseUnlocked(date, course, filters, random)
+    }
+
+    suspend fun setLocked(date: LocalDate, locked: Boolean, course: MealCourse = MealCourse.MAIN) =
+        planMutationMutex.withLock { setLockedUnlocked(date, locked, course) }
+
+    suspend fun setCompleted(date: LocalDate, completed: Boolean, course: MealCourse = MealCourse.MAIN) =
+        planMutationMutex.withLock { setCompletedUnlocked(date, completed, course) }
+
+    suspend fun deleteCookedHistoryEntry(historyId: String) =
+        planMutationMutex.withLock { deleteCookedHistoryEntryUnlocked(historyId) }
+
+    suspend fun replaceWithFavorite(date: LocalDate, recipeId: String,
+        course: MealCourse = MealCourse.MAIN): FavoriteReplacementResult = planMutationMutex.withLock {
+        replaceWithFavoriteUnlocked(date, recipeId, course)
+    }
+
     val backendState = repository.backendState
     val accountState: Flow<AccountState> = repository.accountState
     val recipes: Flow<List<Recipe>> = repository.recipes
@@ -100,7 +144,7 @@ class MealPlanner @Inject constructor(
     suspend fun getCatalogFacetOptions(): CatalogFacetOptions =
         repository.getCatalogFacetOptions()
 
-    suspend fun ensureWeek(
+    private suspend fun ensureWeekUnlocked(
         containingDate: LocalDate = LocalDate.now(),
         random: Random = Random.Default,
         resetWeekdays: Set<DayOfWeek> = emptySet(),
@@ -139,7 +183,7 @@ class MealPlanner @Inject constructor(
         }
     }
 
-    suspend fun reroll(
+    private suspend fun rerollUnlocked(
         date: LocalDate,
         filters: RecipeFilters? = null,
         random: Random = Random.Default,
@@ -149,7 +193,7 @@ class MealPlanner @Inject constructor(
     }
 
     /** One source and preference snapshot for every day; repeats remain eligible. */
-    suspend fun rerollWeek(
+    private suspend fun rerollWeekUnlocked(
         containingDate: LocalDate,
         random: Random = Random.Default,
     ): List<MealPlanSelection> {
@@ -181,45 +225,82 @@ class MealPlanner @Inject constructor(
             preferences = preferences,
             favorites = favorites,
         )
-        val plan = newPlan(date, requestedFilters, selected)
+        val selectedPlan = newPlan(date, requestedFilters, selected)
+        val plan = existing?.withCourse(MealCourse.MAIN, selectedPlan) ?: selectedPlan
         repository.upsertMealPlan(plan)
         return if (selected == null) MealPlanSelection.NoMatch(date, requestedFilters)
         else MealPlanSelection.Selected(plan, selected)
     }
 
-    suspend fun suggestMenu(
-        date: LocalDate,
-        random: Random = Random.Default,
-    ): MealMenuProposal {
+    /** Generates only missing courses. Reopening a menu never redraws saved selections. */
+    private suspend fun suggestMenuUnlocked(date: LocalDate, random: Random = Random.Default): MealMenuProposal {
         repository.ensureReady()
-        val preferences = mealPreferenceSettings.first()
-        val favorites = favoritePool(preferences)
-        val plan = repository.mealPlans.first().firstOrNull { it.date == date.toString() }
-        val main = plan?.recipeId?.takeIf(String::isNotBlank)
-            ?.let { repository.getRecipesByIds(setOf(it)).firstOrNull() }
-        val filters = plan?.filters ?: WeeklyPlanDefaults.filtersFor(date, preferences)
-        val criteria = ExploreCriteria(
-            easeLevel = filters.easeLevel,
-            minRating = filters.minRating,
-            maxPrepMinutes = filters.maxPrepMinutes,
-        )
-        val excludedIds = setOfNotNull(plan?.recipeId?.takeIf(String::isNotBlank))
-        val side = selectMenuRecipe(
-            criteria = criteria.copy(mealTypeLabels = setOf("Συνοδευτικά", "Σαλάτα", "Σαλάτες", "Ορεκτικά", "Ορεκτικό μεζές")),
-            preferences = preferences.copy(excludedCategories = preferences.excludedCategories + MealCategory.DESSERT.key),
-            favorites = favorites,
-            excludedIds = excludedIds,
-            random = random,
-        )
-        val dessert = selectMenuRecipe(
-            criteria = criteria.copy(category = MealCategory.DESSERT.key),
-            preferences = preferences,
-            favorites = favorites,
-            excludedIds = excludedIds,
-            random = random,
-        )
-        return MealMenuProposal(main, side, dessert)
+        var plan = repository.mealPlans.first().firstOrNull { it.date == date.toString() }
+            ?: ensureWeekUnlocked(date, random).first { it.date == date.toString() }
+        if (plan.side == null || plan.dessert == null) {
+            val preferences = mealPreferenceSettings.first()
+            val favorites = favoritePool(preferences)
+            for (course in listOf(MealCourse.SIDE, MealCourse.DESSERT)) {
+                if (plan.coursePlan(course) != null) continue
+                val filters = plan.filters.copy(category = if (course == MealCourse.DESSERT) "dessert" else "any")
+                val recipe = chooseCourseRecipe(plan, course, filters, preferences, favorites, random)
+                plan = plan.withCourse(course, newPlan(date, filters, recipe))
+            }
+            repository.upsertMealPlan(plan)
+        }
+        val recipes = repository.getRecipesByIds(plan.allCourses().mapNotNullTo(mutableSetOf()) {
+            it.recipeId.takeIf(String::isNotBlank)
+        }).associateBy(Recipe::id)
+        return MealMenuProposal(recipes[plan.recipeId], recipes[plan.side?.recipeId], recipes[plan.dessert?.recipeId])
     }
+
+    private suspend fun rerollCourseUnlocked(
+        date: LocalDate,
+        course: MealCourse,
+        filters: RecipeFilters? = null,
+        random: Random = Random.Default,
+    ): MealPlanSelection {
+        if (course == MealCourse.MAIN) return rerollUnlocked(date, filters, random)
+        repository.ensureReady()
+        val parent = repository.mealPlans.first().firstOrNull { it.date == date.toString() }
+            ?: return MealPlanSelection.NoMatch(date, filters ?: RecipeFilters())
+        val current = parent.coursePlan(course)
+        val requested = filters ?: current?.filters ?: parent.filters.copy(
+            category = if (course == MealCourse.DESSERT) "dessert" else "any",
+        )
+        if (!requested.isValid()) return MealPlanSelection.NoMatch(date, requested)
+        val preferences = mealPreferenceSettings.first()
+        val selected = chooseCourseRecipe(parent, course, requested, preferences, favoritePool(preferences), random)
+        val changed = parent.withCourse(course, newPlan(date, requested, selected))
+        repository.upsertMealPlan(changed)
+        return if (selected == null) MealPlanSelection.NoMatch(date, requested)
+        else MealPlanSelection.Selected(changed, selected)
+    }
+
+    private suspend fun chooseCourseRecipe(
+        parent: DayMealPlan,
+        course: MealCourse,
+        filters: RecipeFilters,
+        preferences: MealPreferenceSettings,
+        favorites: List<Recipe>?,
+        random: Random,
+    ): Recipe? = selectMenuRecipe(
+        criteria = ExploreCriteria(
+            category = filters.category, easeLevel = filters.easeLevel,
+            minRating = filters.minRating, maxPrepMinutes = filters.maxPrepMinutes,
+            mealTypeLabels = if (course == MealCourse.SIDE && filters.category == "any") {
+                setOf("Συνοδευτικά", "Σαλάτα", "Σαλάτες", "Ορεκτικά", "Ορεκτικό μεζές")
+            } else emptySet(),
+        ),
+        preferences = if (course == MealCourse.SIDE && filters.category == "any") {
+            preferences.copy(excludedCategories = preferences.excludedCategories + "dessert")
+        } else preferences,
+        favorites = favorites,
+        excludedIds = MealCourse.entries.filterNot { it == course }.mapNotNullTo(mutableSetOf()) {
+            parent.coursePlan(it)?.recipeId?.takeIf(String::isNotBlank)
+        },
+        random = random,
+    )
 
     private suspend fun selectMenuRecipe(
         criteria: ExploreCriteria,
@@ -235,7 +316,7 @@ class MealPlanner @Inject constructor(
         val first = repository.queryRecipes(criteria, 1, 0, preferences)
         if (first.totalCount == 0) return null
         val start = random.nextInt(first.totalCount)
-        // At most one main-dish id can be skipped; paging keeps the full catalog out of memory.
+        // Skip other saved courses without loading the full catalog into memory.
         repeat(minOf(first.totalCount, excludedIds.size + 1)) { attempt ->
             val offset = (start + attempt) % first.totalCount
             val page = if (offset == 0) first else repository.queryRecipes(criteria, 1, offset, preferences)
@@ -250,23 +331,24 @@ class MealPlanner @Inject constructor(
         random: Random = Random.Default,
     ): MealPlanSelection = reroll(date, filters, random)
 
-    suspend fun setLocked(date: LocalDate, locked: Boolean) {
+    private suspend fun setLockedUnlocked(date: LocalDate, locked: Boolean, course: MealCourse = MealCourse.MAIN) {
         repository.ensureReady()
-        val plan = repository.mealPlans.first().firstOrNull { it.date == date.toString() } ?: return
+        val parent = repository.mealPlans.first().firstOrNull { it.date == date.toString() } ?: return
+        val plan = parent.coursePlan(course) ?: return
         // Completed meals are automatically protected; their completion event stays untouched.
         if (plan.completed || plan.recipeId.isBlank() || plan.locked == locked) return
-        repository.upsertMealPlan(plan.copy(
+        repository.upsertMealPlan(parent.withCourse(course, plan.copy(
             locked = locked,
-            updatedAtEpochMillis = maxOf(System.currentTimeMillis(), plan.updatedAtEpochMillis + 1),
-        ))
+            updatedAtEpochMillis = maxOf(System.currentTimeMillis(), parent.updatedAtEpochMillis + 1),
+        )))
     }
 
-    suspend fun setCompleted(date: LocalDate, completed: Boolean) {
+    private suspend fun setCompletedUnlocked(date: LocalDate, completed: Boolean, course: MealCourse = MealCourse.MAIN) {
         repository.ensureReady()
-        repository.setMealCompleted(date.toString(), completed)
+        repository.setCourseCompleted(date.toString(), course, completed)
     }
 
-    suspend fun deleteCookedHistoryEntry(historyId: String) {
+    private suspend fun deleteCookedHistoryEntryUnlocked(historyId: String) {
         repository.ensureReady()
         repository.deleteCookedHistoryEntry(historyId)
     }
@@ -345,9 +427,10 @@ class MealPlanner @Inject constructor(
     }
 
     /** Replaces a day's proposal only when [recipeId] is still an available favorite. */
-    suspend fun replaceWithFavorite(
+    private suspend fun replaceWithFavoriteUnlocked(
         date: LocalDate,
         recipeId: String,
+        course: MealCourse = MealCourse.MAIN,
     ): FavoriteReplacementResult {
         repository.ensureReady()
         if (recipeId.isBlank() || recipeId !in repository.favoriteRecipeIds.first()) {
@@ -366,7 +449,8 @@ class MealPlanner @Inject constructor(
                     ?.takeIf(String::isNotBlank)
                 ?: WeeklyPlanDefaults.filtersFor(date).category
         }
-        val plan = newPlan(date, RecipeFilters(category = category), recipe)
+        val selection = newPlan(date, RecipeFilters(category = category), recipe)
+        val plan = existing?.withCourse(course, selection) ?: selection
         repository.upsertMealPlan(plan)
         return FavoriteReplacementResult.Selected(plan, recipe)
     }
@@ -388,7 +472,8 @@ class MealPlanner @Inject constructor(
             preferences = preferences,
             favorites = favorites,
         )
-        return newPlan(date, filters, recipe)
+        val selection = newPlan(date, filters, recipe)
+        return previous?.withCourse(MealCourse.MAIN, selection) ?: selection
     }
 
     /** Null means the full catalog; an empty list means no available favorites. */

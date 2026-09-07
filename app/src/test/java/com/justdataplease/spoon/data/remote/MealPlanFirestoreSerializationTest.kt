@@ -1,5 +1,6 @@
 package com.justdataplease.spoon.data.remote
 
+import com.justdataplease.spoon.data.model.MealCoursePlan
 import com.justdataplease.spoon.data.model.DayMealPlan
 import com.justdataplease.spoon.data.model.RecipeFilters
 import org.junit.Assert.assertEquals
@@ -22,6 +23,7 @@ class MealPlanFirestoreSerializationTest {
                 "completed",
                 "locked",
                 "completionEventId",
+                "completedAtEpochMillis",
                 "updatedAtEpochMillis",
             ),
             document.keys,
@@ -57,6 +59,21 @@ class MealPlanFirestoreSerializationTest {
         assertTrue(document["locked"] as Boolean)
         assertEquals("cooked_20260903_1777777777777", document["completionEventId"])
         assertEquals(1_777_777_777_777L, document["updatedAtEpochMillis"])
+    }
+
+    @Test
+    fun `nested courses serialize independently without computed or document fields`() {
+        val document = samplePlan().copy(side = MealCoursePlan(category = "vegetables", recipeId = "salad",
+            recipeTitle = "Salad", filters = RecipeFilters(category = "vegetables"), locked = true,
+            completed = true, completionEventId = "cooked_" + "a".repeat(32),
+            completedAtEpochMillis = 200, updatedAtEpochMillis = 300)).toFirestoreDocument()
+        val side = document.getValue("side") as Map<*, *>
+        assertEquals(document.keys - setOf("date", "side"), side.keys)
+        assertEquals(200L, side["completedAtEpochMillis"])
+        assertEquals(300L, side["updatedAtEpochMillis"])
+        assertEquals("salad", side["recipeId"])
+        assertEquals(true, side["locked"])
+        assertEquals(1_777_777_777_777L, document["completedAtEpochMillis"])
     }
 
     private fun samplePlan() = DayMealPlan(

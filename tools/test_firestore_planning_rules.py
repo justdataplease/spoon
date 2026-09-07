@@ -65,6 +65,62 @@ class PlanningRulesTest(unittest.TestCase):
         except HTTPError as error:
             return error.code
 
+    def commit(self, updates=(), deletes=(), authenticated_owner=None):
+        root = f"projects/{PROJECT}/databases/(default)/documents/spoon/{self.owner}/"
+        writes = [{"update": {"name": root + suffix, "fields": {k: value(v) for k, v in data.items()}}}
+                  for suffix, data in updates]
+        writes += [{"delete": root + suffix} for suffix in deletes]
+        request = Request(f"http://{HOST}/v1/projects/{PROJECT}/databases/(default)/documents:commit",
+                          json.dumps({"writes": writes}).encode(),
+                          headers={"Content-Type": "application/json", "Authorization": "Bearer " + token(authenticated_owner or self.owner)}, method="POST")
+        try:
+            with urlopen(request, timeout=15) as response:
+                return response.status
+        except HTTPError as error:
+            return error.code
+
+    def test_all_courses_complete_atomically_and_keep_independent_history(self):
+        plan = self.plan | {"recipeId": "main", "recipeTitle": "Main", "completedAtEpochMillis": 0}
+        extra = {key: val for key, val in plan.items() if key != "date"}
+        plan.update(side=extra | {"recipeId": "side", "recipeTitle": "Side", "locked": True},
+                    dessert=extra | {"recipeId": "dessert", "recipeTitle": "Dessert"})
+        self.assertEqual(200, self.write("mealPlans/2026-09-07", plan))
+        histories = {}
+        for index, role in enumerate(("main", "side", "dessert")):
+            event_id = "cooked_" + str(index + 1) * 32
+            timestamp = 200 + index
+            course = plan if role == "main" else plan[role]
+            course.update(completed=True, completionEventId=event_id,
+                          completedAtEpochMillis=timestamp, updatedAtEpochMillis=timestamp)
+            plan["updatedAtEpochMillis"] = timestamp
+            history = {"date": plan["date"], "recipeId": course["recipeId"], "recipeTitle": course["recipeTitle"],
+                       "completedAtEpochMillis": timestamp}
+            histories[role] = (event_id, history)
+            self.assertEqual(403, self.write("mealPlans/2026-09-07", plan))
+            self.assertEqual(200, self.commit((("mealPlans/2026-09-07", plan), ("cookedHistory/" + event_id, history))), role)
+        # Parent revisions change without changing any cooking timestamp.
+        plan["updatedAtEpochMillis"] = 300
+        self.assertEqual(200, self.write("mealPlans/2026-09-07", plan))
+        for role, (event_id, history) in histories.items():
+            self.assertEqual(403, self.commit(deletes=("cookedHistory/" + event_id,)))
+        side_id = histories["side"][0]
+        plan["side"].update(completed=False, completionEventId="", completedAtEpochMillis=0, updatedAtEpochMillis=301)
+        plan["updatedAtEpochMillis"] = 301
+        self.assertEqual(200, self.commit((("mealPlans/2026-09-07", plan),), ("cookedHistory/" + side_id,)))
+        self.assertEqual(403, self.commit(deletes=("cookedHistory/" + histories["main"][0],)))
+        self.assertEqual(403, self.write("mealPlans/2026-09-07", plan, "different-owner"))
+
+    def test_nested_courses_reject_extra_fields_bad_types_and_orphan_history(self):
+        extra = {key: val for key, val in self.plan.items() if key != "date"}
+        self.assertEqual(200, self.write("mealPlans/2026-09-07", self.plan | {"side": extra, "dessert": extra}))
+        for invalid in ([], extra | {"locked": "yes"}, extra | {"date": "2026-09-08"},
+                        extra | {"side": extra}, extra | {"completed": True},
+                        extra | {"completedAtEpochMillis": -1}, extra | {"recipeTitle": "Stale"}):
+            with self.subTest(invalid=invalid):
+                self.assertEqual(403, self.write("mealPlans/2026-09-07", self.plan | {"side": invalid}))
+        history = {"date": self.plan["date"], "recipeId": "side", "recipeTitle": "Side", "completedAtEpochMillis": 300}
+        self.assertEqual(403, self.write("cookedHistory/cooked_" + "a" * 32, history))
+
     def test_legacy_preferences_and_new_planner_options(self):
         self.assertEqual(200, self.write("preferences/meal", self.preferences))
         self.preferences.update(weekdayCategories={"MONDAY": "meat", "TUESDAY": "any", "WEDNESDAY": "legumes"}, favoritesOnly=True)

@@ -5,6 +5,7 @@ import android.content.ContextWrapper
 import android.database.sqlite.SQLiteDatabase
 import com.justdataplease.spoon.data.expandedIngredientAliasTokens
 import androidx.test.platform.app.InstrumentationRegistry
+import com.justdataplease.spoon.data.model.MealCourse
 import com.justdataplease.spoon.data.model.*
 import com.justdataplease.spoon.data.preferences.MealPreferenceSettings
 import com.justdataplease.spoon.domain.*
@@ -226,6 +227,38 @@ class CatalogContractDeviceTest {
         assertEquals(5, MealPlanner(reopened, selector).rerollWeek(monday).size)
         assertEquals(protected, reopened.mealPlans.first().filter { it.locked || it.completed })
         assertEquals(history, reopened.cookedHistory.first())
+    }
+
+    @Test fun fullMenuPersistsCoursesAcrossRegenerationCookingAndRestart() = runBlocking {
+        val preferences = context.getSharedPreferences("full-menu-test", Context.MODE_PRIVATE)
+        preferences.edit().clear().commit()
+        val repository = LocalSpoonRepository(preferences, json, catalog)
+        val planner = MealPlanner(repository, selector)
+        val monday = LocalDate.of(2026, 9, 7)
+        planner.ensureWeek(monday)
+        planner.suggestMenu(monday, Random(1))
+        planner.setLocked(monday, true, MealCourse.SIDE)
+        planner.setCompleted(monday, true, MealCourse.DESSERT)
+        val menu = repository.mealPlans.first().first { it.date == monday.toString() }
+        assertTrue(menu.side!!.recipeId.isNotBlank())
+        assertTrue(menu.dessert!!.completed)
+        val history = repository.cookedHistory.first()
+        planner.rerollWeek(monday, Random(2))
+        val reopened = LocalSpoonRepository(preferences, json, BundledRecipeCatalog(context, json))
+        val reopenedPlanner = MealPlanner(reopened, selector)
+        repeat(3) { reopenedPlanner.suggestMenu(monday, Random(it + 10)) }
+        val stored = reopened.mealPlans.first().first { it.date == monday.toString() }
+        assertEquals(menu.side, stored.side)
+        assertEquals(menu.dessert, stored.dessert)
+        assertEquals(history, reopened.cookedHistory.first())
+        val hydratedIds = reopened.recipes.first().map { it.id }.toSet()
+        assertTrue(menu.side!!.recipeId in hydratedIds)
+        assertTrue(menu.dessert!!.recipeId in hydratedIds)
+        reopenedPlanner.toggleFavorite(menu.side!!.recipeId)
+        reopenedPlanner.replaceWithFavorite(monday, menu.side!!.recipeId, MealCourse.SIDE)
+        assertEquals(menu.dessert, reopened.mealPlans.first().first { it.date == monday.toString() }.dessert)
+        reopenedPlanner.setCompleted(monday, false, MealCourse.DESSERT)
+        assertTrue(reopened.cookedHistory.first().isEmpty())
     }
 
     @Test fun staleInstallStampReinstallsCatalogWithoutTouchingPersonalData() = runBlocking {
