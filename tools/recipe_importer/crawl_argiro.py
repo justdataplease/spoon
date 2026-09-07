@@ -150,6 +150,8 @@ AUDITED_INTERNAL_STALE_REDIRECTS = {
 PARSER_CONTRACT_FILENAMES = (
     "argiro_schema.py",
     "full_schema.py",
+    "ingredient_taxonomy.py",
+    "ingredient_aliases.json",
     "helpers.py",
     "providers.py",
 )

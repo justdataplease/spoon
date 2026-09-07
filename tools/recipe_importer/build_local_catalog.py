@@ -29,8 +29,10 @@ from typing import Any, Iterable, Mapping, Sequence
 
 try:
     from .helpers import classify_ease
+    from .ingredient_taxonomy import normalize_ingredient_facets
 except ImportError:  # pragma: no cover - direct script execution
     from helpers import classify_ease
+    from ingredient_taxonomy import normalize_ingredient_facets
 
 
 SCHEMA_VERSION = 3
@@ -617,6 +619,8 @@ def prepare_recipe(
     if not isinstance(category, str) or not category:
         raise CatalogBuildError(f"{recipe_id}: category must be a non-empty string")
 
+    # Bundle the same backend projection that is published to Firestore.
+    record = normalize_ingredient_facets(record)
     facets, labels = _facet_values(record)
     ingredient_texts = _normalized_ingredient_texts(record)
     vegan_eligible = int(

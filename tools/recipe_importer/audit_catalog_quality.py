@@ -25,6 +25,8 @@ try:
         normalize_search_token,
     )
     from .helpers import canonical_category, classify_ease
+    from .ingredient_taxonomy import canonical_ingredient_labels, is_reviewed_ingredient
+    from .full_schema import CATEGORY_LABELS
 except ImportError:  # pragma: no cover - direct script execution
     from build_local_catalog import (
         FACET_FIELDS,
@@ -33,6 +35,8 @@ except ImportError:  # pragma: no cover - direct script execution
         normalize_search_token,
     )
     from helpers import canonical_category, classify_ease
+    from ingredient_taxonomy import canonical_ingredient_labels, is_reviewed_ingredient
+    from full_schema import CATEGORY_LABELS
 
 
 KNOWN_SOURCES = {"akis", "argiro", "gastronomos"}
@@ -219,6 +223,9 @@ def audit_catalog(database_path: Path, *, sample_limit: int = 20) -> dict[str, A
         unknown_sources: Counter[str] = Counter()
         unknown_categories: Counter[str] = Counter()
         record_count = 0
+        ingredient_normalization_mismatches = []
+        unreviewed_ingredients: Counter[str] = Counter()
+        category_label_mismatches = []
 
         rows = connection.execute(
             """
@@ -235,6 +242,12 @@ def audit_catalog(database_path: Path, *, sample_limit: int = 20) -> dict[str, A
             category = row["category"]
             recipe = json.loads(zlib.decompress(row["recipe_json"]).decode("utf-8"))
             title = str(recipe.get("title") or "")
+            ingredient_values = _strings(recipe.get("ingredientLabels"))
+            if ingredient_values != canonical_ingredient_labels(ingredient_values):
+                ingredient_normalization_mismatches.append(recipe_id)
+            unreviewed_ingredients.update(label for label in ingredient_values if not is_reviewed_ingredient(label))
+            if recipe.get("categoryLabel") != CATEGORY_LABELS.get(category):
+                category_label_mismatches.append(recipe_id)
             actual_facets = indexed_facets.get(recipe_id, {})
             facet_tokens = {
                 facet_type: tuple(sorted(actual_facets.get(facet_type, set())))
@@ -480,6 +493,9 @@ def audit_catalog(database_path: Path, *, sample_limit: int = 20) -> dict[str, A
             "categoryKeyMismatchSamples": category_key_mismatches[:sample_limit],
             "suspiciousCategoryEvidenceCount": len(suspicious_categories),
             "suspiciousCategoryEvidenceSamples": suspicious_categories[:sample_limit],
+            "ingredientNormalizationMismatchCount": len(ingredient_normalization_mismatches),
+            "unreviewedIngredientLabels": dict(unreviewed_ingredients),
+            "categoryLabelMismatchCount": len(category_label_mismatches),
             "indexMismatchCount": len(index_mismatches),
             "indexMismatchSamples": index_mismatches[:sample_limit],
             "unknownSources": dict(unknown_sources),
@@ -537,6 +553,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     return (
         1
         if report["indexMismatchCount"]
+        or report["ingredientNormalizationMismatchCount"]
+        or report["unreviewedIngredientLabels"]
+        or report["categoryLabelMismatchCount"]
         or vegan_audit["recomputationMismatchCount"]
         or vegan_audit["animalCategoryEligibleCount"]
         else 0

@@ -106,6 +106,8 @@ tools/recipe_importer/
   crawl_gastronomos.py complete permission-gated Gastronomos Greek crawler
   build_local_catalog.py deterministic indexed SQLite catalog builder
   full_schema.py      rich normalization and Firestore projections
+  ingredient_taxonomy.py shared ingredient identities for Firestore projections
+  migrate_firestore_taxonomy.py guarded repair of existing public taxonomy fields
   import_catalog.py   dry-run-first validator and Admin SDK importer
   inspect_recipe.py   one-URL metadata inspector
 

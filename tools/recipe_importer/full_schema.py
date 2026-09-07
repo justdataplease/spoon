@@ -14,6 +14,7 @@ from typing import Any
 from urllib.parse import urljoin, urlsplit, urlunsplit
 
 try:
+    from .ingredient_taxonomy import normalize_ingredient_facets
     from .helpers import (
         canonical_category,
         classify_ease,
@@ -24,6 +25,7 @@ try:
         AKIS, ProviderError, canonical_recipe_url, provider_for, recipe_document_id,
     )
 except ImportError:  # pragma: no cover - direct script execution
+    from ingredient_taxonomy import normalize_ingredient_facets
     from helpers import (
         canonical_category,
         classify_ease,
@@ -538,7 +540,7 @@ def normalize_recipe_detail(
 
 def firestore_detail_payload(record: Mapping[str, Any]) -> dict[str, Any]:
     """Return complete normalized details, with raw API data stored separately."""
-    payload = dict(record)
+    payload = normalize_ingredient_facets(record)
     payload.pop("id", None)
     payload.pop("sourcePayload", None)
     return payload
@@ -581,7 +583,8 @@ FIRESTORE_RECIPE_SUMMARY_FIELDS = frozenset({
 
 
 def firestore_recipe_payload(record: Mapping[str, Any]) -> dict[str, Any]:
-    """Return the lean summary streamed by Explore and weekly planning."""
+    """Return the lean summary with the same normalized facets as details."""
+    record = normalize_ingredient_facets(record)
     return {
         field: record[field]
         for field in FIRESTORE_RECIPE_SUMMARY_FIELDS

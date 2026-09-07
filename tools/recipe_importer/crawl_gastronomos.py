@@ -322,6 +322,8 @@ AUDITED_NON_RECIPE_SITEMAP_ENTRIES = (
 PARSER_CONTRACT_FILENAMES = (
     "gastronomos_schema.py",
     "full_schema.py",
+    "ingredient_taxonomy.py",
+    "ingredient_aliases.json",
     "helpers.py",
     "providers.py",
 )

@@ -458,3 +458,63 @@ not certify that every publisher tag is complete or culinarily correct.
 The bundled audit independently checks compressed recipe payloads against SQLite
 category, title, facet, ingredient-text, effort, rating, time, quick, and vegan
 indexes. Rebuild and distribute an APK to deliver corrected public data to phones.
+
+
+## Cross-provider Firestore normalization
+
+`ingredient_aliases.json` defines 273 reviewed ingredient identities and display
+labels across Akis, Argiro, and Gastronomos. `ingredient_taxonomy.py` applies that
+vocabulary in the shared Firestore summary/detail projections. Exact singular,
+plural, spelling, and case variants collapse; distinct foods, plant milks, mince
+varieties, and compound publisher groups remain separate. Ingredient-derived tags
+use the same canonical names. Original ingredient prose, quantities, source
+associations, and raw source payloads remain unchanged.
+
+The APK catalog builder consumes the same backend projection. No additional
+Android normalization rules are needed for these published labels. The full
+catalog audit rejects unreviewed ingredient labels, noncanonical ingredient
+facets, and category-label mismatches before release. Unknown future labels are
+preserved by the importer and must be reviewed before bundling a release.
+
+The Argiro and Gastronomos parser fingerprints include the vocabulary and its
+normalizer, so changing either invalidates stale checkpoint contracts. Complete
+source artifacts remain immutable; their manifests must be revalidated and have
+the summary/detail projection hashes and sizes recomputed after a projection
+change. Preserve the original manifests and verify the original catalog and raw
+source hashes before refreshing those derived fields.
+
+To repair existing Firestore records, first produce a read-only plan:
+
+```powershell
+python -m tools.recipe_importer.migrate_firestore_taxonomy `
+  --project-id spoontheplanner `
+  --plan tools/recipe_importer/output/taxonomy-plan.json
+```
+
+The command validates all three complete catalog/manifest pairs, requires every
+current ingredient facet to have a reviewed mapping, and compares all existing
+summary/detail documents with the backend projections. It aborts on missing
+records, unexpected active records, or source-identity mismatches. The optional
+`--gcloud-account` selects an already authorized gcloud identity without changing
+the active account or storing its short-lived token.
+
+Review the returned field counts and plan hash, then apply that exact plan:
+
+```powershell
+python -m tools.recipe_importer.migrate_firestore_taxonomy `
+  --project-id spoontheplanner `
+  --plan tools/recipe_importer/output/taxonomy-plan.json `
+  --commit --expected-plan-hash <reviewed-plan-hash>
+```
+
+Only changed category, ingredient-label, and tag fields are updated, in batches of
+200. Update-time preconditions reject concurrent changes, and update operations
+cannot create missing documents. The saved plan includes the previous taxonomy
+values. An interrupted run can be resumed by generating and reviewing a fresh
+plan; already-correct records require no writes. Every recipe is read back before
+publishing per-provider taxonomy hashes and normalization metadata. Source-payload
+and personal-data collections are never written.
+
+A taxonomy-only repair clears stale whole-document summary/detail status hashes,
+because it cannot certify unrelated fields. Original catalog/source hashes remain
+intact; a subsequent complete import restores the full projection hashes.
