@@ -288,6 +288,8 @@ class MealPreferenceSettingsStoreTest {
         val store = newStore()
         val settings = MealPreferenceSettings(
             weekdayCategories = mapOf("MONDAY" to "meat", "WEDNESDAY" to "any"),
+            sideWeekdayCategories = mapOf("MONDAY" to "vegetables"),
+            dessertWeekdayCategories = mapOf("SUNDAY" to "other"),
             favoritesOnly = true,
             updatedAtEpochMillis = 42L,
         )

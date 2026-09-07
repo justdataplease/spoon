@@ -1,5 +1,6 @@
 package com.justdataplease.spoon.domain
 
+import com.justdataplease.spoon.data.model.MealCourse
 import com.justdataplease.spoon.data.model.MealCategory
 import com.justdataplease.spoon.data.model.RecipeFilters
 import com.justdataplease.spoon.data.preferences.MealPreferenceSettings
@@ -30,12 +31,20 @@ object WeeklyPlanDefaults {
     fun categoryFor(
         dayOfWeek: DayOfWeek,
         preferences: MealPreferenceSettings = MealPreferenceSettings(),
-    ): MealCategory = preferences.weekdayCategories[dayOfWeek.name]
-        ?.let(MealCategory::fromKey) ?: checkNotNull(categoriesByDay[dayOfWeek])
+        course: MealCourse = MealCourse.MAIN,
+    ): MealCategory = when (course) {
+        MealCourse.MAIN -> preferences.weekdayCategories[dayOfWeek.name]
+            ?.let(MealCategory::fromKey) ?: checkNotNull(categoriesByDay[dayOfWeek])
+        MealCourse.SIDE -> preferences.sideWeekdayCategories[dayOfWeek.name]
+            ?.let(MealCategory::fromKey) ?: MealCategory.ANY
+        MealCourse.DESSERT -> preferences.dessertWeekdayCategories[dayOfWeek.name]
+            ?.let(MealCategory::fromKey) ?: MealCategory.DESSERT
+    }
 
     fun filtersFor(
         date: LocalDate,
         preferences: MealPreferenceSettings = MealPreferenceSettings(),
-    ): RecipeFilters = RecipeFilters(category = categoryFor(date.dayOfWeek, preferences).key)
+        course: MealCourse = MealCourse.MAIN,
+    ): RecipeFilters = RecipeFilters(category = categoryFor(date.dayOfWeek, preferences, course).key)
 }
 

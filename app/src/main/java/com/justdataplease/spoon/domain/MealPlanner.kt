@@ -74,8 +74,9 @@ class MealPlanner @Inject constructor(
     private val planMutationMutex = Mutex()
 
     suspend fun ensureWeek(containingDate: LocalDate = LocalDate.now(), random: Random = Random.Default,
-        resetWeekdays: Set<DayOfWeek> = emptySet()): List<DayMealPlan> = planMutationMutex.withLock {
-        ensureWeekUnlocked(containingDate, random, resetWeekdays)
+        resetWeekdays: Set<DayOfWeek> = emptySet(),
+        resetCourseWeekdays: Map<MealCourse, Set<DayOfWeek>> = emptyMap()): List<DayMealPlan> = planMutationMutex.withLock {
+        ensureWeekUnlocked(containingDate, random, resetWeekdays, resetCourseWeekdays)
     }
 
     suspend fun reroll(date: LocalDate, filters: RecipeFilters? = null,
@@ -148,6 +149,7 @@ class MealPlanner @Inject constructor(
         containingDate: LocalDate = LocalDate.now(),
         random: Random = Random.Default,
         resetWeekdays: Set<DayOfWeek> = emptySet(),
+        resetCourseWeekdays: Map<MealCourse, Set<DayOfWeek>> = emptyMap(),
     ): List<DayMealPlan> {
         repository.ensureReady()
         // Keep one coherent preference snapshot for the entire refresh. A cloud/cache update
@@ -161,8 +163,10 @@ class MealPlanner @Inject constructor(
 
         return WeeklyPlanDefaults.dates(containingDate).map { date ->
             val current = existing[date.toString()]
-            val resetCategory = date.dayOfWeek in resetWeekdays && current?.completed != true && current?.locked != true
-            if (current != null && !resetCategory && current.isUsable(recipesById, preferences, favorites)) {
+            val resetCategory = (date.dayOfWeek in resetWeekdays ||
+                date.dayOfWeek in resetCourseWeekdays[MealCourse.MAIN].orEmpty()) &&
+                current?.completed != true && current?.locked != true
+            var plan = if (current != null && !resetCategory && current.isUsable(recipesById, preferences, favorites)) {
                 current
             } else {
                 val replacement = createDay(
@@ -177,9 +181,18 @@ class MealPlanner @Inject constructor(
                 if (current?.recipeId == "" && replacement.recipeId.isBlank() && current.filters == replacement.filters && !current.completed) {
                     current
                 } else {
-                    replacement.also { repository.upsertMealPlan(it) }
+                    replacement
                 }
             }
+            for (course in listOf(MealCourse.SIDE, MealCourse.DESSERT)) {
+                val saved = plan.coursePlan(course) ?: continue
+                if (date.dayOfWeek !in resetCourseWeekdays[course].orEmpty() || saved.locked || saved.completed) continue
+                val filters = saved.filters.copy(category = WeeklyPlanDefaults.categoryFor(date.dayOfWeek, preferences, course).key)
+                val recipe = chooseCourseRecipe(plan, course, filters, preferences, favorites, random)
+                plan = plan.withCourse(course, newPlan(date, filters, recipe))
+            }
+            if (plan != current) repository.upsertMealPlan(plan)
+            plan
         }
     }
 
@@ -200,10 +213,32 @@ class MealPlanner @Inject constructor(
         val preferences = mealPreferenceSettings.first()
         val favorites = favoritePool(preferences)
         val plansByDate = repository.mealPlans.first().associateBy(DayMealPlan::date)
-        return WeeklyPlanDefaults.dates(containingDate).mapNotNull { date ->
-            val plan = plansByDate[date.toString()]
-            if (plan?.locked == true || plan?.completed == true) null
-            else rerollDay(date, null, random, preferences, favorites)
+        return WeeklyPlanDefaults.dates(containingDate).flatMap { date ->
+            val current = plansByDate[date.toString()]
+            var plan = current ?: DayMealPlan(id = date.toString(), date = date.toString(),
+                filters = WeeklyPlanDefaults.filtersFor(date, preferences))
+            val selections = mutableListOf<Pair<RecipeFilters, Recipe?>>()
+            for (course in MealCourse.entries) {
+                val saved = plan.coursePlan(course)
+                if (saved?.locked == true || saved?.completed == true) continue
+                val filters = saved?.filters ?: courseFilters(date, plan, course, preferences)
+                if (!filters.isValid()) {
+                    selections += filters to null
+                    continue
+                }
+                val recipe = if (course == MealCourse.MAIN) {
+                    selectEligibleRecipe(filters, null, random.nextLong(), preferences, favorites)
+                } else {
+                    chooseCourseRecipe(plan, course, filters, preferences, favorites, random)
+                }
+                plan = plan.withCourse(course, newPlan(date, filters, recipe))
+                selections += filters to recipe
+            }
+            if (plan != current) repository.upsertMealPlan(plan)
+            selections.map { (filters, recipe) ->
+                if (recipe == null) MealPlanSelection.NoMatch(date, filters)
+                else MealPlanSelection.Selected(plan, recipe)
+            }
         }
     }
 
@@ -242,7 +277,7 @@ class MealPlanner @Inject constructor(
             val favorites = favoritePool(preferences)
             for (course in listOf(MealCourse.SIDE, MealCourse.DESSERT)) {
                 if (plan.coursePlan(course) != null) continue
-                val filters = plan.filters.copy(category = if (course == MealCourse.DESSERT) "dessert" else "any")
+                val filters = courseFilters(date, plan, course, preferences)
                 val recipe = chooseCourseRecipe(plan, course, filters, preferences, favorites, random)
                 plan = plan.withCourse(course, newPlan(date, filters, recipe))
             }
@@ -265,17 +300,24 @@ class MealPlanner @Inject constructor(
         val parent = repository.mealPlans.first().firstOrNull { it.date == date.toString() }
             ?: return MealPlanSelection.NoMatch(date, filters ?: RecipeFilters())
         val current = parent.coursePlan(course)
-        val requested = filters ?: current?.filters ?: parent.filters.copy(
-            category = if (course == MealCourse.DESSERT) "dessert" else "any",
-        )
-        if (!requested.isValid()) return MealPlanSelection.NoMatch(date, requested)
         val preferences = mealPreferenceSettings.first()
+        val requested = filters ?: current?.filters ?: courseFilters(date, parent, course, preferences)
+        if (!requested.isValid()) return MealPlanSelection.NoMatch(date, requested)
         val selected = chooseCourseRecipe(parent, course, requested, preferences, favoritePool(preferences), random)
         val changed = parent.withCourse(course, newPlan(date, requested, selected))
         repository.upsertMealPlan(changed)
         return if (selected == null) MealPlanSelection.NoMatch(date, requested)
         else MealPlanSelection.Selected(changed, selected)
     }
+
+    private fun courseFilters(
+        date: LocalDate,
+        parent: DayMealPlan,
+        course: MealCourse,
+        preferences: MealPreferenceSettings,
+    ): RecipeFilters = parent.filters.copy(
+        category = WeeklyPlanDefaults.categoryFor(date.dayOfWeek, preferences, course).key,
+    )
 
     private suspend fun chooseCourseRecipe(
         parent: DayMealPlan,

@@ -13,14 +13,21 @@ class MealPreferenceFirestoreTest {
     fun `weekday and favorites settings survive cloud serialization with legacy defaults`() {
         val settings = MealPreferenceSettings(
             weekdayCategories = mapOf("MONDAY" to "meat", "SUNDAY" to "any"),
+            sideWeekdayCategories = mapOf("MONDAY" to "vegetables"),
+            dessertWeekdayCategories = mapOf("SUNDAY" to "other"),
             favoritesOnly = true,
             updatedAtEpochMillis = 123L,
         )
         val fields = settings.toFirestoreDocument()
         assertEquals(settings.weekdayCategories, fields["weekdayCategories"])
+        assertEquals(settings.sideWeekdayCategories, fields["sideWeekdayCategories"])
+        assertEquals(settings.dessertWeekdayCategories, fields["dessertWeekdayCategories"])
+        assertEquals(settings, settings.normalizedForSync(123L))
         assertEquals(true, fields["favoritesOnly"])
         assertEquals(settings, MealPreferenceDocument(
             weekdayCategories = settings.weekdayCategories,
+            sideWeekdayCategories = settings.sideWeekdayCategories,
+            dessertWeekdayCategories = settings.dessertWeekdayCategories,
             favoritesOnly = true,
             updatedAtEpochMillis = 123L,
         ).toSettingsOrNull())
@@ -50,6 +57,8 @@ class MealPreferenceFirestoreTest {
                 "excludedIngredientTerms",
                 "updatedAtEpochMillis",
                 "weekdayCategories",
+                "sideWeekdayCategories",
+                "dessertWeekdayCategories",
                 "favoritesOnly",
             ),
             document.keys,
@@ -109,6 +118,8 @@ class MealPreferenceFirestoreTest {
         )
         val invalidDocuments = listOf(
             valid.copy(id = "other"),
+            valid.copy(sideWeekdayCategories = mapOf("FUNDAY" to "meat")),
+            valid.copy(dessertWeekdayCategories = mapOf("MONDAY" to "invalid")),
             valid.copy(updatedAtEpochMillis = 0L),
             valid.copy(updatedAtEpochMillis = MAX_MEAL_PREFERENCE_EPOCH_MILLIS + 1L),
             valid.copy(excludedCategories = listOf("fish", "fish")),

@@ -14,17 +14,18 @@ data.
 
 - Monday-to-Sunday planning with default main-food groups such as όσπρια, κοτόπουλο,
   λαχανικά, κρέας, ψάρι, βρώμικο, and ζυμαρικά/ρύζι.
-- Preferences let you choose a default category for each weekday, Monday through
-  Sunday, and generate new proposals only from favorites. Matching favorites can
-  repeat across days and weeks; missing categories show an unavailable recipe card
+- Preferences let you choose default main, side, and dessert categories for each
+  weekday, Monday through Sunday, and generate new proposals only from favorites.
+  Matching favorites can repeat across days and weeks; missing categories show an unavailable recipe card
   with an action to edit that day's category or filters.
 - The main recipe stays visible on each day card. The optional «Πλήρες μενού»
   button opens a dedicated screen with saved main, side, and dessert courses.
   Each course supports filters, favorites, replacement, locks, and cooking history.
-  Reopening the screen and regenerating weekly mains preserve saved extras. Only
-  an explicit course replacement changes them. New courses respect the selected
-  source and food preferences; missing matches show unavailable. Dessert remains
-  an explicit category choice; the preset week uses main-dish categories.
+  Reopening the screen preserves saved selections. Weekly new proposals refresh
+  the full menu, keeping each locked or already-cooked course independently. New
+  courses respect the selected source and food preferences; missing matches show
+  unavailable. The preset week uses main-dish categories for mains, matching
+  accompaniments for sides, and desserts for the sweet course.
 - Lock a recipe at the top of its day card to keep it during weekly regeneration.
   Already-cooked meals are automatically kept too. Locks persist offline and sync
   with the plan; unlocking makes the day eligible for weekly regeneration again.
@@ -70,8 +71,9 @@ data.
 Strict filters are never silently relaxed. If no recipe matches a valid request,
 the day is saved as unavailable, keeping its category and filters for the next
 attempt. Adding a matching favorite allows the day to recover. Changing weekday
-defaults updates unfinished days of the selected week; completed meals and their
-cooking history remain intact during preference reconciliation.
+defaults updates the corresponding saved, unlocked and unfinished courses of the
+selected week; completed meals and their cooking history remain intact during
+preference reconciliation.
 
 ## Architecture
 

@@ -593,15 +593,17 @@ class SpoonViewModel @Inject constructor(
         launchWorking(
             work = {
                 val previous = mealPreferenceSettings.value
-                val changedDays = DayOfWeek.entries.filterTo(mutableSetOf()) { day ->
-                    WeeklyPlanDefaults.categoryFor(day, previous) != WeeklyPlanDefaults.categoryFor(day, settings)
+                val changedDays = MealCourse.entries.associateWith { course ->
+                    DayOfWeek.entries.filterTo(mutableSetOf()) { day ->
+                        WeeklyPlanDefaults.categoryFor(day, previous, course) != WeeklyPlanDefaults.categoryFor(day, settings, course)
+                    }
                 }
                 mealPlanner.saveMealPreferenceSettings(settings)
                 changedDays
             },
         ) { changedDays ->
             message.value = "Οι προτιμήσεις φαγητού αποθηκεύτηκαν."
-            ensureWeek(selectedWeekStart.value, force = true, resetWeekdays = changedDays)
+            ensureWeek(selectedWeekStart.value, force = true, resetCourseWeekdays = changedDays)
             onSaved()
         }
     }
@@ -790,8 +792,8 @@ class SpoonViewModel @Inject constructor(
         ) { misses ->
             message.value = when {
                 misses == 0 -> "Έτοιμη η νέα εβδομάδα!"
-                misses == 1 -> "Μία μέρα δεν είχε πρόταση με αυτά τα φίλτρα."
-                else -> "$misses μέρες δεν είχαν πρόταση με αυτά τα φίλτρα."
+                misses == 1 -> "Ένα πιάτο δεν είχε πρόταση με αυτά τα φίλτρα."
+                else -> "$misses πιάτα δεν είχαν πρόταση με αυτά τα φίλτρα."
             }
         }
     }
@@ -1032,7 +1034,7 @@ class SpoonViewModel @Inject constructor(
         }
     }
 
-    private fun ensureWeek(date: LocalDate, force: Boolean = false, resetWeekdays: Set<DayOfWeek> = emptySet()) {
+    private fun ensureWeek(date: LocalDate, force: Boolean = false, resetCourseWeekdays: Map<MealCourse, Set<DayOfWeek>> = emptyMap()) {
         val weekStart = WeeklyPlanDefaults.weekStart(date)
         if (
             !shouldStartWeekEnsure(
@@ -1043,7 +1045,7 @@ class SpoonViewModel @Inject constructor(
             )
         ) return
         catalogWeekRetryGate.onDirectRequest(weekStart)
-        startWeekEnsure(weekStart, isCatalogRetry = false, resetWeekdays = resetWeekdays)
+        startWeekEnsure(weekStart, isCatalogRetry = false, resetCourseWeekdays = resetCourseWeekdays)
     }
 
     private fun retryWeekAfterCatalog(weekStart: LocalDate) {
@@ -1055,7 +1057,7 @@ class SpoonViewModel @Inject constructor(
     private fun startWeekEnsure(
         weekStart: LocalDate,
         isCatalogRetry: Boolean,
-        resetWeekdays: Set<DayOfWeek> = emptySet(),
+        resetCourseWeekdays: Map<MealCourse, Set<DayOfWeek>> = emptyMap(),
     ) {
         if (!isCatalogRetry) weekEnsureJob?.cancel()
         val generation = ++weekEnsureGeneration
@@ -1064,7 +1066,7 @@ class SpoonViewModel @Inject constructor(
         val job = viewModelScope.launch(start = CoroutineStart.LAZY) {
             try {
                 val plans = withUserActionTimeout {
-                    withContext(Dispatchers.Default) { mealPlanner.ensureWeek(weekStart, resetWeekdays = resetWeekdays) }
+                    withContext(Dispatchers.Default) { mealPlanner.ensureWeek(weekStart, resetCourseWeekdays = resetCourseWeekdays) }
                 }
                 if (plans.isNotEmpty() && plans.all { it.recipeId.isNotBlank() }) {
                     catalogWeekRetryGate.onAttemptSucceeded(weekStart)

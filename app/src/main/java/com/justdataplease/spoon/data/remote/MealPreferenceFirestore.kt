@@ -35,6 +35,8 @@ internal fun MealPreferenceSettings.toFirestoreDocument(): Map<String, Any> {
         "excludedIngredientTerms" to ingredients,
         "updatedAtEpochMillis" to updatedAtEpochMillis,
         "weekdayCategories" to weekdayCategories.validWeekdayCategories(),
+        "dessertWeekdayCategories" to dessertWeekdayCategories.validWeekdayCategories(),
+        "sideWeekdayCategories" to sideWeekdayCategories.validWeekdayCategories(),
         "favoritesOnly" to favoritesOnly,
     )
 }
@@ -43,6 +45,8 @@ internal fun MealPreferenceDocument.toSettingsOrNull(): MealPreferenceSettings? 
     if (id.isNotBlank() && id != MEAL_PREFERENCE_DOCUMENT_ID) return null
     if (updatedAtEpochMillis !in 1L..MAX_MEAL_PREFERENCE_EPOCH_MILLIS) return null
     if (weekdayCategories != weekdayCategories.validWeekdayCategories()) return null
+    if (dessertWeekdayCategories != dessertWeekdayCategories.validWeekdayCategories()) return null
+    if (sideWeekdayCategories != sideWeekdayCategories.validWeekdayCategories()) return null
     if (
         excludedCategories.size > AllowedExcludedCategories.size ||
         excludedCategories.any { it !in AllowedExcludedCategories } ||
@@ -62,6 +66,8 @@ internal fun MealPreferenceDocument.toSettingsOrNull(): MealPreferenceSettings? 
         excludedIngredientTerms = ingredients.toSet(),
         updatedAtEpochMillis = updatedAtEpochMillis,
         weekdayCategories = weekdayCategories,
+        dessertWeekdayCategories = dessertWeekdayCategories,
+        sideWeekdayCategories = sideWeekdayCategories,
         favoritesOnly = favoritesOnly,
     )
 }
@@ -76,6 +82,8 @@ internal fun MealPreferenceSettings.normalizedForSync(timestamp: Long): MealPref
             (document.getValue("excludedIngredientTerms") as List<String>).toSet(),
         updatedAtEpochMillis = timestamp,
         weekdayCategories = weekdayCategories.validWeekdayCategories(),
+        dessertWeekdayCategories = dessertWeekdayCategories.validWeekdayCategories(),
+        sideWeekdayCategories = sideWeekdayCategories.validWeekdayCategories(),
         favoritesOnly = favoritesOnly,
     )
 }

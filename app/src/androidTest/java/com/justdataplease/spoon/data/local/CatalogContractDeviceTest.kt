@@ -224,8 +224,12 @@ class CatalogContractDeviceTest {
         val reopened = LocalSpoonRepository(preferences, json, catalog)
         assertEquals(protected, reopened.mealPlans.first().filter { it.locked || it.completed })
         reopened.updateMealPreferenceSettings(MealPreferenceSettings(favoritesOnly = true))
-        assertEquals(5, MealPlanner(reopened, selector).rerollWeek(monday).size)
-        assertEquals(protected, reopened.mealPlans.first().filter { it.locked || it.completed })
+        assertEquals(19, MealPlanner(reopened, selector).rerollWeek(monday).size)
+        protected.forEach { saved ->
+            val actual = reopened.mealPlans.first().single { it.date == saved.date }
+            assertEquals(saved.copy(side = actual.side, dessert = actual.dessert,
+                updatedAtEpochMillis = actual.updatedAtEpochMillis), actual)
+        }
         assertEquals(history, reopened.cookedHistory.first())
     }
 

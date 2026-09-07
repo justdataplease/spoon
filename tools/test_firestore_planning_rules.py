@@ -123,7 +123,8 @@ class PlanningRulesTest(unittest.TestCase):
 
     def test_legacy_preferences_and_new_planner_options(self):
         self.assertEqual(200, self.write("preferences/meal", self.preferences))
-        self.preferences.update(weekdayCategories={"MONDAY": "meat", "TUESDAY": "any", "WEDNESDAY": "legumes"}, favoritesOnly=True)
+        self.preferences.update(weekdayCategories={"MONDAY": "meat", "TUESDAY": "any", "WEDNESDAY": "legumes"}, favoritesOnly=True,
+                                sideWeekdayCategories={"MONDAY": "vegetables"}, dessertWeekdayCategories={"SUNDAY": "other"})
         self.assertEqual(200, self.write("preferences/meal", self.preferences))
         self.assertEqual(403, self.write("preferences/meal", self.preferences, "different-owner"))
 
@@ -132,6 +133,12 @@ class PlanningRulesTest(unittest.TestCase):
             {"weekdayCategories": {"FUNDAY": "meat"}},
             {"weekdayCategories": {"MONDAY": "invalid"}},
             {"weekdayCategories": ["meat"]}, {"favoritesOnly": "true"},
+            {"sideWeekdayCategories": {"FUNDAY": "meat"}},
+            {"sideWeekdayCategories": {"MONDAY": "invalid"}},
+            {"sideWeekdayCategories": ["vegetables"]},
+            {"dessertWeekdayCategories": {"FUNDAY": "dessert"}},
+            {"dessertWeekdayCategories": {"MONDAY": "invalid"}},
+            {"dessertWeekdayCategories": ["dessert"]},
             {"unexpectedField": True},
         ):
             with self.subTest(update=update):

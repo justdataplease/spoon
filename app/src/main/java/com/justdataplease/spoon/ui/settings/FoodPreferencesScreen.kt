@@ -54,6 +54,7 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.justdataplease.spoon.data.preferences.MealPreferenceSettings
+import com.justdataplease.spoon.data.model.MealCourse
 import com.justdataplease.spoon.data.model.MealCategory
 import com.justdataplease.spoon.domain.WeeklyPlanDefaults
 import com.justdataplease.spoon.ui.components.GreekLocale
@@ -79,6 +80,7 @@ fun FoodPreferencesScreen(
 ) {
     BackHandler(onBack = onBack)
     var draft by remember(settings) { mutableStateOf(settings) }
+    var defaultCourse by rememberSaveable { mutableStateOf(MealCourse.MAIN) }
     var ingredientInput by rememberSaveable { mutableStateOf("") }
     var ingredientMenuExpanded by rememberSaveable { mutableStateOf(false) }
     val keyboardController = LocalSoftwareKeyboardController.current
@@ -175,12 +177,21 @@ fun FoodPreferencesScreen(
             item {
                 PreferenceCard(
                     title = "Κατηγορία ανά ημέρα",
-                    subtitle = "Οι προεπιλογές για κάθε εβδομάδα. Η αποθήκευση ενημερώνει και τις αντίστοιχες αμαγείρευτες ημέρες της επιλεγμένης εβδομάδας.",
+                    subtitle = "Διάλεξε προεπιλογές για κυρίως, συνοδευτικό και γλυκό. Η αποθήκευση ενημερώνει τα αντίστοιχα πιάτα της επιλεγμένης εβδομάδας, εκτός αν είναι κλειδωμένα ή μαγειρεμένα.",
                     icon = Icons.Outlined.CalendarMonth,
                 ) {
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        MealCourse.entries.forEach { course ->
+                            FilterChip(
+                                selected = defaultCourse == course,
+                                onClick = { defaultCourse = course },
+                                label = { Text(course.label) },
+                            )
+                        }
+                    }
                     DayOfWeek.entries.forEach { day ->
                         var expanded by remember { mutableStateOf(false) }
-                        val category = WeeklyPlanDefaults.categoryFor(day, draft)
+                        val category = WeeklyPlanDefaults.categoryFor(day, draft, defaultCourse)
                         ExposedDropdownMenuBox(
                             expanded = expanded,
                             onExpandedChange = { expanded = it },
@@ -198,10 +209,19 @@ fun FoodPreferencesScreen(
                                     DropdownMenuItem(
                                         text = { Text(option.greekLabel) },
                                         onClick = {
-                                            val overrides = draft.weekdayCategories - day.name
-                                            draft = draft.copy(weekdayCategories = if (option == WeeklyPlanDefaults.categoryFor(day)) {
+                                            val overrides = when (defaultCourse) {
+                                                MealCourse.MAIN -> draft.weekdayCategories
+                                                MealCourse.SIDE -> draft.sideWeekdayCategories
+                                                MealCourse.DESSERT -> draft.dessertWeekdayCategories
+                                            } - day.name
+                                            val updated = if (option == WeeklyPlanDefaults.categoryFor(day, course = defaultCourse)) {
                                                 overrides
-                                            } else overrides + (day.name to option.key))
+                                            } else overrides + (day.name to option.key)
+                                            draft = when (defaultCourse) {
+                                                MealCourse.MAIN -> draft.copy(weekdayCategories = updated)
+                                                MealCourse.SIDE -> draft.copy(sideWeekdayCategories = updated)
+                                                MealCourse.DESSERT -> draft.copy(dessertWeekdayCategories = updated)
+                                            }
                                             expanded = false
                                         },
                                     )

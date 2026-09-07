@@ -92,9 +92,13 @@ service cloud.firestore {
           'excludedIngredientTerms',
           'updatedAtEpochMillis',
           'weekdayCategories',
+          'sideWeekdayCategories',
+          'dessertWeekdayCategories',
           'favoritesOnly'
         ]) &&
         validWeekdayCategories(data.get('weekdayCategories', {})) &&
+        validWeekdayCategories(data.get('sideWeekdayCategories', {})) &&
+        validWeekdayCategories(data.get('dessertWeekdayCategories', {})) &&
         data.get('favoritesOnly', false) is bool &&
         data.excludedCategories is list &&
         data.excludedCategories.size() <= 9 &&

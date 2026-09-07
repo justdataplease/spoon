@@ -10,5 +10,7 @@ data class MealPreferenceDocument(
     val excludedIngredientTerms: List<String> = emptyList(),
     val updatedAtEpochMillis: Long = 0L,
     val weekdayCategories: Map<String, String> = emptyMap(),
+    val sideWeekdayCategories: Map<String, String> = emptyMap(),
+    val dessertWeekdayCategories: Map<String, String> = emptyMap(),
     val favoritesOnly: Boolean = false,
 )
