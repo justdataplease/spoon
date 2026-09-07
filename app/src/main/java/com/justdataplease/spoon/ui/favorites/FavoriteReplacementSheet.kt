@@ -49,7 +49,7 @@ fun FavoriteReplacementSheet(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             item {
-                Text("Επιλογή από αγαπημένα", style = MaterialTheme.typography.headlineMedium)
+                Text("Επιλογή από τη συλλογή", style = MaterialTheme.typography.headlineMedium)
                 Text(
                     "Αντικατάσταση για ${date.greekDayLabel()}",
                     style = MaterialTheme.typography.bodyLarge,
@@ -75,7 +75,7 @@ fun FavoriteReplacementSheet(
                                 tint = MaterialTheme.colorScheme.primary,
                             )
                         }
-                        Text("Δεν έχεις αγαπημένες συνταγές ακόμη", style = MaterialTheme.typography.titleLarge)
+                        Text("Η συλλογή σου είναι ακόμη άδεια", style = MaterialTheme.typography.titleLarge)
                         Text(
                             "Πρόσθεσε συνταγές από την Εξερεύνηση και θα εμφανιστούν εδώ.",
                             style = MaterialTheme.typography.bodyLarge,

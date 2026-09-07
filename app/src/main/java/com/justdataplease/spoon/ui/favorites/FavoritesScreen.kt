@@ -60,7 +60,7 @@ fun FavoritesScreen(
                         tint = MaterialTheme.colorScheme.primary,
                     )
                 }
-                Text("Οι αγαπημένες σου", style = MaterialTheme.typography.headlineMedium)
+                Text("Η συλλογή σου", style = MaterialTheme.typography.headlineMedium)
                 Text(
                     "Πάτησε την καρδιά σε μια πρόταση και θα τη βρεις εδώ.",
                     style = MaterialTheme.typography.bodyLarge,
@@ -77,7 +77,7 @@ fun FavoritesScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         item {
-            Text("Αγαπημένες", style = MaterialTheme.typography.displaySmall)
+            Text("Συλλογή", style = MaterialTheme.typography.displaySmall)
             Text(
                 favoriteRecipeSummary(favorites.size),
                 style = MaterialTheme.typography.bodyLarge,
@@ -91,7 +91,7 @@ fun FavoritesScreen(
                 filters = filters,
                 onQueryChange = onQueryChange,
                 onShowFilters = { showFilters = true },
-                filterDescription = "Φίλτρα αγαπημένων",
+                filterDescription = "Φίλτρα συλλογής",
             )
         }
         if (filters.activeCount > 0) {
@@ -100,7 +100,7 @@ fun FavoritesScreen(
         if (favorites.isEmpty()) {
             item {
                 Column(Modifier.fillMaxWidth().padding(vertical = 24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("Δεν βρέθηκαν αγαπημένες συνταγές", style = MaterialTheme.typography.titleLarge)
+                    Text("Δεν βρέθηκαν συνταγές στη συλλογή", style = MaterialTheme.typography.titleLarge)
                     Text(
                         "Δοκίμασε άλλη αναζήτηση ή άλλα φίλτρα. Ισχύουν και οι προτιμήσεις φαγητού σου.",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,

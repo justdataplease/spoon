@@ -714,10 +714,10 @@ class SpoonViewModel @Inject constructor(
             when (result) {
                 is FavoriteReplacementResult.Selected -> {
                     favoriteReplacementDate.value = null
-                    message.value = "Η αγαπημένη συνταγή μπήκε στο πρόγραμμα."
+                    message.value = "Η συνταγή από τη συλλογή μπήκε στο πρόγραμμα."
                 }
                 is FavoriteReplacementResult.NotFavorite -> {
-                    message.value = "Η συνταγή δεν βρίσκεται πια στα αγαπημένα σου."
+                    message.value = "Η συνταγή δεν βρίσκεται πια στη συλλογή σου."
                 }
                 is FavoriteReplacementResult.RecipeUnavailable -> {
                     message.value = "Η συνταγή δεν είναι πλέον διαθέσιμη στον κατάλογο."

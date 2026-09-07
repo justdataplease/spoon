@@ -31,6 +31,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.justdataplease.spoon.data.model.isCustomRecipeId
@@ -64,7 +65,7 @@ private data class Destination(
 private val Destinations = listOf(
     Destination(PrimaryDestination.WEEK, "Πλάνο", Icons.Filled.RestaurantMenu, Icons.Outlined.RestaurantMenu),
     Destination(PrimaryDestination.EXPLORE, "Βρες", Icons.Filled.Search, Icons.Outlined.Search),
-    Destination(PrimaryDestination.FAVORITES, "Αγαπημένα", Icons.Filled.Favorite, Icons.Outlined.FavoriteBorder),
+    Destination(PrimaryDestination.FAVORITES, "Συλλογή", Icons.Filled.Favorite, Icons.Outlined.FavoriteBorder),
     Destination(PrimaryDestination.SHOPPING, "Αγορές", Icons.Filled.ShoppingBasket, Icons.Outlined.ShoppingBasket),
     Destination(PrimaryDestination.HISTORY, "Ιστορικό", Icons.Filled.History, Icons.Outlined.History),
     Destination(PrimaryDestination.MORE, "Μενού", Icons.Filled.MoreHoriz, Icons.Outlined.Menu),
@@ -137,7 +138,7 @@ fun SpoonApp(
                                     contentDescription = destination.label,
                                 )
                             },
-                            label = { Text(destination.label) },
+                            label = { Text(destination.label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                             colors = NavigationBarItemDefaults.colors(
                                 indicatorColor = MaterialTheme.colorScheme.primaryContainer,
                             ),

@@ -126,7 +126,7 @@ fun WeekScreen(
             }
             item {
                 Text(
-                    if (favoritesOnly) "Προτάσεις μόνο από αγαπημένες · επιτρέπονται επαναλήψεις"
+                    if (favoritesOnly) "Προτάσεις μόνο από τη συλλογή · επιτρέπονται επαναλήψεις"
                     else "Προτάσεις από όλες τις συνταγές",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -318,7 +318,7 @@ internal fun DayRecipeCard(
                     IconButton(onClick = onToggleFavorite) {
                         Icon(
                             if (plan.isFavorite) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
-                            contentDescription = if (plan.isFavorite) "Αφαίρεση από αγαπημένα" else "Στα αγαπημένα",
+                            contentDescription = if (plan.isFavorite) "Αφαίρεση από τη συλλογή" else "Στη συλλογή",
                             tint = if (plan.isFavorite) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
@@ -381,7 +381,7 @@ internal fun DayRecipeCard(
                 TextButton(onClick = onChooseFavorite) {
                     Icon(Icons.Outlined.FavoriteBorder, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.size(6.dp))
-                    Text("Από αγαπημένα")
+                    Text("Από τη συλλογή")
                 }
             }
             Row(

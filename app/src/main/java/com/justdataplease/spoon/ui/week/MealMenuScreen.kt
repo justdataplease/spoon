@@ -89,7 +89,7 @@ fun MealMenuScreen(
                             EmptyRecipeCard(plan = plan, onPick = { onReroll(course) },
                                 onEdit = { editingCourse = course }, favoritesOnly = state.favoritesOnly,
                                 title = course.label)
-                            TextButton(onClick = { onChooseFavorite(course) }) { Text("Από αγαπημένα") }
+                            TextButton(onClick = { onChooseFavorite(course) }) { Text("Από τη συλλογή") }
                         }
                     } else {
                         DayRecipeCard(

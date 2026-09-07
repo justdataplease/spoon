@@ -187,7 +187,7 @@ fun EmptyRecipeCard(
                 style = MaterialTheme.typography.bodyLarge,
             )
             Text(
-                if (favoritesOnly) "Δεν υπάρχει αγαπημένη συνταγή που να ταιριάζει στην κατηγορία και στα φίλτρα αυτής της ημέρας."
+                if (favoritesOnly) "Δεν υπάρχει συνταγή στη συλλογή που να ταιριάζει στην κατηγορία και στα φίλτρα αυτής της ημέρας."
                 else "Δεν υπάρχει συνταγή που να ταιριάζει στην κατηγορία και στα φίλτρα αυτής της ημέρας.",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -264,7 +264,7 @@ fun CompactFavoriteCard(
                 androidx.compose.material3.IconButton(onClick = onRemove) {
                     Icon(
                         imageVector = androidx.compose.material.icons.Icons.Filled.Favorite,
-                        contentDescription = "Αφαίρεση από αγαπημένα",
+                        contentDescription = "Αφαίρεση από τη συλλογή",
                         tint = MaterialTheme.colorScheme.primary,
                     )
                 }

@@ -285,7 +285,7 @@ private fun ExploreRecipeCard(
                     IconButton(onClick = onToggleFavorite, modifier = Modifier.size(38.dp)) {
                         Icon(
                             if (recipe.isFavorite) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
-                            contentDescription = if (recipe.isFavorite) "Αφαίρεση από αγαπημένα" else "Προσθήκη στα αγαπημένα",
+                            contentDescription = if (recipe.isFavorite) "Αφαίρεση από τη συλλογή" else "Προσθήκη στη συλλογή",
                             tint = if (recipe.isFavorite) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }

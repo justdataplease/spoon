@@ -143,7 +143,7 @@ fun FoodPreferencesScreen(
                         Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                             Text("Όλα περιλαμβάνονται αρχικά", fontWeight = FontWeight.Bold)
                             Text(
-                                "Οι αποκλεισμοί ισχύουν στην Εξερεύνηση, στις Αγαπημένες και στις νέες προτάσεις εβδομάδας.",
+                                "Οι αποκλεισμοί ισχύουν στην Εξερεύνηση, στη Συλλογή και στις νέες προτάσεις εβδομάδας.",
                                 style = MaterialTheme.typography.bodyMedium,
                             )
                         }
@@ -159,7 +159,7 @@ fun FoodPreferencesScreen(
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
-                            Text("Μόνο από αγαπημένες", style = MaterialTheme.typography.titleMedium)
+                            Text("Μόνο από τη συλλογή", style = MaterialTheme.typography.titleMedium)
                             Text(
                                 "Οι συνταγές μπορούν να επαναλαμβάνονται. Αν καμία δεν ταιριάζει στην κατηγορία και στα φίλτρα της ημέρας, θα εμφανίζεται μη διαθέσιμη συνταγή.",
                                 style = MaterialTheme.typography.bodyMedium,
