@@ -24,8 +24,8 @@ android {
         applicationId = "com.spoon.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 19
-        versionName = "0.8.1"
+        versionCode = 20
+        versionName = "0.8.2"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("boolean", "HAS_FIREBASE_CONFIG", hasFirebaseConfig.toString())
     }
