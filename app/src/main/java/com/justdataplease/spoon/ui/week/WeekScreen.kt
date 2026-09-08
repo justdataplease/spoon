@@ -140,7 +140,12 @@ fun WeekScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            item { StatusBanner(backendState = state.backendState) }
+            item {
+                StatusBanner(
+                    backendState = state.backendState,
+                    isSignedIn = state.account.isSignedIn,
+                )
+            }
             if (state.isLoading && state.weekPlans.isEmpty()) {
                 item {
                     Box(Modifier.fillMaxWidth().height(220.dp), contentAlignment = Alignment.Center) {

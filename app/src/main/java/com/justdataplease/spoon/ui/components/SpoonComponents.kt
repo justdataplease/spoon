@@ -283,13 +283,18 @@ fun CompactFavoriteCard(
 @Composable
 fun StatusBanner(
     backendState: BackendState,
+    isSignedIn: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
     val isCloud = backendState is BackendState.Cloud
     val text = when (backendState) {
         BackendState.Local -> "Λειτουργία επίδειξης · τα δεδομένα μένουν στη συσκευή"
         BackendState.Connecting -> "Σύνδεση με το Firestore…"
-        BackendState.Cloud -> "Συγχρονισμένο με το Firestore"
+        BackendState.Cloud -> if (isSignedIn) {
+            "Συγχρονισμένο με το Firestore"
+        } else {
+            "Ο κατάλογος είναι έτοιμος · σύνδεση για συγχρονισμό"
+        }
         is BackendState.Error -> backendErrorText(backendState)
     }
     Surface(
