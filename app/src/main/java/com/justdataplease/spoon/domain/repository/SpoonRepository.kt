@@ -106,12 +106,10 @@ interface SpoonRepository {
     suspend fun deleteCustomRecipe(recipeId: String): Unit = unsupported("custom recipes")
     suspend fun updateMealPreferenceSettings(settings: MealPreferenceSettings): Unit =
         unsupported("meal preferences")
-    suspend fun registerEmailAccount(email: String, password: String): Unit =
-        unsupported("email accounts")
     suspend fun signInWithEmail(email: String, password: String): Unit =
         unsupported("email accounts")
     suspend fun sendPasswordReset(email: String): Unit = unsupported("email accounts")
-    suspend fun signOutToAnonymous(): Unit = unsupported("email accounts")
+    suspend fun signOut(): Unit = unsupported("email accounts")
 }
 
 private val DEFAULT_ACCOUNT_STATE = MutableStateFlow<AccountState>(AccountState.Unavailable)

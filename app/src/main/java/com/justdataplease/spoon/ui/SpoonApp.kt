@@ -292,7 +292,6 @@ fun SpoonApp(
                             viewModel.clearAccountError()
                             morePage = MorePage.HUB
                         },
-                        onCreateOrLinkAccount = viewModel::createOrLinkAccount,
                         onSignIn = viewModel::signInWithEmail,
                         onResetPassword = viewModel::resetPassword,
                         onSignOut = viewModel::signOut,

@@ -49,6 +49,7 @@ KNOWN_CATEGORIES = {
     "street_food",
     "pasta_rice",
     "dessert",
+    "drinks",
     "other",
 }
 

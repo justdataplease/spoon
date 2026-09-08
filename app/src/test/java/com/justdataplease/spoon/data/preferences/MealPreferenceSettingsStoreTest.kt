@@ -15,10 +15,11 @@ import org.junit.Test
 
 class MealPreferenceSettingsStoreTest {
     @Test
-    fun `defaults include every recipe`() = runTest {
+    fun `defaults exclude the catch all category`() = runTest {
         val store = newStore()
 
         assertEquals(MealPreferenceSettings(), store.settings.first())
+        assertEquals(setOf("other"), store.settings.first().excludedCategories)
     }
 
     @Test
@@ -66,7 +67,7 @@ class MealPreferenceSettingsStoreTest {
     }
 
     @Test
-    fun `clear restores include everything defaults`() = runTest {
+    fun `clear restores the catch all exclusion default`() = runTest {
         val store = newStore()
         store.update {
             MealPreferenceSettings(
@@ -274,7 +275,10 @@ class MealPreferenceSettingsStoreTest {
                 updatedAtEpochMillis = 100L,
             ),
         )
-        val pendingClear = MealPreferenceSettings(updatedAtEpochMillis = 101L)
+        val pendingClear = MealPreferenceSettings(
+            excludedCategories = emptySet(),
+            updatedAtEpochMillis = 101L,
+        )
 
         store.replacePendingForNextOwner(pendingClear)
 

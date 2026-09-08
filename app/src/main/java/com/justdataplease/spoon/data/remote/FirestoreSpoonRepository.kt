@@ -4,7 +4,6 @@ import android.util.Log
 import com.google.android.gms.tasks.Task
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseAuthException
-import com.google.firebase.auth.EmailAuthProvider
 import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.FirebaseNetworkException
 import com.google.firebase.FirebaseTooManyRequestsException
@@ -104,7 +103,6 @@ class FirestoreSpoonRepository internal constructor(
     private val preferenceStore: MealPreferenceSettingsStore? = null,
 ) : SpoonRepository {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val authMutex = Mutex()
     private val personalMutationMutex = Mutex()
     private val accountRefreshGate = AccountRefreshGate()
     private val authJobLock = Any()
@@ -112,7 +110,7 @@ class FirestoreSpoonRepository internal constructor(
     private val uid = MutableStateFlow(auth.currentUser?.uid)
     private val _accountState = MutableStateFlow(auth.currentUser.toAccountState())
     private val authHealth = MutableStateFlow<CloudComponentState>(
-        if (auth.currentUser == null) CloudComponentState.Pending else CloudComponentState.Ready,
+        CloudComponentState.Ready,
     )
     private val recipesHealth = MutableStateFlow<CloudComponentState>(CloudComponentState.Pending)
     private val mealPlansHealth = MutableStateFlow<CloudComponentState>(CloudComponentState.Pending)
@@ -152,8 +150,6 @@ class FirestoreSpoonRepository internal constructor(
     )
 
     @Volatile
-    private var authJob: Job? = null
-    @Volatile
     private var authRefreshJob: Job? = null
 
     override val backendState = combine(listOf(authHealth, recipesHealth) + ownerHealth) { states ->
@@ -179,9 +175,7 @@ class FirestoreSpoonRepository internal constructor(
     private val authListener = FirebaseAuth.AuthStateListener { firebaseAuth ->
         val user = firebaseAuth.currentUser
         publishAuthenticatedUser(user)
-        if (user == null) {
-            startAuthentication()
-        }
+        user?.let(::refreshCachedUser)
     }
 
     init {
@@ -189,7 +183,6 @@ class FirestoreSpoonRepository internal constructor(
         observeUserQueries()
         observeMealPreferenceQuery()
         auth.addAuthStateListener(authListener)
-        startAuthentication()
         auth.currentUser?.uid?.let { ownerUid ->
             _mealPlans.value.forEach { plan -> queueMealPlanBackup(ownerUid, plan) }
         }
@@ -310,6 +303,7 @@ class FirestoreSpoonRepository internal constructor(
                             if (uid.value == null) {
                                 locallyLoadedPreferenceOwner.value =
                                     LocallyLoadedPreferenceOwner(null)
+                                preferencesHealth.value = CloudComponentState.Ready
                             }
                         }
                         emit(null to null)
@@ -435,7 +429,6 @@ class FirestoreSpoonRepository internal constructor(
             } else if (cachedUser != null && uid.value != expectedUid) {
                 publishAuthenticatedUser(cachedUser)
             }
-            startAuthentication()
             locallyLoadedPreferenceOwner.first { ready ->
                 uid.value != expectedUid ||
                     (ready != null && ready.ownerUid == expectedUid)
@@ -569,7 +562,6 @@ class FirestoreSpoonRepository internal constructor(
                     _mealPreferenceSettings.value = stored
                     locallyLoadedPreferenceOwner.value = LocallyLoadedPreferenceOwner(null)
                 }
-                startAuthentication()
                 return
             }
             check(auth.currentUser?.uid == authenticatedUser.uid) {
@@ -619,7 +611,7 @@ class FirestoreSpoonRepository internal constructor(
             }
             if (uid.value != null) publishAuthenticatedUser(null)
             if (!storeOwnerlessMealPlan(stored)) continue
-            auth.currentUser?.let(::publishAuthenticatedUser) ?: startAuthentication()
+            auth.currentUser?.let(::publishAuthenticatedUser)
             return
         }
     }
@@ -896,22 +888,6 @@ class FirestoreSpoonRepository internal constructor(
         }
     }
 
-    override suspend fun registerEmailAccount(email: String, password: String) {
-        val normalizedEmail = requireAccountEmail(email)
-        requireAccountPassword(password)
-        runAccountOperation {
-            val currentUser = auth.currentUser ?: authenticateOnce()
-            if (!currentUser.isAnonymous) {
-                throw AccountOperationException(
-                    accountFailureForFirebaseCode("ERROR_EMAIL_ALREADY_IN_USE"),
-                )
-            }
-            val credential = EmailAuthProvider.getCredential(normalizedEmail, password)
-            val linkedUser = checkNotNull(currentUser.linkWithCredential(credential).await().user)
-            publishAuthenticatedUser(linkedUser)
-        }
-    }
-
     override suspend fun signInWithEmail(email: String, password: String) {
         val normalizedEmail = requireAccountEmail(email)
         requireAccountPassword(password)
@@ -930,22 +906,9 @@ class FirestoreSpoonRepository internal constructor(
         }
     }
 
-    override suspend fun signOutToAnonymous() {
+    override suspend fun signOut() {
         auth.signOut()
         publishAuthenticatedUser(null)
-        startAuthentication()
-    }
-
-    private fun startAuthentication() {
-        auth.currentUser?.let { user ->
-            publishAuthenticatedUser(user)
-            refreshCachedUser(user)
-            return
-        }
-        synchronized(authJobLock) {
-            if (authJob?.isActive == true) return
-            authJob = scope.launch { authenticateWithRetry() }
-        }
     }
 
     /**
@@ -964,35 +927,6 @@ class FirestoreSpoonRepository internal constructor(
                             ?.let(::publishAuthenticatedUser)
                     }
             }
-        }
-    }
-
-    private suspend fun authenticateWithRetry() {
-        var attempt = 0L
-        while (currentCoroutineContext().isActive && auth.currentUser == null) {
-            authHealth.value = CloudComponentState.Pending
-            val failure = tryAuthentication() ?: return
-            authHealth.value = CloudComponentState.Failed(failure)
-            if (failure.isRetryable == false) return
-            delay(retryDelayMillis(attempt++))
-        }
-    }
-
-    private suspend fun authenticateOnce() = withTimeout(AUTH_ATTEMPT_TIMEOUT_MILLIS) {
-        authMutex.withLock {
-            auth.currentUser ?: requireNotNull(auth.signInAnonymously().await().user)
-        }
-    }
-
-    private suspend fun tryAuthentication(): BackendFailure? {
-        return try {
-            val user = authenticateOnce()
-            publishAuthenticatedUser(user)
-            null
-        } catch (error: CancellationException) {
-            if (error is TimeoutCancellationException) classifyFirebaseFailure(error) else throw error
-        } catch (error: Exception) {
-            classifyFirebaseFailure(error)
         }
     }
 
@@ -1110,6 +1044,8 @@ class FirestoreSpoonRepository internal constructor(
                             fromCache = awaitingServer,
                             hasValues = snapshot.hasValues,
                         )
+                    } else if (uid.value == null && sourceUid == null) {
+                        health.value = CloudComponentState.Ready
                     }
                 }
             }
@@ -1188,14 +1124,13 @@ class FirestoreSpoonRepository internal constructor(
             if (uid.value != user.uid) publishAuthenticatedUser(user)
             return user.uid
         }
-        startAuthentication()
-        val state = authHealth.first { candidate ->
-            candidate is CloudComponentState.Ready || candidate is CloudComponentState.Failed
-        }
-        if (state is CloudComponentState.Failed) {
-            throw BackendUnavailableException(state.failure)
-        }
-        return requireNotNull(auth.currentUser?.uid ?: uid.value)
+        throw BackendUnavailableException(
+            BackendFailure(
+                kind = BackendFailureKind.AUTHENTICATION,
+                isRetryable = false,
+                message = "Sign in required",
+            ),
+        )
     }
 
     private suspend fun <T> withPersonalMutation(
@@ -1328,8 +1263,7 @@ class FirestoreSpoonRepository internal constructor(
             }
             uid.value = nextUid
             _accountState.value = user.toAccountState()
-            authHealth.value =
-                if (user == null) CloudComponentState.Pending else CloudComponentState.Ready
+            authHealth.value = CloudComponentState.Ready
         }
         nextUid?.let { ownerUid ->
             mealPlansToBackup.forEach { plan -> queueMealPlanBackup(ownerUid, plan) }
@@ -1401,7 +1335,6 @@ class FirestoreSpoonRepository internal constructor(
         private const val UPDATED_AT_FIELD = "updatedAtEpochMillis"
         private const val COMPLETED_AT_FIELD = "completedAtEpochMillis"
         private const val FIRESTORE_BATCH_LIMIT = 450
-        private const val AUTH_ATTEMPT_TIMEOUT_MILLIS = 20_000L
         private const val LOCAL_PLANNING_CACHE_WARMUP_TIMEOUT_MILLIS = 2_000L
         private const val PERSONAL_CACHE_WARMUP_TIMEOUT_MILLIS = 15_000L
         private const val MEAL_PLANS_COMPONENT = "mealPlans"
@@ -1573,7 +1506,7 @@ internal fun cookedMealDocument(
 )
 
 private fun FirebaseUser?.toAccountState(): AccountState = when {
-    this == null -> AccountState.Loading
+    this == null -> AccountState.SignedOut
     isAnonymous -> AccountState.Anonymous(uid)
     else -> AccountState.Email(
         uid = uid,

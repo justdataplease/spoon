@@ -48,13 +48,16 @@ class WeeklyPlanDefaultsTest {
     }
 
     @Test
-    fun `catalog categories include dessert and other without changing the weekly rhythm`() {
+    fun `catalog categories include dessert drinks and other without changing the weekly rhythm`() {
         assertEquals(MealCategory.DESSERT, MealCategory.fromKey("dessert"))
         assertEquals("Γλυκά", MealCategory.DESSERT.greekLabel)
         assertEquals(MealCategory.OTHER, MealCategory.fromKey("other"))
         assertEquals("Άλλο", MealCategory.OTHER.greekLabel)
+        assertEquals(MealCategory.DRINKS, MealCategory.fromKey("drinks"))
+        assertEquals("Ροφήματα", MealCategory.DRINKS.greekLabel)
         assertTrue(DayOfWeek.entries.map(WeeklyPlanDefaults::categoryFor).none {
-            it == MealCategory.DESSERT || it == MealCategory.OTHER
+            it == MealCategory.DESSERT || it == MealCategory.DRINKS ||
+                it == MealCategory.OTHER
         })
     }
 

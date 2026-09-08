@@ -207,10 +207,12 @@ _REVIEWED_MAIN_INGREDIENT_LABELS = {
 for _group, _labels in _REVIEWED_MAIN_INGREDIENT_LABELS.items():
     _CATEGORY_LABEL_MAP[_group].update(_labels)
 
-_TERMINAL_OTHER = {
+_TERMINAL_DRINKS = {
     "ροφημα", "ροφηματα", "ποτο", "ποτα", "κοκτέιλ", "cocktail", "cocktails", "smoothie",
-    "smoothies", "χυμοι", "μαρμελαδες", "σαλτσες", "ντιπ", "ψωμια", "ζυμες",
-    "rofima", "rofimata", "poto", "pota", "chymoi", "marmelades", "saltses",
+    "smoothies", "χυμοι", "rofima", "rofimata", "poto", "pota", "chymoi",
+}
+_TERMINAL_OTHER = {
+    "μαρμελαδες", "σαλτσες", "ντιπ", "ψωμια", "ζυμες", "marmelades", "saltses",
     "ntip", "psomia", "zymes",
 }
 _STREET_FORMATS = {
@@ -1411,6 +1413,7 @@ def _taxonomy(metadata: Mapping[str, Any], recipe: Mapping[str, Any]) -> tuple[l
         _normalized_label(value) for value in keyword_values
     }
     dessert_values = {_normalized_label(value) for value in _CATEGORY_LABEL_MAP["dessert"]}
+    drink_values = {_normalized_label(value) for value in _TERMINAL_DRINKS}
     other_values = {_normalized_label(value) for value in _TERMINAL_OTHER}
     street_values = {_normalized_label(value) for value in _STREET_FORMATS}
     explicit_keys = _category_matches(authoritative_values)
@@ -1418,7 +1421,7 @@ def _taxonomy(metadata: Mapping[str, Any], recipe: Mapping[str, Any]) -> tuple[l
     keyword_keys = _category_matches(keyword_values)
     authoritative_terminal = bool(
         authoritative_normalized
-        & (dessert_values | other_values | street_values)
+        & (dessert_values | drink_values | other_values | street_values)
     )
 
     # Structured recipe categories and page facets always outrank keywords.
@@ -1428,6 +1431,8 @@ def _taxonomy(metadata: Mapping[str, Any], recipe: Mapping[str, Any]) -> tuple[l
     # classify the record.
     if authoritative_normalized & dessert_values:
         primary = "dessert"
+    elif authoritative_normalized & drink_values:
+        primary = "drinks"
     elif authoritative_normalized & other_values:
         primary = "other"
     elif authoritative_normalized & street_values:
@@ -1438,6 +1443,8 @@ def _taxonomy(metadata: Mapping[str, Any], recipe: Mapping[str, Any]) -> tuple[l
         primary = ingredient_keys[0]
     elif keyword_normalized & dessert_values:
         primary = "dessert"
+    elif keyword_normalized & drink_values:
+        primary = "drinks"
     elif keyword_normalized & other_values:
         primary = "other"
     elif keyword_normalized & street_values:

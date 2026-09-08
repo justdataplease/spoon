@@ -25,13 +25,20 @@ class MealPreferenceFirestoreTest {
         assertEquals(settings, settings.normalizedForSync(123L))
         assertEquals(true, fields["favoritesOnly"])
         assertEquals(settings, MealPreferenceDocument(
+            excludedCategories = settings.excludedCategories.toList(),
             weekdayCategories = settings.weekdayCategories,
             sideWeekdayCategories = settings.sideWeekdayCategories,
             dessertWeekdayCategories = settings.dessertWeekdayCategories,
             favoritesOnly = true,
             updatedAtEpochMillis = 123L,
         ).toSettingsOrNull())
-        assertEquals(MealPreferenceSettings(updatedAtEpochMillis = 1L), MealPreferenceDocument(updatedAtEpochMillis = 1L).toSettingsOrNull())
+        assertEquals(
+            MealPreferenceSettings(
+                excludedCategories = emptySet(),
+                updatedAtEpochMillis = 1L,
+            ),
+            MealPreferenceDocument(updatedAtEpochMillis = 1L).toSettingsOrNull(),
+        )
         assertNull(MealPreferenceDocument(weekdayCategories = mapOf("FUNDAY" to "meat"), updatedAtEpochMillis = 1L).toSettingsOrNull())
         assertNull(MealPreferenceDocument(weekdayCategories = mapOf("MONDAY" to "invalid"), updatedAtEpochMillis = 1L).toSettingsOrNull())
     }

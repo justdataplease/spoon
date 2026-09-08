@@ -25,12 +25,13 @@ import kotlinx.coroutines.flow.map
 /**
  * Device-local meal preferences applied to recipe discovery and automatic planning.
  *
- * Empty sets intentionally mean "include everything". Diet labels are requirements
+ * The default excludes the catch-all "other" category. An explicitly stored empty set
+ * still means "include everything". Diet labels are requirements
  * (for example, selecting Vegan keeps only recipes carrying that label), while category
  * and ingredient terms are exclusions.
  */
 data class MealPreferenceSettings(
-    val excludedCategories: Set<String> = emptySet(),
+    val excludedCategories: Set<String> = DEFAULT_EXCLUDED_CATEGORIES,
     val veganOnly: Boolean = false,
     val excludedIngredientTerms: Set<String> = emptySet(),
     val updatedAtEpochMillis: Long = 0L,
@@ -40,10 +41,13 @@ data class MealPreferenceSettings(
     val favoritesOnly: Boolean = false,
 ) {
     fun hasActiveSelections(): Boolean =
-        excludedCategories.isNotEmpty() || veganOnly || excludedIngredientTerms.isNotEmpty() ||
+        excludedCategories != DEFAULT_EXCLUDED_CATEGORIES || veganOnly ||
+            excludedIngredientTerms.isNotEmpty() ||
             weekdayCategories.isNotEmpty() || sideWeekdayCategories.isNotEmpty() ||
             dessertWeekdayCategories.isNotEmpty() || favoritesOnly
 }
+
+internal val DEFAULT_EXCLUDED_CATEGORIES = setOf(MealCategory.OTHER.key)
 
 internal const val MAX_MEAL_PREFERENCE_EPOCH_MILLIS = 253_402_300_799_999L
 
@@ -211,7 +215,9 @@ class MealPreferenceSettingsStore internal constructor(
             longPreferencesKey("pending_updated_at_epoch_millis")
 
         fun decode(preferences: Preferences): MealPreferenceSettings = MealPreferenceSettings(
-            excludedCategories = preferences[EXCLUDED_CATEGORIES].orEmpty().cleanedPreferenceValues(),
+            excludedCategories = preferences[EXCLUDED_CATEGORIES]
+                ?.cleanedPreferenceValues()
+                ?: DEFAULT_EXCLUDED_CATEGORIES,
             veganOnly = preferences[VEGAN_ONLY] ?: false,
             weekdayCategories = preferences[WEEKDAY_CATEGORIES].orEmpty().decodedWeekdayCategories(),
             dessertWeekdayCategories = preferences[DESSERT_WEEKDAY_CATEGORIES].orEmpty().decodedWeekdayCategories(),
@@ -244,8 +250,8 @@ class MealPreferenceSettingsStore internal constructor(
             if (preferences[HAS_PENDING_SETTINGS] != true) return null
             return MealPreferenceSettings(
                 excludedCategories = preferences[PENDING_EXCLUDED_CATEGORIES]
-                    .orEmpty()
-                    .cleanedPreferenceValues(),
+                    ?.cleanedPreferenceValues()
+                    ?: DEFAULT_EXCLUDED_CATEGORIES,
                 veganOnly = preferences[PENDING_VEGAN_ONLY] ?: false,
                 weekdayCategories = preferences[PENDING_WEEKDAY_CATEGORIES].orEmpty().decodedWeekdayCategories(),
                 dessertWeekdayCategories = preferences[PENDING_DESSERT_WEEKDAY_CATEGORIES].orEmpty().decodedWeekdayCategories(),

@@ -68,6 +68,7 @@ DIET_LABELS = {
 }
 CATEGORY_LABELS = {
     "dessert": "Γλυκά",
+    "drinks": "Ροφήματα",
     "other": "Άλλο",
     "legumes": "Όσπρια",
     "fish": "Ψάρι",

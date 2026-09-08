@@ -54,6 +54,7 @@ import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.justdataplease.spoon.ui.components.CategoryPill
+import com.justdataplease.spoon.ui.components.PublisherBadge
 import com.justdataplease.spoon.ui.components.RecipeArtwork
 import com.justdataplease.spoon.ui.components.formatRating10
 import com.justdataplease.spoon.ui.model.EaseUi
@@ -244,10 +245,16 @@ private fun HeroCircleButton(
 @Composable
 private fun RecipeHeading(recipe: RecipeDetailUi) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        CategoryPill(
-            emoji = recipe.category.emoji,
-            label = recipe.categoryLabel.ifBlank { recipe.category.label },
-        )
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            CategoryPill(
+                emoji = recipe.category.emoji,
+                label = recipe.categoryLabel.ifBlank { recipe.category.label },
+            )
+            PublisherBadge(sourceName = recipe.sourceName, sourceUrl = recipe.sourceUrl)
+        }
         Text(recipe.title, style = MaterialTheme.typography.displaySmall)
         val attribution = buildList {
             recipe.authorName.takeIf(String::isNotBlank)?.let { add(it) }

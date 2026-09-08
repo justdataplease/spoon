@@ -26,13 +26,14 @@ _DURATION_RE = re.compile(
 # Recipe titles and free-form ingredient text are deliberately excluded: a
 # substring classifier made "Τρουφάκια" match the old "φακ" lentil stem.
 #
-# Precedence is encoded in the returned list: terminal dessert/non-meal source
+# Precedence is encoded in the returned list: terminal dessert/drink/non-meal source
 # categories win, followed by the publisher's exact sandwich/finger-food format,
 # then the exact recipe category and official main-ingredient facets. The broad
 # Snack bucket is never enough on its own: it also contains sweet bars, cereal,
 # and breakfast recipes.
 _CATEGORY_KEY_PRECEDENCE = (
     "dessert",
+    "drinks",
     "fish",
     "seafood",
     "legumes",
@@ -95,15 +96,18 @@ _SOURCE_CATEGORY_KEYS = {
 # These exact source categories describe content that must never be proposed as
 # one of the app's main-meal groups, even if an official ingredient facet is
 # present (for example rice pudding or a vegetable-based cake).
-_TERMINAL_OTHER_SOURCE_CATEGORIES = {
-    "psomia", "zymes", "ntip-saltses", "marinades", "i-vasis-tis-maghirikis",
-    "marmelades",
+_TERMINAL_DRINK_SOURCE_CATEGORIES = {
     "rofimata-pota",
     "smoothies",
     "ximi",
     "detox",
     "cocktails",
     "mi-alkooloukha-pota",
+}
+
+_TERMINAL_OTHER_SOURCE_CATEGORIES = {
+    "psomia", "zymes", "ntip-saltses", "marinades", "i-vasis-tis-maghirikis",
+    "marmelades",
 }
 
 _SOURCE_FORMAT_FALLBACK_KEYS = {
@@ -144,6 +148,18 @@ _EXACT_METADATA_ALIASES = {
     "desserts": "dessert",
     "γλυκο": "dessert",
     "γλυκα": "dessert",
+    "drink": "drinks",
+    "drinks": "drinks",
+    "beverage": "drinks",
+    "beverages": "drinks",
+    "ποτο": "drinks",
+    "ποτα": "drinks",
+    "ροφημα": "drinks",
+    "ροφηματα": "drinks",
+    "cocktail": "drinks",
+    "cocktails": "drinks",
+    "smoothie": "drinks",
+    "smoothies": "drinks",
     "fish": "fish",
     "ψαρι": "fish",
     "ψαρια": "fish",
@@ -184,6 +200,7 @@ _EXACT_METADATA_ALIASES = {
 
 _CANONICAL_CATEGORY_ALIASES = {
     "dessert": "dessert",
+    "drinks": "drinks",
     "other": "other",
     "legumes": "legumes",
     "poultry": "poultry",
@@ -247,8 +264,9 @@ def classify_official_category_keys(
 ) -> list[str]:
     """Classify using exact official recipe/facet taxonomy metadata only.
 
-    The source recipe category has the strongest authority. Explicit dessert,
-    drink, bread, fruit, and condiment categories are terminal other values so
+    The source recipe category has the strongest authority. Explicit dessert
+    and drink categories are terminal canonical values. Bread, fruit, and
+    condiment categories are terminal other values so
     an ingredient facet cannot turn them into main meals. For a generic source
     category, an official sandwich/finger-food value is authoritative for the
     Street Food planner group. Exact recipe and main-ingredient categories are
@@ -269,6 +287,8 @@ def classify_official_category_keys(
         or _DESSERT_CATEGORY_ID in meal_type_ids
     ):
         return ["dessert"]
+    if slug in _TERMINAL_DRINK_SOURCE_CATEGORIES:
+        return ["drinks"]
     if slug in _TERMINAL_OTHER_SOURCE_CATEGORIES:
         return ["other"]
 

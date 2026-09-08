@@ -70,15 +70,12 @@ class UnavailableSpoonRepository(
 
     override suspend fun deleteCustomRecipe(recipeId: String): Nothing = unavailable()
 
-    override suspend fun registerEmailAccount(email: String, password: String): Nothing =
-        accountUnavailable()
-
     override suspend fun signInWithEmail(email: String, password: String): Nothing =
         accountUnavailable()
 
     override suspend fun sendPasswordReset(email: String): Nothing = accountUnavailable()
 
-    override suspend fun signOutToAnonymous(): Nothing = accountUnavailable()
+    override suspend fun signOut(): Nothing = accountUnavailable()
 
     private fun unavailable(): Nothing = throw BackendUnavailableException(failure)
 

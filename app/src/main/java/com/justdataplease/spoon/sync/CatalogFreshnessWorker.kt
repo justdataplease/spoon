@@ -42,12 +42,7 @@ class CatalogFreshnessWorker(
             val app = requireNotNull(firebaseAppOrNull(applicationContext)) {
                 "Firebase could not be initialized"
             }
-            val auth = FirebaseAuth.getInstance(app)
-            if (auth.currentUser == null) {
-                requireNotNull(auth.signInAnonymously().await().user) {
-                    "Anonymous Firebase sign-in returned no user"
-                }
-            }
+            if (FirebaseAuth.getInstance(app).currentUser == null) return Result.success()
 
             val statusDocument = FirebaseFirestore.getInstance(app)
                 .collection(CATALOG_COLLECTION)

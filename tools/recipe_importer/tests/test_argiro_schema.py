@@ -675,10 +675,15 @@ def test_explicit_family_wins_and_nested_poultry_refines_broad_meat(
 
 
 @pytest.mark.parametrize(
-    "recipe_slug",
-    ["rofimata-pota", "ntip-saltses", "sinodeutika", "psomi-zymes"],
+    ("recipe_slug", "expected"),
+    [
+        ("rofimata-pota", "drinks"),
+        ("ntip-saltses", "other"),
+        ("sinodeutika", "other"),
+        ("psomi-zymes", "other"),
+    ],
 )
-def test_explicit_nonmeal_families_are_terminal_over_ingredients(recipe_slug):
+def test_explicit_nonmeal_families_are_terminal_over_ingredients(recipe_slug, expected):
     page = (
         SYNTHETIC_PAGE
         .replace('"recipeCategory":["Όσπρια"]', '"recipeCategory":["Άλλο"]')
@@ -696,8 +701,8 @@ def test_explicit_nonmeal_families_are_terminal_over_ingredients(recipe_slug):
         page,
         source_url="https://www.argiro.gr/recipe/synthetiki-fasolada/",
     )
-    assert record["category"] == "other"
-    assert record["categoryKeys"][:3] == ["other", "poultry", "meat"]
+    assert record["category"] == expected
+    assert record["categoryKeys"][:3] == [expected, "poultry", "meat"]
 
 
 @pytest.mark.parametrize("recipe_slug", ["santouits", "fingerfood", "finger-food"])

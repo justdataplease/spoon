@@ -53,6 +53,7 @@ class CustomRecipeModelsTest {
             "vegetarian" to MealCategory.VEGETABLES.key,
             "dirty" to MealCategory.STREET_FOOD.key,
             "dessert" to MealCategory.DESSERT.key,
+            "drinks" to MealCategory.DRINKS.key,
             "other" to MealCategory.OTHER.key,
         )
 

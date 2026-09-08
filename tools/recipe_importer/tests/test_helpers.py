@@ -152,7 +152,7 @@ def test_unknown_taxonomy_fails_closed_and_exact_format_wins_after_terminal_guar
             "ingredient": [{"id": "139", "title": "Φακές"}],
             "meal_type": [{"id": "92", "title": "Finger food"}],
         },
-    ) == ["other"]
+    ) == ["drinks"]
     assert classify_official_category_keys(
         {"id": 34, "slug": "glika"},
         {"meal_type": [{"id": "92", "title": "Finger food"}]},
@@ -162,6 +162,7 @@ def test_unknown_taxonomy_fails_closed_and_exact_format_wins_after_terminal_guar
 def test_canonical_category_uses_first_supported_alias():
     assert canonical_category(["other", "dirty", "poultry"]) == "other"
     assert canonical_category(["dessert"]) == "dessert"
+    assert canonical_category(["drinks"]) == "drinks"
     assert canonical_category(["seafood"]) == "fish"
     assert canonical_category(["pasta", "rice"]) == "pasta_rice"
     assert canonical_category(["other"]) == "other"

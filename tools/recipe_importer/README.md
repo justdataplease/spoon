@@ -483,6 +483,20 @@ the summary/detail projection hashes and sizes recomputed after a projection
 change. Preserve the original manifests and verify the original catalog and raw
 source hashes before refreshing those derived fields.
 
+Preview a taxonomy-only refresh of the three complete source artifacts, then
+commit it after reviewing the changed recipe counts and hashes:
+
+```powershell
+python -m tools.recipe_importer.refresh_taxonomy_artifacts
+python -m tools.recipe_importer.refresh_taxonomy_artifacts --commit
+python tools/recipe_importer/build_local_catalog.py
+```
+
+The refresh command revalidates each existing artifact and manifest before it
+changes anything. It derives only the canonical category fields and display tags
+from the preserved publisher payload, verifies that the raw payload hash is
+unchanged, and atomically replaces the JSONL and manifest files in commit mode.
+
 To repair existing Firestore records, first produce a read-only plan:
 
 ```powershell

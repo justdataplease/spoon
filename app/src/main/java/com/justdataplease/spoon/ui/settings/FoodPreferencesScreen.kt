@@ -141,7 +141,7 @@ fun FoodPreferencesScreen(
                             )
                         }
                         Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                            Text("Όλα περιλαμβάνονται αρχικά", fontWeight = FontWeight.Bold)
+                            Text("Το «Άλλο» εξαιρείται αρχικά", fontWeight = FontWeight.Bold)
                             Text(
                                 "Οι αποκλεισμοί ισχύουν στην Εξερεύνηση, στη Συλλογή και στις νέες προτάσεις εβδομάδας.",
                                 style = MaterialTheme.typography.bodyMedium,

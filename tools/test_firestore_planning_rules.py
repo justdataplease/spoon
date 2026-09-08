@@ -128,6 +128,17 @@ class PlanningRulesTest(unittest.TestCase):
         self.assertEqual(200, self.write("preferences/meal", self.preferences))
         self.assertEqual(403, self.write("preferences/meal", self.preferences, "different-owner"))
 
+    def test_drinks_category_is_valid_for_preferences_and_plans(self):
+        self.assertEqual(200, self.write(
+            "preferences/meal",
+            self.preferences | {"excludedCategories": ["drinks"]},
+        ))
+        drinks_plan = self.plan | {
+            "category": "drinks",
+            "filters": self.plan["filters"] | {"category": "drinks"},
+        }
+        self.assertEqual(200, self.write("mealPlans/2026-09-07", drinks_plan))
+
     def test_reject_invalid_weekdays_categories_and_source_types(self):
         for update in (
             {"weekdayCategories": {"FUNDAY": "meat"}},

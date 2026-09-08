@@ -41,6 +41,7 @@ service cloud.firestore {
         'street_food',
         'pasta_rice',
         'dessert',
+        'drinks',
         'other',
         'any'
       ];
@@ -101,7 +102,7 @@ service cloud.firestore {
         validWeekdayCategories(data.get('dessertWeekdayCategories', {})) &&
         data.get('favoritesOnly', false) is bool &&
         data.excludedCategories is list &&
-        data.excludedCategories.size() <= 9 &&
+        data.excludedCategories.size() <= 10 &&
         data.excludedCategories.size() == data.excludedCategories.toSet().size() &&
         data.excludedCategories.hasOnly([
           'legumes',
@@ -112,6 +113,7 @@ service cloud.firestore {
           'street_food',
           'pasta_rice',
           'dessert',
+          'drinks',
           'other'
         ]) &&
         data.veganOnly is bool &&

@@ -154,10 +154,14 @@ class UiEaseMappingTest {
     }
 
     @Test
-    fun `authoritative dessert and other categories are selectable in Greek`() {
+    fun `authoritative dessert drinks and other categories are selectable in Greek`() {
         assertEquals(
             CategoryUi("dessert", "Γλυκά", "🍰"),
             AvailableCategories.single { it.key == "dessert" },
+        )
+        assertEquals(
+            CategoryUi("drinks", "Ροφήματα", "🥤"),
+            AvailableCategories.single { it.key == "drinks" },
         )
         assertEquals(
             CategoryUi("other", "Άλλο", "🍽️"),
@@ -166,6 +170,10 @@ class UiEaseMappingTest {
         assertEquals("Γλυκά", DayPlanUi(
             date = LocalDate.of(2026, 9, 3),
             categoryKey = "dessert",
+        ).category.label)
+        assertEquals("Ροφήματα", DayPlanUi(
+            date = LocalDate.of(2026, 9, 3),
+            categoryKey = "drinks",
         ).category.label)
         assertEquals("Άλλο", DayPlanUi(
             date = LocalDate.of(2026, 9, 3),

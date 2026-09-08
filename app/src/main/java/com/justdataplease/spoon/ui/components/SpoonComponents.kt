@@ -53,6 +53,7 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 internal val GreekLocale = Locale.forLanguageTag("el-GR")
+internal val RecipeBadgeHeight = 34.dp
 
 fun LocalDate.greekDayLabel(): String =
     format(DateTimeFormatter.ofPattern("EEEE", GreekLocale)).replaceFirstChar { it.titlecase(GreekLocale) }
@@ -108,16 +109,17 @@ fun GradientHeroCard(
 @Composable
 fun CategoryPill(emoji: String, label: String, modifier: Modifier = Modifier) {
     Surface(
-        modifier = modifier,
+        modifier = modifier.height(RecipeBadgeHeight),
         color = MaterialTheme.colorScheme.secondaryContainer,
         contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
         shape = CircleShape,
     ) {
-        Text(
-            text = "$emoji  $label",
-            style = MaterialTheme.typography.labelLarge,
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
-        )
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(text = "$emoji  $label", style = MaterialTheme.typography.labelLarge)
+        }
     }
 }
 

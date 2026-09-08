@@ -93,12 +93,14 @@ _CATEGORY_KEY_PRECEDENCE = (
 _TERMINAL_DESSERT_CATEGORY_SLUGS = {
     "glyka", "glika", "gliko", "epidorpia", "keik", "tourtes",
 }
+_TERMINAL_DRINK_CATEGORY_SLUGS = {"rofimata-pota"}
 _TERMINAL_OTHER_CATEGORY_SLUGS = {
-    "rofimata-pota", "ntip-saltses", "sinodeutika", "psomi-zymes",
+    "ntip-saltses", "sinodeutika", "psomi-zymes",
 }
 _STREET_FORMAT_CATEGORY_SLUGS = {"santouits", "fingerfood", "finger-food"}
 _CATEGORY_LABELS_EXACT = {
     "dessert": {"γλυκα", "γλυκο", "επιδορπια", "dessert"},
+    "drinks": {"ροφηματα", "ροφημα", "ποτα", "ποτο", "κοκτειλ", "drinks", "cocktails"},
     "legumes": {"οσπρια", "legumes"},
     "fish": {"ψαρια", "ψαρι", "θαλασσινα", "fish"},
     "meat": {"κρεας", "μοσχαρι", "χοιρινο", "αρνι", "κατσικι", "meat"},
@@ -1222,6 +1224,10 @@ def _taxonomy(metadata: Mapping[str, Any], recipe: Mapping[str, Any]):
         bool(category_slugs & _TERMINAL_DESSERT_CATEGORY_SLUGS)
         or bool(exact_categories & _CATEGORY_LABELS_EXACT["dessert"])
     )
+    drinks = (
+        bool(category_slugs & _TERMINAL_DRINK_CATEGORY_SLUGS)
+        or bool(exact_categories & _CATEGORY_LABELS_EXACT["drinks"])
+    )
     non_meal = bool(category_slugs & _TERMINAL_OTHER_CATEGORY_SLUGS)
     street_format = bool(category_slugs & _STREET_FORMAT_CATEGORY_SLUGS)
     nested_poultry = any(
@@ -1232,6 +1238,8 @@ def _taxonomy(metadata: Mapping[str, Any], recipe: Mapping[str, Any]):
     )
     if dessert:
         keys = ordered_unique("dessert", recipe_keys, ingredient_keys)
+    elif drinks:
+        keys = ordered_unique("drinks", recipe_keys, ingredient_keys)
     elif non_meal:
         keys = ordered_unique("other", recipe_keys, ingredient_keys)
     elif street_format:

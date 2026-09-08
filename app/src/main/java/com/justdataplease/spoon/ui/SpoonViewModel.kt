@@ -966,12 +966,6 @@ class SpoonViewModel @Inject constructor(
         message.value = null
     }
 
-    fun createOrLinkAccount(email: String, password: String) {
-        launchAccountOperation("Ο λογαριασμός σου κατοχυρώθηκε και τα δεδομένα σου είναι ασφαλή.") {
-            mealPlanner.registerEmailAccount(email, password)
-        }
-    }
-
     fun signInWithEmail(email: String, password: String) {
         launchAccountOperation("Συνδέθηκες στον λογαριασμό σου.") {
             mealPlanner.signInWithEmail(email, password)
@@ -985,8 +979,8 @@ class SpoonViewModel @Inject constructor(
     }
 
     fun signOut() {
-        launchAccountOperation("Αποσυνδέθηκες. Συνεχίζεις με προσωρινό λογαριασμό.") {
-            mealPlanner.signOutToAnonymous()
+        launchAccountOperation("Αποσυνδέθηκες.") {
+            mealPlanner.signOut()
         }
     }
 
@@ -1163,6 +1157,7 @@ private fun AccountState.ownerUidOrNull(): String? = when (this) {
     is AccountState.Anonymous -> uid
     is AccountState.Email -> uid
     AccountState.Loading,
+    AccountState.SignedOut,
     AccountState.Unavailable,
     -> null
 }
@@ -1270,7 +1265,9 @@ private fun AccountState.toUi(operation: AccountOperationStatus): AccountUiState
         errorMessage = operation.errorMessage,
     )
 
-    AccountState.Unavailable -> AccountUiState(
+    AccountState.SignedOut,
+    AccountState.Unavailable,
+    -> AccountUiState(
         isSignedIn = false,
         isAnonymous = false,
         isBusy = operation.busy,

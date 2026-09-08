@@ -16,6 +16,7 @@ enum class MealCategory(
     STREET_FOOD("street_food", "Βρώμικο"),
     PASTA_RICE("pasta_rice", "Ζυμαρικά & ρύζι"),
     DESSERT("dessert", "Γλυκά"),
+    DRINKS("drinks", "Ροφήματα"),
     OTHER("other", "Άλλο"),
     ANY("any", "Όλα"),
     ;

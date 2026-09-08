@@ -140,7 +140,16 @@ class CatalogContractDeviceTest {
                     else setOf(label.normalizedCatalogToken())
                 val expected = tokens.flatMap { indexes.getValue(group)[it].orEmpty() }.toSet()
                 assertTrue("$group/$label has no source recipes", expected.isNotEmpty())
-                assertIds("$group/$label", expected, sqlIds(CatalogSqlBuilder.forExplore(criteria(label))))
+                assertIds(
+                    "$group/$label",
+                    expected,
+                    sqlIds(
+                        CatalogSqlBuilder.forExplore(
+                            criteria(label),
+                            MealPreferenceSettings(excludedCategories = emptySet()),
+                        ),
+                    ),
+                )
             }
         }
     }
@@ -168,7 +177,7 @@ class CatalogContractDeviceTest {
         }
         val before = repository.mealPlans.first()
         val history = repository.cookedHistory.first()
-        assertEquals(9, history.size)
+        assertEquals(10, history.size)
         repeat(12) { page -> catalog.queryRecipes(ExploreCriteria(), 100, page * 100, MealPreferenceSettings()) }
         assertTrue(catalog.cachedRecipes.value.size <= 256)
         val reopened = LocalSpoonRepository(preferences, json, BundledRecipeCatalog(context, json))
@@ -276,7 +285,15 @@ class CatalogContractDeviceTest {
         replacement.ensureReady()
         assertEquals(expected, installed.length())
         assertEquals("keep", sentinel.getString("saved", null))
-        assertEquals(20861, replacement.queryRecipes(ExploreCriteria(), 1, 0, MealPreferenceSettings()).totalCount)
+        assertEquals(
+            20861,
+            replacement.queryRecipes(
+                ExploreCriteria(),
+                1,
+                0,
+                MealPreferenceSettings(excludedCategories = emptySet()),
+            ).totalCount,
+        )
     }
 
     private fun only(category: MealCategory) = MealPreferenceSettings(excludedCategories = MealCategory.entries.filterNot { it == MealCategory.ANY || it == category }.map(MealCategory::key).toSet())

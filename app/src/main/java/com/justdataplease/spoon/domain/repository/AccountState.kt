@@ -3,6 +3,7 @@ package com.justdataplease.spoon.domain.repository
 /** Authentication identity exposed without leaking Firebase types into the UI/domain. */
 sealed interface AccountState {
     data object Loading : AccountState
+    data object SignedOut : AccountState
     data class Anonymous(val uid: String) : AccountState
     data class Email(
         val uid: String,

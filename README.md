@@ -61,12 +61,12 @@ data.
 - The complete 20,861-recipe Greek catalog works offline from indexed local
   SQLite. Explore loads 24 rows at a time, so opening and filtering the catalog
   does not download every recipe or issue Firestore recipe reads.
-- Anonymous Firebase Authentication plus optional email/password account linking,
-  sign-in, sign-out, and password reset. Linking upgrades the same UID so the
-  owner's plans, favorites, history, notes, shopping list, and custom recipes remain
-  attached to the account and sync across phones. Account metadata checks are
-  throttled to once per 15 seconds; failed connections retry after 5, 10, 20, then
-  30 seconds. Live personal-data listeners and queued saves remain immediate.
+- Sign-in-only Firebase Authentication with email/password, sign-out, and password
+  reset. The app does not register users or create anonymous Firebase accounts.
+  A project administrator provisions accounts, and the owner's plans, favorites,
+  history, notes, shopping list, and custom recipes then sync across phones.
+  Account metadata checks are throttled to once per 15 seconds. Live personal-data
+  listeners and queued saves remain immediate.
 
 Strict filters are never silently relaxed. If no recipe matches a valid request,
 the day is saved as unavailable, keeping its category and filters for the next
@@ -169,19 +169,26 @@ per-app “install unknown apps” prompt.
 
 The public catalog remains available offline regardless of Firebase state.
 Without `app/google-services.json`, account backup and cross-phone sync are
-unavailable. With a valid Firebase configuration, queued personal changes sync
-automatically after connectivity returns.
+unavailable. With a valid Firebase configuration and an administrator-provisioned
+account, queued personal changes sync automatically after connectivity returns.
 
 ## Firebase configuration
 
-Use the dedicated Firebase Android app `com.spoon.app` in project
-`spoontheplanner`. Do not copy another application's `google-services.json`:
-the package and Firebase app registration must match. Keep the downloaded file at
-`app/google-services.json`; that path is ignored by Git.
+For your own distribution, create a Firebase project and register an Android app
+with package `com.spoon.app`. Download that project's `google-services.json` to
+`app/google-services.json`; the path is ignored by Git. This file contains public,
+project-specific Firebase client configuration. Never place a service-account JSON
+key or other administrator credential in the repository or APK.
+
+The upstream maintainer uses project `spoontheplanner`. Forks and independent
+distributions should use their own Firebase project and configuration so account,
+quota, billing, rules, and data ownership remain under their control.
 
 Firebase setup requires:
 
-1. Anonymous and Email/Password sign-in enabled in Firebase Authentication.
+1. Enable Email/Password sign-in and leave Anonymous sign-in disabled in Firebase
+   Authentication. In Authentication Settings, disable end-user sign-up. Provision
+   each allowed user from the Firebase console or a trusted Admin SDK environment.
 2. A Firestore database in the selected European location.
 3. The checked-in rules and indexes deployed:
 
@@ -345,8 +352,9 @@ and hashes, build the optimized release, and distribute a new `dist/spoon.apk`.
 
 ## Privacy and operating notes
 
-- The app contains no advertising profile. Anonymous Firebase IDs exist only to
-  isolate each user's data before an optional email account is linked.
+- The app contains no advertising profile and creates no anonymous Firebase
+  accounts. Personal cloud data is available only after an administrator-provisioned
+  user signs in.
 - Personal changes are accepted offline through Firestore's persistent local
   cache and synchronize/backup on reconnect. Public recipe text and metadata are
   always served from the bundled SQLite database.

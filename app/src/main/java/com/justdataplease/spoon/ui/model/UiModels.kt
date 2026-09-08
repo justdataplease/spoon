@@ -29,6 +29,7 @@ val AvailableCategories = listOf(
     CategoryUi("vegetarian", "Λαχανικά", "🥬"),
     CategoryUi("dirty", "Βρώμικο", "🍔"),
     CategoryUi("dessert", "Γλυκά", "🍰"),
+    CategoryUi("drinks", "Ροφήματα", "🥤"),
     CategoryUi("other", "Άλλο", "🍽️"),
 )
 

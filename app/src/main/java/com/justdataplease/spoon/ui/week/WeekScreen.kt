@@ -65,6 +65,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.justdataplease.spoon.ui.components.CategoryPill
+import com.justdataplease.spoon.ui.components.PublisherBadge
 import com.justdataplease.spoon.ui.components.DayDateHeader
 import com.justdataplease.spoon.ui.components.EasePill
 import com.justdataplease.spoon.ui.components.EmptyRecipeCard
@@ -337,7 +338,14 @@ internal fun DayRecipeCard(
                 )
                 Column(modifier = Modifier.weight(1f)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) { CategoryPill(plan.category.emoji, plan.category.label) }
+                        Row(
+                            modifier = Modifier.weight(1f),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            CategoryPill(plan.category.emoji, plan.category.label)
+                            PublisherBadge(sourceName = plan.sourceName, sourceUrl = plan.sourceUrl)
+                        }
                         if (onOpenMenu != null) {
                             IconButton(onClick = onOpenMenu) {
                                 Icon(Icons.Outlined.RestaurantMenu, contentDescription = "Πλήρες μενού: κυρίως, συνοδευτικό και γλυκό")

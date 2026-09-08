@@ -65,8 +65,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.justdataplease.spoon.ui.components.GradientHeroCard
+import com.justdataplease.spoon.ui.components.CategoryPill
 import com.justdataplease.spoon.ui.components.MAX_RATING_THRESHOLD
 import com.justdataplease.spoon.ui.components.ProviderLabelKind
+import com.justdataplease.spoon.ui.components.PublisherBadge
 import com.justdataplease.spoon.ui.components.RecipeArtwork
 import com.justdataplease.spoon.ui.components.formatRating10
 import com.justdataplease.spoon.ui.components.greekProviderLabel
@@ -290,11 +292,19 @@ private fun ExploreRecipeCard(
                         )
                     }
                 }
-                Text(
-                    "${recipe.categoryEmoji} ${recipe.categoryLabel.ifBlank { "Άλλη κατηγορία" }}",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.primary,
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    CategoryPill(
+                        emoji = recipe.categoryEmoji,
+                        label = recipe.categoryLabel.ifBlank { "Άλλη κατηγορία" },
+                    )
+                    PublisherBadge(
+                        sourceKey = recipe.sourceKey,
+                        sourceName = recipe.sourceName,
+                    )
+                }
                 recipe.sourceName.ifBlank { recipe.sourceKey }.takeIf(String::isNotBlank)?.let { source ->
                     Text(
                         "Από $source",

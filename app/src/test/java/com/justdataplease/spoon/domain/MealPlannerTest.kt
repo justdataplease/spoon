@@ -983,7 +983,8 @@ class MealPlannerTest {
         val side = Recipe(id = "side", title = "Side", category = "poultry", prepMinutes = 10)
         val dessert = Recipe(id = "dessert", title = "Dessert", category = "other", prepMinutes = 10)
         val repository = FakeRepository(initialRecipes = listOf(main, side, dessert),
-            initialPreferences = MealPreferenceSettings(sideWeekdayCategories = mapOf("MONDAY" to "poultry"),
+            initialPreferences = MealPreferenceSettings(excludedCategories = emptySet(),
+                sideWeekdayCategories = mapOf("MONDAY" to "poultry"),
                 dessertWeekdayCategories = mapOf("MONDAY" to "other")))
         val planner = MealPlanner(repository, RecipeSelector())
         planner.reroll(monday, RecipeFilters(category = "legumes", maxPrepMinutes = 20))

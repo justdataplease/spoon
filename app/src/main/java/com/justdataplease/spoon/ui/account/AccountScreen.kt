@@ -21,12 +21,10 @@ import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Email
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Person
-import androidx.compose.material.icons.outlined.PersonAdd
 import androidx.compose.material.icons.outlined.RestartAlt
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -52,7 +50,6 @@ import androidx.compose.ui.unit.dp
 fun AccountScreen(
     state: AccountUiState,
     onBack: () -> Unit,
-    onCreateOrLinkAccount: (email: String, password: String) -> Unit,
     onSignIn: (email: String, password: String) -> Unit,
     onResetPassword: (email: String) -> Unit,
     onSignOut: () -> Unit,
@@ -60,17 +57,15 @@ fun AccountScreen(
     modifier: Modifier = Modifier,
 ) {
     BackHandler(onBack = onBack)
-    var mode by rememberSaveable { mutableStateOf(AccountFormMode.CREATE) }
+    var mode by rememberSaveable { mutableStateOf(AccountFormMode.SIGN_IN) }
     var email by rememberSaveable(state.email) { mutableStateOf(state.email) }
     // Passwords deliberately stay out of Android's persisted saved-state Bundle.
     var password by remember { mutableStateOf("") }
-    var confirmation by remember { mutableStateOf("") }
     var localError by remember { mutableStateOf<String?>(null) }
 
     fun switchMode(value: AccountFormMode) {
         mode = value
         password = ""
-        confirmation = ""
         localError = null
         onClearError()
     }
@@ -107,40 +102,18 @@ fun AccountScreen(
                 AnonymousStatusCard(isAnonymous = state.isAnonymous)
             }
             item {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(
-                        selected = mode == AccountFormMode.CREATE,
-                        onClick = { switchMode(AccountFormMode.CREATE) },
-                        label = { Text(if (state.isAnonymous) "Κατοχύρωση" else "Εγγραφή") },
-                        leadingIcon = { Icon(Icons.Outlined.PersonAdd, contentDescription = null, modifier = Modifier.size(18.dp)) },
-                        modifier = Modifier.weight(1f),
-                    )
-                    FilterChip(
-                        selected = mode == AccountFormMode.SIGN_IN,
-                        onClick = { switchMode(AccountFormMode.SIGN_IN) },
-                        label = { Text("Σύνδεση") },
-                        leadingIcon = { Icon(Icons.Outlined.Person, contentDescription = null, modifier = Modifier.size(18.dp)) },
-                        modifier = Modifier.weight(1f),
-                    )
-                }
-            }
-            item {
                 AccountFormCard(
                     mode = mode,
-                    isAnonymous = state.isAnonymous,
                     email = email,
                     password = password,
-                    confirmation = confirmation,
                     isBusy = state.isBusy,
                     onEmailChange = { value -> edit { email = value } },
                     onPasswordChange = { value -> edit { password = value } },
-                    onConfirmationChange = { value -> edit { confirmation = value } },
                     onSubmit = {
-                        val error = validateAccountInput(mode, email, password, confirmation)
+                        val error = validateAccountInput(mode, email, password)
                         if (error != null) {
                             localError = error
                         } else when (mode) {
-                            AccountFormMode.CREATE -> onCreateOrLinkAccount(email.trim(), password)
                             AccountFormMode.SIGN_IN -> onSignIn(email.trim(), password)
                             AccountFormMode.RESET -> onResetPassword(email.trim())
                         }
@@ -178,15 +151,15 @@ private fun AnonymousStatusCard(isAnonymous: Boolean) {
             }
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(
-                    if (isAnonymous) "Προσωρινός λογαριασμός" else "Δεν είσαι συνδεδεμένος/η",
+                    if (isAnonymous) "Προσωρινός λογαριασμός" else "Δεν έχεις συνδεθεί",
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold,
                 )
                 Text(
                     if (isAnonymous) {
-                        "Κατοχύρωσέ τον με την ηλεκτρονική σου διεύθυνση για να μη χάσεις τη συλλογή, τις σημειώσεις και τις λίστες σου."
+                        "Συνδέσου με έναν λογαριασμό που σου έχει δοθεί για να συγχρονίσεις τη συλλογή, τις σημειώσεις και τις λίστες σου."
                     } else {
-                        "Συνδέσου ή δημιούργησε λογαριασμό για συγχρονισμό."
+                        "Συνδέσου με έναν λογαριασμό που σου έχει δοθεί για συγχρονισμό."
                     },
                     style = MaterialTheme.typography.bodyMedium,
                 )
@@ -226,14 +199,11 @@ private fun SignedInAccountCard(state: AccountUiState, onSignOut: () -> Unit) {
 @Composable
 private fun AccountFormCard(
     mode: AccountFormMode,
-    isAnonymous: Boolean,
     email: String,
     password: String,
-    confirmation: String,
     isBusy: Boolean,
     onEmailChange: (String) -> Unit,
     onPasswordChange: (String) -> Unit,
-    onConfirmationChange: (String) -> Unit,
     onSubmit: () -> Unit,
     onForgotPassword: () -> Unit,
     onCancelReset: () -> Unit,
@@ -242,7 +212,6 @@ private fun AccountFormCard(
         Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(
                 when (mode) {
-                    AccountFormMode.CREATE -> if (isAnonymous) "Κατοχύρωση λογαριασμού" else "Νέος λογαριασμός"
                     AccountFormMode.SIGN_IN -> "Σύνδεση σε υπάρχοντα λογαριασμό"
                     AccountFormMode.RESET -> "Επαναφορά κωδικού"
                 },
@@ -269,18 +238,6 @@ private fun AccountFormCard(
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                 )
             }
-            if (mode == AccountFormMode.CREATE) {
-                OutlinedTextField(
-                    value = confirmation,
-                    onValueChange = onConfirmationChange,
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    label = { Text("Επανάληψη κωδικού") },
-                    leadingIcon = { Icon(Icons.Outlined.Lock, contentDescription = null) },
-                    visualTransformation = PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                )
-            }
             Button(onClick = onSubmit, enabled = !isBusy, modifier = Modifier.fillMaxWidth()) {
                 Icon(
                     if (mode == AccountFormMode.RESET) Icons.Outlined.RestartAlt else Icons.Outlined.Person,
@@ -289,8 +246,6 @@ private fun AccountFormCard(
                 Text(
                     when {
                         isBusy -> "Παρακαλώ περίμενε…"
-                        mode == AccountFormMode.CREATE && isAnonymous -> "Κατοχύρωση"
-                        mode == AccountFormMode.CREATE -> "Δημιουργία"
                         mode == AccountFormMode.SIGN_IN -> "Σύνδεση"
                         else -> "Αποστολή μηνύματος επαναφοράς"
                     },

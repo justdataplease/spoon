@@ -57,7 +57,10 @@ class RecipeCatalogTest {
     @Test
     fun `every Explore category binds the stored machine key unchanged`() {
         MealCategory.entries.filterNot { it == MealCategory.ANY }.forEach { category ->
-            val sql = CatalogSqlBuilder.forExplore(ExploreCriteria(category = category.key))
+            val sql = CatalogSqlBuilder.forExplore(
+                ExploreCriteria(category = category.key),
+                MealPreferenceSettings(excludedCategories = emptySet()),
+            )
             assertEquals(category.key, listOf(category.key), sql.arguments)
         }
     }
@@ -85,6 +88,7 @@ class RecipeCatalogTest {
     fun `Explore ingredient facet expands reviewed aliases in one OR predicate`() {
         val sql = CatalogSqlBuilder.forExplore(
             ExploreCriteria(ingredientLabels = setOf("Αυγό")),
+            MealPreferenceSettings(excludedCategories = emptySet()),
         )
 
         assertEquals(listOf("ingredient", "αυγο", "αυγα"), sql.arguments)
@@ -97,6 +101,7 @@ class RecipeCatalogTest {
         ReviewedIngredientAliasCases.forEach { case ->
             val sql = CatalogSqlBuilder.forExplore(
                 ExploreCriteria(ingredientLabels = setOf(case.canonical)),
+                MealPreferenceSettings(excludedCategories = emptySet()),
             )
             val expectedTokens = case.aliases
                 .map(String::normalizedCatalogToken)
@@ -121,6 +126,7 @@ class RecipeCatalogTest {
     fun `Explore SQL ORs multiple ingredient groups inside one facet predicate`() {
         val sql = CatalogSqlBuilder.forExplore(
             ExploreCriteria(ingredientLabels = setOf("Αυγό", "Πατάτα")),
+            MealPreferenceSettings(excludedCategories = emptySet()),
         )
 
         assertEquals(
@@ -136,6 +142,7 @@ class RecipeCatalogTest {
         DistinctIngredientConceptCases.forEach { (selected, distinct) ->
             val sql = CatalogSqlBuilder.forExplore(
                 ExploreCriteria(ingredientLabels = setOf(selected)),
+                MealPreferenceSettings(excludedCategories = emptySet()),
             )
 
             assertFalse(
@@ -155,6 +162,7 @@ class RecipeCatalogTest {
                 maxPrepMinutes = 25,
             ),
             excludingRecipeId = "current",
+            preferences = MealPreferenceSettings(excludedCategories = emptySet()),
         )
 
         assertEquals(
@@ -201,7 +209,10 @@ class RecipeCatalogTest {
         val sql = CatalogSqlBuilder.forPlanner(
             filters = RecipeFilters(category = MealCategory.ANY.key),
             excludingRecipeId = null,
-            preferences = MealPreferenceSettings(excludedIngredientTerms = setOf("Αυγά")),
+            preferences = MealPreferenceSettings(
+                excludedCategories = emptySet(),
+                excludedIngredientTerms = setOf("Αυγά"),
+            ),
         )
 
         assertEquals(
@@ -220,6 +231,7 @@ class RecipeCatalogTest {
         val sql = CatalogSqlBuilder.forExplore(
             criteria = ExploreCriteria(),
             preferences = MealPreferenceSettings(
+                excludedCategories = emptySet(),
                 excludedIngredientTerms = setOf("Αλεύρι (ζύμες)", "Γάλα αμυγδάλου"),
             ),
         )

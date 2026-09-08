@@ -43,6 +43,7 @@ class SpoonViewModelLifecyclePolicyTest {
         assertTrue(tracker.onAccountState(AccountState.Email("owner-b", "b@example.com", false)))
         assertTrue(tracker.onAccountState(AccountState.Loading))
         assertTrue(tracker.onAccountState(AccountState.Anonymous("guest-c")))
+        assertTrue(tracker.onAccountState(AccountState.SignedOut))
     }
 
     @Test

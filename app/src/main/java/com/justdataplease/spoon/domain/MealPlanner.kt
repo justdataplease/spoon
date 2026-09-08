@@ -450,11 +450,6 @@ class MealPlanner @Inject constructor(
         return stored
     }
 
-    suspend fun registerEmailAccount(email: String, password: String) {
-        repository.ensureReady()
-        repository.registerEmailAccount(email, password)
-    }
-
     suspend fun signInWithEmail(email: String, password: String) {
         repository.ensureReady()
         repository.signInWithEmail(email, password)
@@ -464,8 +459,8 @@ class MealPlanner @Inject constructor(
         repository.sendPasswordReset(email)
     }
 
-    suspend fun signOutToAnonymous() {
-        repository.signOutToAnonymous()
+    suspend fun signOut() {
+        repository.signOut()
     }
 
     /** Replaces a day's proposal only when [recipeId] is still an available favorite. */
