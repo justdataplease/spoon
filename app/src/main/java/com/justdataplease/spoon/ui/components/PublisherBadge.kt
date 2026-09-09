@@ -1,12 +1,9 @@
 package com.justdataplease.spoon.ui.components
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.MaterialTheme
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
@@ -19,7 +16,6 @@ import androidx.compose.ui.res.imageResource
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import com.justdataplease.spoon.R
-import androidx.compose.ui.unit.dp
 
 @Composable
 fun PublisherBadge(
@@ -43,15 +39,14 @@ fun PublisherBadge(
     val description = sourceName.ifBlank { sourceKey }.ifBlank { "πηγή συνταγής" }
     Surface(
         modifier = modifier.size(RecipeBadgeHeight),
-        shape = RoundedCornerShape(8.dp),
+        shape = CircleShape,
         // Publisher artwork includes dark/transparent marks designed for a white canvas.
         color = Color.White,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
     ) {
         Image(
             painter = painter,
             contentDescription = "Πηγή: $description",
-            modifier = Modifier.fillMaxSize().padding(4.dp),
+            modifier = Modifier.fillMaxSize(),
             contentScale = ContentScale.Fit,
         )
     }

@@ -1,6 +1,6 @@
 # Publisher source icons
 
-These original publisher PNG files are bundled unchanged for source attribution and offline display. They are not generated or upscaled. The badge preserves the full image on a white background in both themes.
+These original publisher PNG files are bundled unchanged for source attribution and offline display. They are not generated or upscaled. The badge presents each mark on a circular white canvas in both themes.
 
 | Publisher | Original website asset | Native size | SHA-256 |
 | --- | --- | --- | --- |
@@ -10,6 +10,6 @@ These original publisher PNG files are bundled unchanged for source attribution 
 
 Akis publishes the available icon sizes in [site.webmanifest](https://akispetretzikis.com/site.webmanifest). Argiro and Gastronomos link their icons in their homepage metadata; the unsuffixed WordPress image URLs are the native 512px originals.
 
-Keep these raster assets in `drawable-nodpi` so Android does not pre-scale them as density-specific resources. The 34dp badge uses Fit with padding, and its light canvas preserves dark or transparent logo details.
+Keep these raster assets in `drawable-nodpi` so Android does not pre-scale them as density-specific resources. The 34dp badge uses Fit inside a circle with no decorative border or inset padding. The light canvas preserves dark or transparent logo details, and Argiro's red background fills the circle.
 
 Akis includes a large blank border inside its official PNG. The painter skips the outer one-sixth on each side, leaving the complete seal and its white margin visible at a comparable size to the other logos. The stored image bytes remain unchanged.
