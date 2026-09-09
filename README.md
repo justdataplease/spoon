@@ -55,6 +55,11 @@ data.
   difficulty, servings, rating distribution, grouped ingredients and conversions,
   numbered method steps, tips, nutrition, equipment, publication metadata, and the
   canonical source link.
+- Share any built-in catalog recipe with another Spoon user from the recipe's
+  «Κοινοποίηση συνταγής» button. The Android share sheet sends a clickable HTTPS
+  link that opens the same recipe in Spoon, including on a cold launch. Both
+  phones need version 0.8.6 or later. The recipe is read from the recipient's
+  offline catalog; private notes and personal recipes are never included.
 - User-initiated inline video for YouTube, Vimeo, and direct HTTPS video files.
   Nothing autoplays, unsafe URLs/navigation are blocked, loading failures are shown
   instead of a blank player, and an external fallback remains available.
@@ -171,6 +176,25 @@ The public catalog remains available offline regardless of Firebase state.
 Without `app/google-services.json`, account backup and cross-phone sync are
 unavailable. With a valid Firebase configuration and an administrator-provisioned
 account, queued personal changes sync automatically after connectivity returns.
+
+## Recipe sharing links
+
+Public recipe links use `https://justdataplease.github.io/spoon/recipe/<id>`.
+Android verifies this domain using the published association with `com.spoon.app`
+and the existing APK signing certificate. The `website/` directory contains the
+static site and association, deployed to the root of the separate
+`justdataplease/justdataplease.github.io` repository. See
+[the website deployment notes](website/README.md).
+
+When a messaging app keeps links in its own browser, the landing page offers
+«Άνοιγμα στο Spoon». If the app is absent or outdated, it also links to the current
+APK. After upgrading, tap the original recipe link again. No account identifier
+or personal content is placed in these links, and opening one does not add a
+favorite or change a meal plan. Manually created recipes remain owner-private.
+
+Links are validated before catalog lookup. Unknown recipes show a Greek update
+message; malformed or private IDs are rejected. Incoming links work while Spoon
+is running, survive activity recreation, and can be dismissed while loading.
 
 ## Firebase configuration
 

@@ -169,6 +169,7 @@ class SpoonViewModel @Inject constructor(
     private val favoritesSearchState = ExploreSearchState(computationScope)
     private val favoritesFilters = MutableStateFlow(ExploreFiltersUi())
     private val customRecipeEditorStore = CustomRecipeEditorStore(savedStateHandle)
+    private val recipeLinkState = savedStateHandle
     val customRecipeEditor = customRecipeEditorStore.state
     val mealPreferenceSettings = mealPlanner.mealPreferenceSettings.stateIn(
         scope = viewModelScope,
@@ -498,6 +499,7 @@ class SpoonViewModel @Inject constructor(
         observeCatalogReadiness()
         observeExploreFilters()
         ensureWeek(selectedWeekStart.value)
+        recipeLinkState.get<String>("shared_recipe_id")?.let(::openSharedRecipe)
     }
 
     fun previousWeek() = showWeek(selectedWeekStart.value.minusWeeks(1))
@@ -528,6 +530,7 @@ class SpoonViewModel @Inject constructor(
 
     fun showRecipeDetails(recipeId: String) {
         if (recipeId.isBlank()) return
+        recipeLinkState.remove<String>("shared_recipe_id")
         recipeDetailsJob?.cancel()
         val generation = ++recipeDetailsGeneration
         selectedRecipeId.value = recipeId
@@ -540,7 +543,12 @@ class SpoonViewModel @Inject constructor(
                         if (!isCurrentRecipeRequest(generation, recipeId)) return@let
                         selectedRecipeDetails.value = details
                         if (details == null) {
-                            message.value = "Οι πλήρεις λεπτομέρειες δεν είναι διαθέσιμες ακόμη."
+                            message.value = if (recipeLinkState.get<String>("shared_recipe_id") == recipeId) {
+                                recipeLinkState.remove<String>("shared_recipe_id")
+                                "Η κοινόχρηστη συνταγή δεν βρέθηκε. Ενημέρωσε το Spoon και δοκίμασε ξανά."
+                            } else {
+                                "Οι πλήρεις λεπτομέρειες δεν είναι διαθέσιμες ακόμη."
+                            }
                         }
                     }
             } catch (error: CancellationException) {
@@ -561,12 +569,23 @@ class SpoonViewModel @Inject constructor(
     }
 
     fun dismissRecipeDetails() {
+        recipeLinkState.remove<String>("shared_recipe_id")
         recipeDetailsGeneration++
         recipeDetailsJob?.cancel()
         recipeDetailsJob = null
         selectedRecipeId.value = null
         selectedRecipeDetails.value = null
         recipeDetailsLoading.value = false
+    }
+
+    fun openSharedRecipe(recipeId: String) {
+        if (com.justdataplease.spoon.ui.sharing.RecipeShareLink.create(recipeId) == null) return
+        dismissCustomRecipeEditor()
+        dismissFavoriteReplacement()
+        dismissFilters()
+        dismissMealMenu()
+        showRecipeDetails(recipeId)
+        recipeLinkState["shared_recipe_id"] = recipeId
     }
 
     private fun isCurrentRecipeRequest(generation: Long, recipeId: String): Boolean =
@@ -657,8 +676,7 @@ class SpoonViewModel @Inject constructor(
                 exploreFilterInput,
                 customRecipeRevisions,
                 mealPreferenceSettings,
-            ) { input, _, _ -> input }
-                .collect { input ->
+            ) { input, _, _ -> input }.collect { input ->
                 exploreLoadJob?.cancel()
                 exploreLoadJob = null
                 exploreFacetLoadJob?.cancel()
@@ -997,10 +1015,13 @@ class SpoonViewModel @Inject constructor(
         viewModelScope.launch {
             mealPlanner.accountState.collect { account ->
                 if (accountOwnerTracker.onAccountState(account)) {
+                    // Catalog links must survive authentication settling on launch.
+                    val sharedRecipeId = recipeLinkState.get<String>("shared_recipe_id")
                     dismissCustomRecipeEditor()
                     dismissRecipeDetails()
                     dismissMealMenu()
                     resetWeekEnsureForAccountOwner()
+                    sharedRecipeId?.let(::openSharedRecipe)
                 }
             }
         }

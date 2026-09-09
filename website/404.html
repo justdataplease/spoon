@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="el">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#416447">
+    <meta name="referrer" content="no-referrer">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; base-uri 'none'; form-action 'none'">
+    <meta name="robots" content="noindex">
+    <title>Συνταγή στο Spoon</title>
+    <link rel="stylesheet" href="/styles.css">
+    <script type="module" src="/recipe-page.mjs"></script>
+  </head>
+  <body>
+    <main class="card">
+      <a class="brand home" href="/"><span aria-hidden="true">🥄</span> Spoon</a>
+      <p class="eyebrow">Μοιράσου κάτι νόστιμο</p>
+      <div aria-live="polite">
+        <h1 id="page-title">Ο σύνδεσμος δεν είναι διαθέσιμος.</h1>
+        <p class="description" id="page-description">Έλεγξε ότι αντέγραψες ολόκληρο τον σύνδεσμο της συνταγής.</p>
+      </div>
+      <a class="button" id="open-recipe" hidden>Άνοιγμα στο Spoon</a>
+      <noscript><p class="hint">Για να ανοίξεις τη συνταγή από αυτή τη σελίδα, ενεργοποίησε τη JavaScript και δοκίμασε ξανά.</p></noscript>
+      <div class="download">
+        <p>Χρειάζεσαι την εφαρμογή;</p>
+        <a class="download-link" href="https://media.githubusercontent.com/media/justdataplease/spoon/main/dist/spoon.apk">Λήψη Spoon για Android <span aria-hidden="true">↗</span></a>
+        <p class="hint">Εγκατάστησε την τελευταία έκδοση και μετά πάτησε ξανά τον σύνδεσμο της συνταγής.</p>
+      </div>
+    </main>
+    <footer>Το επόμενο γεύμα ξεκινά με μια ιδέα.</footer>
+  </body>
+</html>

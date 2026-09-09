@@ -32,6 +32,7 @@ import androidx.compose.material.icons.outlined.Groups
 import androidx.compose.material.icons.outlined.LocalDining
 import androidx.compose.material.icons.outlined.PhotoLibrary
 import androidx.compose.material.icons.outlined.Schedule
+import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.Star
 import androidx.compose.material.icons.outlined.Timer
 import androidx.compose.material3.ButtonDefaults
@@ -71,6 +72,7 @@ fun RecipeDetailsScreen(
     onOpenSource: () -> Unit,
     modifier: Modifier = Modifier,
     onEdit: (() -> Unit)? = null,
+    onShare: (() -> Unit)? = null,
     recipeNote: String = "",
     onSaveNote: (String) -> Unit = {},
     onAddIngredients: (List<ShoppingIngredientDraftUi>) -> Unit = {},
@@ -92,7 +94,7 @@ fun RecipeDetailsScreen(
             contentPadding = PaddingValues(bottom = 160.dp),
         ) {
             item {
-                RichRecipeHero(recipe, onBack, onToggleFavorite, onEdit)
+                RichRecipeHero(recipe, onBack, onToggleFavorite, onEdit, onShare)
             }
             item {
                 Column(
@@ -174,6 +176,7 @@ private fun RichRecipeHero(
     onBack: () -> Unit,
     onToggleFavorite: () -> Unit,
     onEdit: (() -> Unit)?,
+    onShare: (() -> Unit)?,
 ) {
     Box(modifier = Modifier.fillMaxWidth().height(350.dp)) {
         RecipeArtwork(
@@ -198,6 +201,9 @@ private fun RichRecipeHero(
         ) {
             HeroCircleButton(Icons.AutoMirrored.Outlined.ArrowBack, "Πίσω", onBack)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                onShare?.let { share ->
+                    HeroCircleButton(Icons.Outlined.Share, "Κοινοποίηση συνταγής", share)
+                }
                 onEdit?.let { edit ->
                     HeroCircleButton(Icons.Outlined.Edit, "Επεξεργασία συνταγής", edit)
                 }

@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.spoon.app",
+      "sha256_cert_fingerprints": [
+        "89:2D:89:77:6E:E0:D6:69:3A:19:B7:CD:FB:DA:EC:CB:88:1B:85:C9:2D:DF:3B:14:76:C4:0D:90:99:0F:56:B3"
+      ]
+    }
+  }
+]

@@ -2,6 +2,13 @@ package com.justdataplease.spoon.ui
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.TextButton
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.unit.dp
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.MoreHoriz
@@ -44,6 +51,8 @@ import com.justdataplease.spoon.ui.favorites.FavoriteReplacementSheet
 import com.justdataplease.spoon.ui.favorites.FavoritesScreen
 import com.justdataplease.spoon.ui.history.HistoryScreen
 import com.justdataplease.spoon.ui.model.SpoonUiState
+import com.justdataplease.spoon.ui.model.RecipeDetailUi
+import com.justdataplease.spoon.ui.sharing.RecipeShareLink
 import com.justdataplease.spoon.ui.more.MoreScreen
 import com.justdataplease.spoon.ui.shopping.ShoppingScreen
 import com.justdataplease.spoon.ui.settings.FoodPreferencesScreen
@@ -76,6 +85,7 @@ fun SpoonApp(
     state: SpoonUiState,
     viewModel: SpoonViewModel,
     onOpenRecipe: (String) -> Unit,
+    onShareRecipe: (RecipeDetailUi) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var selectedDestination by rememberSaveable { mutableIntStateOf(0) }
@@ -89,7 +99,7 @@ fun SpoonApp(
     val mealPreferenceSettings by viewModel.mealPreferenceSettings.collectAsStateWithLifecycle()
 
     BackHandler(
-        enabled = mealMenu != null || selectedRecipe != null ||
+        enabled = mealMenu != null || selectedRecipe != null || state.isRecipeDetailsLoading ||
             state.favoriteReplacementDate != null ||
             customRecipeEditor.isOpen ||
             (Destinations[selectedDestination].key == PrimaryDestination.MORE && morePage != MorePage.HUB) ||
@@ -97,7 +107,7 @@ fun SpoonApp(
     ) {
         when {
             customRecipeEditor.isOpen -> viewModel.dismissCustomRecipeEditor()
-            selectedRecipe != null -> viewModel.dismissRecipeDetails()
+            selectedRecipe != null || state.isRecipeDetailsLoading -> viewModel.dismissRecipeDetails()
             state.favoriteReplacementDate != null -> viewModel.dismissFavoriteReplacement()
             mealMenu != null -> viewModel.dismissMealMenu()
             Destinations[selectedDestination].key == PrimaryDestination.MORE && morePage != MorePage.HUB -> {
@@ -121,7 +131,7 @@ fun SpoonApp(
         containerColor = MaterialTheme.colorScheme.background,
         snackbarHost = { SnackbarHost(snackbarHostState) },
         bottomBar = {
-            if (selectedRecipe == null && !customRecipeEditor.isOpen && mealMenu == null) {
+            if (selectedRecipe == null && !state.isRecipeDetailsLoading && !customRecipeEditor.isOpen && mealMenu == null) {
                 NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
                     Destinations.forEachIndexed { index, destination ->
                         val selected = selectedDestination == index
@@ -164,6 +174,11 @@ fun SpoonApp(
                 onBack = viewModel::dismissRecipeDetails,
                 onToggleFavorite = { viewModel.toggleFavorite(selectedRecipe.recipeId) },
                 onOpenSource = { onOpenRecipe(selectedRecipe.sourceUrl) },
+                onShare = if (RecipeShareLink.create(selectedRecipe.recipeId) != null) {
+                    { onShareRecipe(selectedRecipe) }
+                } else {
+                    null
+                },
                 recipeNote = state.selectedRecipeNote,
                 onSaveNote = viewModel::saveRecipeNote,
                 onAddIngredients = viewModel::addIngredientsToShopping,
@@ -175,6 +190,16 @@ fun SpoonApp(
                 isLoadingDetails = state.isRecipeDetailsLoading,
                 modifier = Modifier.padding(padding),
             )
+
+            state.isRecipeDetailsLoading -> Column(
+                modifier = Modifier.padding(padding).fillMaxSize(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(20.dp, Alignment.CenterVertically),
+            ) {
+                CircularProgressIndicator()
+                Text("Φόρτωση συνταγής…")
+                TextButton(onClick = viewModel::dismissRecipeDetails) { Text("Επιστροφή") }
+            }
 
             mealMenu != null -> MealMenuScreen(
                 state = mealMenu!!,
