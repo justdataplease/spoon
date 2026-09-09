@@ -3,17 +3,23 @@ package com.justdataplease.spoon.ui.components
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.imageResource
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
 import com.justdataplease.spoon.R
-import java.util.Locale
+import androidx.compose.ui.unit.dp
 
 @Composable
 fun PublisherBadge(
@@ -23,33 +29,30 @@ fun PublisherBadge(
     modifier: Modifier = Modifier,
 ) {
     val icon = publisherIconResource(sourceKey, sourceName, sourceUrl) ?: return
+    val bitmap = ImageBitmap.imageResource(icon)
+    val painter = remember(icon, bitmap) {
+        // The official Akis PNG includes a large white margin; frame its full seal at the same
+        // visual size as the other publishers without altering or upscaling the bundled file.
+        val inset = if (icon == R.drawable.source_akis) bitmap.width / 6 else 0
+        BitmapPainter(
+            image = bitmap,
+            srcOffset = IntOffset(inset, inset),
+            srcSize = IntSize(bitmap.width - 2 * inset, bitmap.height - 2 * inset),
+        )
+    }
     val description = sourceName.ifBlank { sourceKey }.ifBlank { "πηγή συνταγής" }
     Surface(
         modifier = modifier.size(RecipeBadgeHeight),
-        shape = CircleShape,
-        color = MaterialTheme.colorScheme.surface,
+        shape = RoundedCornerShape(8.dp),
+        // Publisher artwork includes dark/transparent marks designed for a white canvas.
+        color = Color.White,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
     ) {
         Image(
-            painter = painterResource(icon),
+            painter = painter,
             contentDescription = "Πηγή: $description",
-            modifier = Modifier.fillMaxSize(),
-            contentScale = ContentScale.Crop,
+            modifier = Modifier.fillMaxSize().padding(4.dp),
+            contentScale = ContentScale.Fit,
         )
-    }
-}
-
-internal fun publisherIconResource(
-    sourceKey: String,
-    sourceName: String,
-    sourceUrl: String,
-): Int? {
-    val source = "$sourceKey $sourceName $sourceUrl".lowercase(Locale.ROOT)
-    return when {
-        "argiro" in source || "αργυρ" in source -> R.drawable.source_argiro
-        "gastronomos" in source || "γαστρονομ" in source -> R.drawable.source_gastronomos
-        "akis" in source || "petretzikis" in source || "άκης" in source ->
-            R.drawable.source_akis
-        else -> null
     }
 }
