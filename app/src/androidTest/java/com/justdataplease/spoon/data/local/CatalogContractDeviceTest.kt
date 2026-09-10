@@ -11,6 +11,8 @@ import com.justdataplease.spoon.data.preferences.MealPreferenceSettings
 import com.justdataplease.spoon.domain.*
 import java.io.ByteArrayInputStream
 import java.io.File
+import java.io.InputStream
+import java.security.MessageDigest
 import java.time.LocalDate
 import java.util.zip.InflaterInputStream
 import kotlinx.coroutines.flow.first
@@ -38,6 +40,8 @@ class CatalogContractDeviceTest {
             for (ease in EaseLevel.entries) add(PlannerCase(ease.key, RecipeFilters(category = "any", easeLevel = ease.key)))
             for (rating in listOf(0.0, 5.0, 8.0, 9.9)) add(PlannerCase("rating/$rating", RecipeFilters(category = "any", minRating = rating)))
             for (time in listOf(1, 15, 30, 90)) add(PlannerCase("time/$time", RecipeFilters(category = "any", maxPrepMinutes = time)))
+            add(PlannerCase("excluded sources", RecipeFilters(category = "any"), MealPreferenceSettings(excludedSourceKeys = setOf("akis", "cookpad", "tsoulis"))))
+            add(PlannerCase("all sources excluded", RecipeFilters(category = "any"), MealPreferenceSettings(excludedSourceKeys = setOf("akis", "argiro", "gastronomos", "tsoulis", "cookpad", "lucacos", "funkycook"))))
             add(PlannerCase("vegan", RecipeFilters(category = "any"), MealPreferenceSettings(veganOnly = true)))
             add(PlannerCase("ingredient exclusions", RecipeFilters(category = "any"), MealPreferenceSettings(excludedIngredientTerms = setOf("Αυγά", "Γάλα καρύδας"))))
             add(PlannerCase("compound exclusions", RecipeFilters(category = "any"), MealPreferenceSettings(excludedCategories = setOf("pasta_rice", "street_food"))))
@@ -72,6 +76,10 @@ class CatalogContractDeviceTest {
             add(ExploreCase("search punctuation", ExploreCriteria(query = "κοτόπουλο-λεμόνι")))
             add(ExploreCase("combined", ExploreCriteria(category = "poultry", minRating = 7.0, maxPrepMinutes = 30, sourceKeys = setOf("akis", "argiro"))))
             add(ExploreCase("quick", ExploreCriteria(quickOnly = true)))
+            add(ExploreCase("christmas aliases", ExploreCriteria(occasionLabels = setOf("Christmas"), quickOnly = true)))
+            add(ExploreCase("cuisine aliases", ExploreCriteria(cuisineLabels = setOf("Greek", "Ιταλία"))))
+            add(ExploreCase("source preference intersection", ExploreCriteria(sourceKeys = setOf("cookpad", "tsoulis")), MealPreferenceSettings(excludedSourceKeys = setOf("cookpad"))))
+            add(ExploreCase("all sources excluded", ExploreCriteria(), MealPreferenceSettings(excludedSourceKeys = setOf("akis", "argiro", "gastronomos", "tsoulis", "cookpad", "lucacos", "funkycook"))))
             add(ExploreCase("vegan", ExploreCriteria(), MealPreferenceSettings(veganOnly = true)))
             add(ExploreCase("global exclusions", ExploreCriteria(), MealPreferenceSettings(excludedCategories = setOf("pasta_rice", "street_food"), excludedIngredientTerms = setOf("Αυγά"))))
             add(ExploreCase("diet", ExploreCriteria(dietLabels = options.diets.take(2).toSet())))
@@ -280,13 +288,20 @@ class CatalogContractDeviceTest {
         sentinel.edit().putString("saved", "keep").commit()
         val installed = File(context.noBackupFilesDir, BundledRecipeCatalog.INSTALLED_DATABASE_NAME)
         val expected = installed.length()
+        val assetDigest = sha256(context.assets.open(BundledRecipeCatalog.ASSET_DATABASE_NAME))
+        assertArrayEquals("Installed catalog must match the current APK asset", assetDigest, sha256(installed.inputStream()))
+        val expectedCount = catalog.queryRecipes(
+            ExploreCriteria(), 1, 0, MealPreferenceSettings(excludedCategories = emptySet()),
+        ).totalCount
+        assertTrue(expectedCount > 0)
         context.getSharedPreferences("spoon_catalog_install", Context.MODE_PRIVATE).edit().putString("apk_install_stamp_v1", "old-version").commit()
         val replacement = BundledRecipeCatalog(context, json)
         replacement.ensureReady()
         assertEquals(expected, installed.length())
+        assertArrayEquals("Reinstalled catalog must match the current APK asset", assetDigest, sha256(installed.inputStream()))
         assertEquals("keep", sentinel.getString("saved", null))
         assertEquals(
-            20861,
+            expectedCount,
             replacement.queryRecipes(
                 ExploreCriteria(),
                 1,
@@ -297,6 +312,17 @@ class CatalogContractDeviceTest {
     }
 
     private fun only(category: MealCategory) = MealPreferenceSettings(excludedCategories = MealCategory.entries.filterNot { it == MealCategory.ANY || it == category }.map(MealCategory::key).toSet())
+
+    private fun sha256(input: InputStream): ByteArray = input.use { stream ->
+        val digest = MessageDigest.getInstance("SHA-256")
+        val buffer = ByteArray(64 * 1024)
+        while (true) {
+            val count = stream.read(buffer)
+            if (count < 0) break
+            digest.update(buffer, 0, count)
+        }
+        digest.digest()
+    }
 
     private fun forEachRecipe(block: (Recipe) -> Unit) {
         database().use { db ->

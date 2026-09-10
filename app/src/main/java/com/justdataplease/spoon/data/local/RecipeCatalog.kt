@@ -4,6 +4,7 @@ import com.justdataplease.spoon.data.eligibleRecipeDetails
 import com.justdataplease.spoon.data.model.EaseLevel
 import com.justdataplease.spoon.data.model.CustomRecipe
 import com.justdataplease.spoon.data.model.MealCategory
+import com.justdataplease.spoon.data.canonicalFacetLabels
 import com.justdataplease.spoon.data.model.Recipe
 import com.justdataplease.spoon.data.model.RecipeFilters
 import com.justdataplease.spoon.data.model.isCustomRecipeId
@@ -113,8 +114,8 @@ internal fun String.normalizedCatalogToken(): String =
         .trim()
 
 internal fun facetOptionsFrom(recipes: List<Recipe>): CatalogFacetOptions {
-    fun labels(selector: (Recipe) -> List<String>): List<String> = recipes.asSequence()
-        .flatMap { selector(it).asSequence() }
+    fun labels(facet: String, selector: (Recipe) -> List<String>): List<String> = recipes.asSequence()
+        .flatMap { canonicalFacetLabels(facet, selector(it)).asSequence() }
         .map(String::trim)
         .filter(String::isNotBlank)
         .distinctBy(String::normalizedCatalogToken)
@@ -143,12 +144,12 @@ internal fun facetOptionsFrom(recipes: List<Recipe>): CatalogFacetOptions {
 
     return CatalogFacetOptions(
         sources = sourceOptions,
-        diets = labels(Recipe::dietLabels),
-        mealTypes = labels(Recipe::mealTypeLabels),
-        occasions = labels(Recipe::occasionLabels),
-        methods = labels(Recipe::methodLabels),
-        cuisines = labels(Recipe::cuisineLabels),
-        ingredients = labels(Recipe::ingredientLabels),
+        diets = labels("diet", Recipe::dietLabels),
+        mealTypes = labels("meal", Recipe::mealTypeLabels),
+        occasions = labels("occasion", Recipe::occasionLabels),
+        methods = labels("method", Recipe::methodLabels),
+        cuisines = labels("cuisine", Recipe::cuisineLabels),
+        ingredients = labels("ingredient", Recipe::ingredientLabels),
     )
 }
 
@@ -156,9 +157,6 @@ internal fun mergeFacetOptions(
     publicOptions: CatalogFacetOptions,
     personalOptions: CatalogFacetOptions,
 ): CatalogFacetOptions {
-    fun mergeLabels(first: List<String>, second: List<String>): List<String> =
-        (first + second).distinctBy(String::normalizedCatalogToken)
-            .sortedBy(String::normalizedCatalogToken)
     val sources = (publicOptions.sources + personalOptions.sources)
         .groupBy(CatalogSourceOption::key)
         .map { (key, options) ->
@@ -171,12 +169,12 @@ internal fun mergeFacetOptions(
         .sortedBy { it.label.normalizedCatalogToken() }
     return CatalogFacetOptions(
         sources = sources,
-        diets = mergeLabels(publicOptions.diets, personalOptions.diets),
-        mealTypes = mergeLabels(publicOptions.mealTypes, personalOptions.mealTypes),
-        occasions = mergeLabels(publicOptions.occasions, personalOptions.occasions),
-        methods = mergeLabels(publicOptions.methods, personalOptions.methods),
-        cuisines = mergeLabels(publicOptions.cuisines, personalOptions.cuisines),
-        ingredients = mergeLabels(publicOptions.ingredients, personalOptions.ingredients),
+        diets = canonicalFacetLabels("diet", publicOptions.diets + personalOptions.diets),
+        mealTypes = canonicalFacetLabels("meal", publicOptions.mealTypes + personalOptions.mealTypes),
+        occasions = canonicalFacetLabels("occasion", publicOptions.occasions + personalOptions.occasions),
+        methods = canonicalFacetLabels("method", publicOptions.methods + personalOptions.methods),
+        cuisines = canonicalFacetLabels("cuisine", publicOptions.cuisines + personalOptions.cuisines),
+        ingredients = canonicalFacetLabels("ingredient", publicOptions.ingredients + personalOptions.ingredients),
     )
 }
 

@@ -475,10 +475,18 @@ internal fun ExploreFilterSheet(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("Γρήγορες συνταγές", style = MaterialTheme.typography.titleMedium)
-                        Text("Μόνο όσες χαρακτηρίζονται γρήγορες", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("Γρήγορη · κάτω από 30 λεπτά", style = MaterialTheme.typography.titleMedium)
+                        Text("Συνολικός χρόνος μικρότερος από 30 λεπτά", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     Switch(checked = draft.quickOnly, onCheckedChange = { draft = draft.copy(quickOnly = it) })
+                }
+            }
+            item {
+                val christmas = options.occasions.firstOrNull {
+                    greekProviderLabel(it, ProviderLabelKind.OCCASION) == "Χριστουγεννιάτικη"
+                } ?: "Χριστούγεννα"
+                ChoiceChip("Χριστουγεννιάτικη", draft.occasion == christmas) {
+                    draft = draft.copy(occasion = if (draft.occasion == christmas) "" else christmas)
                 }
             }
             item { FacetRow("Ειδική διατροφή", ProviderLabelKind.DIET, options.diets, draft.diet) { draft = draft.copy(diet = it) } }

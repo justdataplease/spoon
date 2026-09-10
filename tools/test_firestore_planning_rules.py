@@ -121,6 +121,16 @@ class PlanningRulesTest(unittest.TestCase):
         history = {"date": self.plan["date"], "recipeId": "side", "recipeTitle": "Side", "completedAtEpochMillis": 300}
         self.assertEqual(403, self.write("cookedHistory/cooked_" + "a" * 32, history))
 
+    def test_source_exclusions_are_optional_bounded_unique_and_owner_scoped(self):
+        keys = ["akis", "argiro", "gastronomos", "tsoulis", "cookpad", "lucacos", "funkycook"]
+        self.assertEqual(200, self.write("preferences/meal", self.preferences))
+        for excluded in ([], ["cookpad"], keys):
+            self.assertEqual(200, self.write("preferences/meal", self.preferences | {"excludedSourceKeys": excluded}))
+        self.assertEqual(403, self.write("preferences/meal", self.preferences | {"excludedSourceKeys": []}, "other-owner"))
+        for invalid in ("akis", True, {}, ["akis", "akis"], ["AKIS"], ["unknown"], ["personal"], keys + ["extra"]):
+            with self.subTest(exclusions=invalid):
+                self.assertEqual(403, self.write("preferences/meal", self.preferences | {"excludedSourceKeys": invalid}))
+
     def test_legacy_preferences_and_new_planner_options(self):
         self.assertEqual(200, self.write("preferences/meal", self.preferences))
         self.preferences.update(weekdayCategories={"MONDAY": "meat", "TUESDAY": "any", "WEDNESDAY": "legumes"}, favoritesOnly=True,

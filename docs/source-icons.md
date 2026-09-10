@@ -1,5 +1,7 @@
 # Publisher source icons
 
+Publisher badges keep their circular artwork and open the publisher website independently of the surrounding recipe card or source-selection chip. The seven website destinations live in `RecipePublisherOptions.kt`, shared by badges and About. Recipe attribution includes a small invitation to visit the creator, linked to that recipe’s original URL; unknown and personal sources do not gain a publisher badge link.
+
 These original publisher PNG files are bundled unchanged for source attribution and offline display. They are not generated or upscaled. The badge presents each mark on a circular white canvas in both themes.
 
 | Publisher | Original website asset | Native size | SHA-256 |
@@ -13,3 +15,26 @@ Akis publishes the available icon sizes in [site.webmanifest](https://akispetret
 Keep these raster assets in `drawable-nodpi` so Android does not pre-scale them as density-specific resources. The 34dp badge uses Fit inside a circle with no decorative border or inset padding. The light canvas preserves dark or transparent logo details, and Argiro's red background fills the circle.
 
 Akis includes a large blank border inside its official PNG. The painter skips the outer one-sixth on each side, leaving the complete seal and its white margin visible at a comparable size to the other logos. The stored image bytes remain unchanged.
+
+
+## Additional publishers (2026-09-10)
+
+The same circular badges use the publishers' own website artwork:
+
+| Publisher | Android asset | Official source |
+| --- | --- | --- |
+| Γιώργος Τσούλης | `source_tsoulis.png` (180 × 180) | https://www.giorgostsoulis.com/apple-icon-180x180.png |
+| Γιάννης Λουκάκος | `source_lucacos.png` (48 × 48) | https://www.yiannislucacos.gr/favicon.ico |
+| Funky Cook | `source_funkycook.jpg` (210 × 210) | [Official favicon](https://funkycook.gr/wp-content/uploads/2015/05/logo_mobile-210x210.jpg) |
+| Cookpad | `source_cookpad.png` (152 × 152) | [Official Apple touch icon](https://global-web-assets.cpcdn.com/assets/favicons/apple-touch-icon-152x152-d8ef6f4b35aee81d7d317da0ef1254f12907a4275fa70c9b5fa4f347cf221119.png) |
+
+Lucacos uses the original favicon's largest frame, losslessly extracted as PNG.
+Tsoulis keeps the original PNG. These assets are publisher marks used for source
+attribution; recipe rights and source links are also shown in recipe details and About.
+
+SHA-256: Tsoulis `14212c5a70adfe5a571ba39358da4d82503b35d94224066f735bde7b2fab2c75`;
+Lucacos `941ac043658d56ac202ebbc410ad3dda2174bd0dfc542f4badc52bb7b4423d30`.
+
+Funky Cook and Cookpad retain their original downloaded bytes. SHA-256: Funky Cook
+`79056d3f77ca0f969bf35041ca675c5be1178f2ef93be86dfa9c7c5e96753358`;
+Cookpad `50dd1eb5b821a7d36c8016046a71bb8298db43c553b60bbd29fa902ac82a1807`.

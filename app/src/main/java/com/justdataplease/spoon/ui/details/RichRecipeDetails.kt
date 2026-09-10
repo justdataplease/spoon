@@ -102,6 +102,7 @@ fun RecipeDetailsScreen(
                     verticalArrangement = Arrangement.spacedBy(18.dp),
                 ) {
                 RecipeHeading(recipe)
+                RecipeAttribution(recipe)
                 if (isLoadingDetails) {
                     Surface(
                         color = MaterialTheme.colorScheme.primaryContainer,
@@ -282,7 +283,6 @@ private data class MetricItem(val icon: ImageVector, val value: String, val labe
 @Composable
 private fun RecipeMetricsGrid(recipe: RecipeDetailUi) {
     val totalMinutes = recipe.totalMinutes.takeIf { it > 0 }
-        ?: (recipe.prepMinutes + recipe.cookMinutes + recipe.waitMinutes).takeIf { it > 0 }
     val yield = recipe.recipeYield.ifBlank { recipe.servings }
     val metrics = buildList {
         if (recipe.rating10 > 0) {

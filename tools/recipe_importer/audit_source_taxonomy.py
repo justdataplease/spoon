@@ -14,6 +14,7 @@ from . import argiro_schema, gastronomos_schema
 from .build_local_catalog import normalize_search_token
 from .full_schema import FACET_LABEL_FIELDS, normalize_recipe_detail
 from .helpers import canonical_category
+from .public_recipe_schema import PUBLIC_SOURCE_KEYS, normalize_public_recipe_payload
 
 
 def source_taxonomy(record: dict) -> dict:
@@ -23,6 +24,17 @@ def source_taxonomy(record: dict) -> dict:
             payload, source_url=record["sourceUrl"],
             sitemap_last_modified=record.get("sitemapLastModified", ""),
             associations=record["filterAssociations"], active=record["active"],
+        )
+        return {field: normalized[field] for field in (
+            "categoryKeys", "category", "categoryLabel", "tags", *FACET_LABEL_FIELDS.values(),
+        )}
+    if record["sourceKey"] in PUBLIC_SOURCE_KEYS:
+        normalized = normalize_public_recipe_payload(
+            payload["jsonLd"], payload["htmlMetadata"],
+            source_key=record["sourceKey"], source_url=record["sourceUrl"],
+            provider_recipe_id=record["providerRecipeId"],
+            sitemap_last_modified=record.get("sitemapLastModified", ""),
+            active=record["active"],
         )
         return {field: normalized[field] for field in (
             "categoryKeys", "category", "categoryLabel", "tags", *FACET_LABEL_FIELDS.values(),
@@ -103,7 +115,7 @@ def main() -> int:
     args = parser.parse_args()
     paths = args.catalogs or [
         Path(__file__).parent / "output" / f"{source}-greek-full.jsonl"
-        for source in ("akis", "argiro", "gastronomos")
+        for source in ("akis", "argiro", "gastronomos", "tsoulis", "lucacos", "funkycook", "cookpad")
     ]
     report = audit_sources(paths)
     serialized = json.dumps(report, ensure_ascii=False, indent=2)

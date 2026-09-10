@@ -17,6 +17,22 @@ import org.junit.Test
 
 class RecipeCatalogTest {
     @Test
+    fun `source exclusions constrain both explore and planning and do not relax when all disabled`() {
+        val settings = MealPreferenceSettings(excludedCategories = emptySet(), excludedSourceKeys = setOf(" AKIS ", "cookpad", "invalid"))
+        val explore = CatalogSqlBuilder.forExplore(ExploreCriteria(sourceKeys = setOf("akis")), settings)
+        assertTrue(explore.whereSql.contains("r.source_key IN (?)"))
+        assertTrue(explore.whereSql.contains("r.source_key NOT IN (?,?)"))
+        assertEquals(listOf("akis", "akis", "cookpad"), explore.arguments)
+        val planning = CatalogSqlBuilder.forPlanner(RecipeFilters(), null, settings)
+        assertTrue(planning.whereSql.contains("r.source_key NOT IN (?,?)"))
+        assertTrue(planning.arguments.containsAll(listOf("akis", "cookpad")))
+        val all = com.justdataplease.spoon.data.preferences.AllowedRecipePublisherKeys
+        val none = CatalogSqlBuilder.forExplore(ExploreCriteria(), settings.copy(excludedSourceKeys = all))
+        assertTrue(none.whereSql.contains("r.source_key NOT IN (?,?,?,?,?,?,?)"))
+        assertEquals(all.sorted(), none.arguments)
+    }
+
+    @Test
     fun `installed catalog remains inside the no-backup directory`() {
         val noBackupDirectory = File("private/no_backup")
 
@@ -91,8 +107,8 @@ class RecipeCatalogTest {
             MealPreferenceSettings(excludedCategories = emptySet()),
         )
 
-        assertEquals(listOf("ingredient", "αυγο", "αυγα"), sql.arguments)
-        assertTrue(sql.whereSql.contains("f.token IN (?,?)"))
+        assertEquals(listOf("ingredient", "αυγο", "αυγα", "αβγο", "αβγα", "αυγων", "αβγων"), sql.arguments)
+        assertTrue(sql.whereSql.contains("f.token IN (?,?,?,?,?,?)"))
         assertEquals(1, "SELECT 1 FROM recipe_facets f".toRegex().findAll(sql.whereSql).count())
     }
 
@@ -130,10 +146,10 @@ class RecipeCatalogTest {
         )
 
         assertEquals(
-            listOf("ingredient", "αυγο", "αυγα", "πατατα", "πατατεσ"),
+            listOf("ingredient", "αυγο", "αυγα", "αβγο", "αβγα", "αυγων", "αβγων", "πατατα", "πατατεσ"),
             sql.arguments,
         )
-        assertTrue(sql.whereSql.contains("f.token IN (?,?,?,?)"))
+        assertTrue(sql.whereSql.contains("f.token IN (?,?,?,?,?,?,?,?)"))
         assertEquals(1, "SELECT 1 FROM recipe_facets f".toRegex().findAll(sql.whereSql).count())
     }
 
@@ -219,11 +235,15 @@ class RecipeCatalogTest {
             listOf(
                 "αυγο", "ingredient", "αυγο",
                 "αυγα", "ingredient", "αυγα",
+                "αβγο", "ingredient", "αβγο",
+                "αβγα", "ingredient", "αβγα",
+                "αυγων", "ingredient", "αυγων",
+                "αβγων", "ingredient", "αβγων",
             ),
             sql.arguments,
         )
-        assertEquals(2, "recipe_ingredient_texts".toRegex().findAll(sql.whereSql).count())
-        assertEquals(2, "SELECT ingredient_facet.recipe_id".toRegex().findAll(sql.whereSql).count())
+        assertEquals(6, "recipe_ingredient_texts".toRegex().findAll(sql.whereSql).count())
+        assertEquals(6, "SELECT ingredient_facet.recipe_id".toRegex().findAll(sql.whereSql).count())
     }
 
     @Test

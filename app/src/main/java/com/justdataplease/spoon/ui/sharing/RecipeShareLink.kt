@@ -39,13 +39,14 @@ internal object RecipeShareLink {
         return path.removePrefix(pathPrefix).removeSuffix("/").takeIf(::isShareableId)
     }
 
-    fun shareText(recipeId: String, title: String): String? {
+    fun shareText(recipeId: String, title: String, appName: String): String? {
         val link = create(recipeId) ?: return null
         val displayTitle = title.trim().replace(TITLE_WHITESPACE, " ").take(160)
+        val displayAppName = appName.trim().replace(TITLE_WHITESPACE, " ")
         val message = if (displayTitle.isEmpty()) {
-            "Δες αυτή τη συνταγή στο Spoon:"
+            "Δες αυτή τη συνταγή στο «$displayAppName»:"
         } else {
-            "Δες τη συνταγή «$displayTitle» στο Spoon:"
+            "Δες τη συνταγή «$displayTitle» στο «$displayAppName»:"
         }
         return "$message\n$link"
     }

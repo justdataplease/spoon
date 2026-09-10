@@ -15,6 +15,8 @@ import com.justdataplease.spoon.ui.SpoonViewModel
 import com.justdataplease.spoon.ui.model.RecipeDetailUi
 import com.justdataplease.spoon.ui.sharing.RecipeShareLink
 import com.justdataplease.spoon.ui.theme.SpoonTheme
+import com.justdataplease.spoon.widget.TodayRecipeWidgetProvider
+import com.justdataplease.spoon.widget.validWidgetRecipeId
 import dagger.hilt.android.AndroidEntryPoint
 
 @AndroidEntryPoint
@@ -45,6 +47,11 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun handleRecipeLink(intent: Intent?) {
+        if (intent?.action == TodayRecipeWidgetProvider.OPEN_RECIPE_ACTION) {
+            validWidgetRecipeId(intent.getStringExtra(TodayRecipeWidgetProvider.RECIPE_ID_EXTRA))
+                ?.let(viewModel::showRecipeDetails)
+            return
+        }
         if (intent?.action != Intent.ACTION_VIEW) return
         val recipeId = RecipeShareLink.parse(intent.dataString)
         if (recipeId == null) {
@@ -55,7 +62,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun shareRecipe(recipe: RecipeDetailUi) {
-        val text = RecipeShareLink.shareText(recipe.recipeId, recipe.title) ?: return
+        val text = RecipeShareLink.shareText(recipe.recipeId, recipe.title, getString(R.string.app_name)) ?: return
         val shareIntent = Intent(Intent.ACTION_SEND).apply {
             type = "text/plain"
             putExtra(Intent.EXTRA_SUBJECT, recipe.title)

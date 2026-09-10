@@ -39,7 +39,7 @@ except ImportError:  # pragma: no cover - direct script execution
     from full_schema import CATEGORY_LABELS
 
 
-KNOWN_SOURCES = {"akis", "argiro", "gastronomos"}
+KNOWN_SOURCES = {"akis", "argiro", "gastronomos", "tsoulis", "lucacos", "funkycook", "cookpad"}
 KNOWN_CATEGORIES = {
     "legumes",
     "poultry",
@@ -399,7 +399,7 @@ def audit_catalog(database_path: Path, *, sample_limit: int = 20) -> dict[str, A
                 ),
                 "rating": recipe.get("rating", 0.0),
                 "prep_minutes": recipe.get("prepMinutes", 0),
-                "quick_recipe": int(recipe.get("quickRecipe", False)),
+                "quick_recipe": int(0 < recipe.get("totalMinutes", 0) < 30),
             }
             planner_differences = {
                 field: {"expected": expected, "actual": row[field]}

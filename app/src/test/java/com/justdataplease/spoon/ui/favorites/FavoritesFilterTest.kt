@@ -17,7 +17,7 @@ class FavoritesFilterTest {
         sourceKey = "akis", dietLabels = listOf("Χωρίς γλουτένη"),
         mealTypeLabels = listOf("Κυρίως"), occasionLabels = listOf("Καθημερινό"),
         methodLabels = listOf("Φούρνος"), cuisineLabels = listOf("Ελληνική"),
-        ingredientLabels = listOf("Αυγό"), quickRecipe = true,
+        ingredientLabels = listOf("Αυγό"), totalMinutes = 25, quickRecipe = true,
     )
     private val filters = ExploreFiltersUi(
         categoryKey = "chicken", ease = EaseUi.EASY, minRating10 = 8, maxPrepMinutes = 30,
@@ -38,7 +38,7 @@ class FavoritesFilterTest {
             favorite.copy(id = "wrong-occasion", occasionLabels = emptyList()),
             favorite.copy(id = "wrong-method", methodLabels = emptyList()),
             favorite.copy(id = "wrong-cuisine", cuisineLabels = emptyList()),
-            favorite.copy(id = "not-quick", quickRecipe = false),
+            favorite.copy(id = "not-quick", totalMinutes = 30),
             favorite.copy(id = "low-rating", rating = 8.0),
             favorite.copy(id = "hard", preparationCount = 3, stepCount = 12),
         )

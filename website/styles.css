@@ -1,8 +1,8 @@
 :root {
   color-scheme: light;
   font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  color: #23362a;
-  background: #f5f3eb;
+  color: #2d2520;
+  background: #fff8f1;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
 }
@@ -22,28 +22,28 @@ body {
 .card {
   width: min(100%, 530px);
   padding: clamp(28px, 7vw, 48px);
-  border: 1px solid #e1e5d9;
+  border: 1px solid #f3e7d8;
   border-radius: 28px;
-  background: #fffef9;
-  box-shadow: 0 14px 42px #23362a08;
+  background: #fffdfb;
+  box-shadow: 0 14px 42px #2d252008;
 }
 
 .brand {
   display: inline-flex;
   gap: 9px;
   align-items: center;
-  color: #416447;
+  color: #b8442e;
   font-size: 22px;
   font-weight: 750;
   letter-spacing: -0.7px;
 }
 
-.brand span { font-size: 27px; }
+.app-icon { flex: 0 0 auto; display: block; border-radius: 12px; }
 .home { text-decoration: none; }
 
 .eyebrow {
   margin: 34px 0 10px;
-  color: #607455;
+  color: #8d2e1e;
   font-size: 13px;
   font-weight: 650;
   letter-spacing: 0.3px;
@@ -61,7 +61,7 @@ h1 {
 
 .description {
   margin: 20px 0 28px;
-  color: #58635a;
+  color: #685b52;
   font-size: 16px;
   line-height: 1.75;
 }
@@ -75,7 +75,7 @@ h1 {
   padding: 14px 20px;
   border-radius: 14px;
   color: #ffffff;
-  background: #416447;
+  background: #b8442e;
   font-size: 15px;
   font-weight: 650;
   line-height: 1.5;
@@ -83,17 +83,17 @@ h1 {
   text-decoration: none;
 }
 
-.button:hover { background: #34553a; }
+.button:hover { background: #8d2e1e; }
 [hidden] { display: none !important; }
 
 a:focus-visible {
-  outline: 3px solid #a87728;
+  outline: 3px solid #e5a63b;
   outline-offset: 5px;
 }
 
 .hint {
   margin: 18px 0 0;
-  color: #687369;
+  color: #7a6a5e;
   font-size: 13px;
   line-height: 1.7;
 }
@@ -101,14 +101,14 @@ a:focus-visible {
 .download {
   margin-top: 28px;
   padding-top: 24px;
-  border-top: 1px solid #e5e9df;
+  border-top: 1px solid #f3e7d8;
   font-size: 14px;
 }
 
 .download > p:first-child { margin: 0 0 10px; }
 
 .download-link {
-  color: #416447;
+  color: #b8442e;
   font-weight: 650;
   text-decoration-thickness: 1px;
   text-underline-offset: 4px;
@@ -116,7 +116,7 @@ a:focus-visible {
 
 footer {
   margin-top: 26px;
-  color: #687369;
+  color: #7a6a5e;
   font-size: 12px;
   line-height: 1.6;
   text-align: center;

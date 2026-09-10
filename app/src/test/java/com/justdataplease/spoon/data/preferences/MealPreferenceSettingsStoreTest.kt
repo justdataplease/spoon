@@ -13,7 +13,37 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
+@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class MealPreferenceSettingsStoreTest {
+    @Test
+    fun `publisher defaults sanitization and all deselected survive local storage`() = runTest {
+        val store = newStore()
+        assertEquals(emptySet<String>(), store.settings.first().excludedSourceKeys)
+        store.update { it.copy(excludedSourceKeys = setOf(" AKIS ", "funkycook", "evil", "personal")) }
+        assertEquals(setOf("akis", "funkycook"), store.settings.first().excludedSourceKeys)
+        store.update { it.copy(excludedSourceKeys = AllowedRecipePublisherKeys) }
+        store.setVeganOnly(true)
+        assertEquals(AllowedRecipePublisherKeys, store.settings.first().excludedSourceKeys)
+        assertTrue(store.settings.first().veganOnly)
+        store.clear()
+        assertEquals(emptySet<String>(), store.settings.first().excludedSourceKeys)
+    }
+
+    @Test
+    fun `publisher exclusions claim pending owner and never leak across accounts`() = runTest {
+        val store = newStore()
+        val selected = MealPreferenceSettings(excludedSourceKeys = AllowedRecipePublisherKeys, updatedAtEpochMillis = 42L)
+        store.replacePendingForNextOwner(selected)
+        assertEquals(selected, store.readPendingForNextOwner())
+        assertEquals(selected, store.readForOwner("owner-a"))
+        assertNull(store.readPendingForNextOwner())
+        assertEquals(selected, store.settings.first())
+        assertEquals(MealPreferenceSettings(), store.readForOwner("owner-b"))
+        val replaced = MealPreferenceSettings(excludedSourceKeys = setOf("cookpad"), updatedAtEpochMillis = 43L)
+        assertTrue(store.replaceForOwner("owner-b", replaced))
+        assertEquals(replaced, store.settings.first())
+    }
+
     @Test
     fun `defaults exclude the catch all category`() = runTest {
         val store = newStore()

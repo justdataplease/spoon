@@ -84,3 +84,26 @@ def test_gastronomos_recipe_urls_are_strict_same_site_https(url):
 def test_argiro_recipe_urls_are_strict_same_site_https(url):
     with pytest.raises(ProviderError, match="sourceUrl"):
         canonical_recipe_url(ARGIRO, url, "17265")
+
+
+@pytest.mark.parametrize("key,native,url,image", [
+    ("tsoulis", "42", "https://www.giorgostsoulis.com/syntages/glyka/keik", "https://api.giorgostsoulis.com/storage/recipes/keik.jpg"),
+    ("lucacos", "5769", "https://www.yiannislucacos.gr/recipe/5769/salata", "https://www.yiannislucacos.gr/sites/default/files/styles/image/public/a.jpg?itok=abc"),
+    ("funkycook", "42", "https://funkycook.gr/keik/", "https://funkycook.gr/wp-content/uploads/a.jpg"),
+    ("cookpad", "42", "https://cookpad.com/gr/sintages/42-keik", "https://img-global.cpcdn.com/recipes/abc/680x482cq80/photo.jpg"),
+])
+def test_new_publishers_preserve_identity_and_official_media_host(key, native, url, image):
+    from tools.recipe_importer.providers import provider_for, recipe_document_id, canonical_recipe_url, canonical_image_url
+    provider = provider_for(source_key=key)
+    assert recipe_document_id(provider, native) == key + "_" + native
+    assert canonical_recipe_url(provider, url, native) == url
+    assert canonical_image_url(provider, image) == image
+
+
+def test_new_provider_media_allowlist_does_not_allow_foreign_hosts_or_unknown_tokens():
+    from tools.recipe_importer.providers import provider_for, canonical_image_url, ProviderError
+    for key,url in [("cookpad", "https://evil.example/recipes/a.jpg"),
+                    ("lucacos", "https://www.yiannislucacos.gr/sites/a.jpg?redirect=bad"),
+                    ("tsoulis", "https://api.giorgostsoulis.com/storage/../private/a.jpg")]:
+        with pytest.raises(ProviderError):
+            canonical_image_url(provider_for(source_key=key), url)

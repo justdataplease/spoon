@@ -29,22 +29,27 @@ from typing import Any, Iterable, Mapping, Sequence
 
 try:
     from .helpers import classify_ease
+    from .facet_taxonomy import normalize_catalog_facets
     from .ingredient_taxonomy import normalize_ingredient_facets
 except ImportError:  # pragma: no cover - direct script execution
     from helpers import classify_ease
+    from facet_taxonomy import normalize_catalog_facets
     from ingredient_taxonomy import normalize_ingredient_facets
 
 
 SCHEMA_VERSION = 3
 APPLICATION_ID = 0x53504F4E  # ``SPON``; SQLite application_id is signed 32-bit.
 PAGE_SIZE = 16_384  # Avoid overflow-page waste for independently compressed recipes.
-MAX_GIT_BLOB_BYTES = 100_000_000
+MAX_CATALOG_BYTES = 2_000_000_000  # Catalog assets are tracked with Git LFS.
 JSON_COMPRESSION_LEVEL = 9
 
 DEFAULT_CATALOG_NAMES = (
     "akis-greek-full",
     "argiro-greek-full",
     "gastronomos-greek-full",
+    "tsoulis-greek-full",
+    "lucacos-greek-full",
+    "funkycook-greek-full",
 )
 
 # Keep this list aligned with data/model/Recipe.kt.  Fields absent from a source
@@ -305,6 +310,7 @@ class CatalogBuildError(ValueError):
 class SourceArtifact:
     catalog_path: Path
     manifest_path: Path
+    allow_partial: bool = False
 
 
 @dataclass(frozen=True)
@@ -619,8 +625,11 @@ def prepare_recipe(
     if not isinstance(category, str) or not category:
         raise CatalogBuildError(f"{recipe_id}: category must be a non-empty string")
 
-    # Bundle the same backend projection that is published to Firestore.
-    record = normalize_ingredient_facets(record)
+    # Preserve publisher artifacts, then derive consistent offline fields and indexes.
+    record = normalize_catalog_facets(normalize_ingredient_facets(record))
+    total_minutes = _non_negative_int(record.get("totalMinutes", 0), field="totalMinutes")
+    derived_ease = classify_ease(preparation_count, step_count, total_minutes)
+    record["ease"] = derived_ease
     facets, labels = _facet_values(record)
     ingredient_texts = _normalized_ingredient_texts(record)
     vegan_eligible = int(
@@ -642,7 +651,7 @@ def prepare_recipe(
         ease=derived_ease,
         rating=rating,
         prep_minutes=prep_minutes,
-        quick_recipe=int(quick_recipe),
+        quick_recipe=int(0 < total_minutes < 30),
         vegan_eligible=vegan_eligible,
         source_key=source_key,
         random_key=random_key,
@@ -664,17 +673,35 @@ def _read_manifest(artifact: SourceArtifact) -> dict[str, Any]:
     if not isinstance(manifest, dict):
         raise CatalogBuildError(f"{artifact.manifest_path}: manifest must be an object")
     if manifest.get("complete") is not True:
-        raise CatalogBuildError(f"{artifact.manifest_path}: catalog is not complete")
+        if not artifact.allow_partial:
+            raise CatalogBuildError(f"{artifact.manifest_path}: catalog is not complete")
+        if not isinstance(manifest.get("coverageNote"), str) or not manifest["coverageNote"].strip():
+            raise CatalogBuildError(f"{artifact.manifest_path}: partial catalog requires a coverage note")
+        if manifest.get("snapshotValidated") is not True:
+            raise CatalogBuildError(f"{artifact.manifest_path}: partial snapshot has not been validated")
     # Older provider manifests did not publish a language field.  Every row is
     # still checked below; an explicit non-Greek manifest value fails closed.
     if manifest.get("language", "el") != "el":
         raise CatalogBuildError(f"{artifact.manifest_path}: catalog is not Greek-only")
-    if manifest.get("failedRecipeCount") != 0:
+    if manifest.get("failedRecipeCount") != 0 and not artifact.allow_partial:
         raise CatalogBuildError(f"{artifact.manifest_path}: catalog contains failures")
+    if artifact.allow_partial and manifest.get("normalizationFailureCount") != 0:
+        raise CatalogBuildError(f"{artifact.manifest_path}: snapshot contains normalization failures")
     for field in ("catalogHash", "detailHash", "summaryHash", "sourcePayloadHash"):
         value = manifest.get(field)
         if not isinstance(value, str) or not _HEX_64_RE.fullmatch(value):
             raise CatalogBuildError(f"{artifact.manifest_path}: invalid {field}")
+    artifact_hash = manifest.get("artifactSha256")
+    if artifact.allow_partial or artifact_hash is not None:
+        if not isinstance(artifact_hash, str) or not _HEX_64_RE.fullmatch(artifact_hash):
+            raise CatalogBuildError(f"{artifact.manifest_path}: missing or invalid artifactSha256")
+        try:
+            with artifact.catalog_path.open("rb") as stream:
+                actual_hash = hashlib.file_digest(stream, "sha256").hexdigest()
+        except OSError as exc:
+            raise CatalogBuildError(f"cannot read {artifact.catalog_path}: {exc}") from exc
+        if actual_hash != artifact_hash:
+            raise CatalogBuildError(f"{artifact.catalog_path}: artifact checksum mismatch")
     return manifest
 
 
@@ -966,11 +993,11 @@ def _write_database(
             connection.close()
 
     size = temporary.stat().st_size
-    if size >= MAX_GIT_BLOB_BYTES:
+    if size >= MAX_CATALOG_BYTES:
         temporary.unlink()
         raise CatalogBuildError(
-            f"generated database is {size} bytes; Git blobs must stay below "
-            f"{MAX_GIT_BLOB_BYTES} bytes"
+            f"generated database is {size} bytes; catalog assets must stay below "
+            f"{MAX_CATALOG_BYTES} bytes"
         )
     os.replace(temporary, output_path)
 
@@ -1010,6 +1037,19 @@ def build_catalog(
         "ingredient_text_index": "recipe_ingredient_texts-title-info-instr-v1",
         "ingredient_text_normalization": "nfkd-casefold-alnum-v1",
     }
+    source_coverage = {}
+    for artifact in artifacts:
+        manifest = _read_manifest(artifact)
+        source_coverage[manifest["sourceKey"]] = {
+            "complete": manifest.get("complete") is True,
+            "discoveryComplete": manifest.get("discoveryComplete", manifest.get("complete")) is True,
+            "activeRecipeCount": manifest["activeRecipeCount"],
+            "pendingRecipeCount": manifest.get("pendingRecipeCount", 0),
+            "failedRecipeCount": manifest.get("failedRecipeCount", 0),
+            "coverageNote": manifest.get("coverageNote", ""),
+        }
+    metadata["source_coverage"] = canonical_json_bytes(source_coverage).decode("utf-8")
+    metadata["quick_recipe_rule"] = "known-total-minutes-lt-30-v1"
     _write_database(output_path, recipes, metadata)
     file_bytes = output_path.read_bytes()
     return BuildResult(
@@ -1044,7 +1084,14 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         action="append",
         nargs=2,
         metavar=("JSONL", "MANIFEST"),
-        help="catalog/manifest pair; repeat for each provider (defaults to all three)",
+        help="complete catalog/manifest pair; repeat for each provider (defaults to the six publishers with exhaustive indexes; add Cookpad with --partial-artifact)",
+    )
+    parser.add_argument(
+        "--partial-artifact",
+        action="append",
+        nargs=2,
+        metavar=("JSONL", "MANIFEST"),
+        help="explicitly include a validated partial snapshot; coverage stays incomplete in catalog metadata",
     )
     parser.add_argument(
         "--output",
@@ -1061,6 +1108,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.artifact
         else default_artifacts(_repository_root())
     )
+    artifacts += [
+        SourceArtifact(Path(pair[0]), Path(pair[1]), allow_partial=True)
+        for pair in (args.partial_artifact or [])
+    ]
     try:
         result = build_catalog(artifacts, args.output)
     except CatalogBuildError as exc:

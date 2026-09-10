@@ -4,11 +4,79 @@ import com.justdataplease.spoon.data.model.MealPreferenceDocument
 import com.justdataplease.spoon.data.preferences.MAX_MEAL_PREFERENCE_EPOCH_MILLIS
 import com.justdataplease.spoon.data.preferences.MealPreferenceSettings
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class MealPreferenceFirestoreTest {
+    @Test
+    fun `source exclusions roundtrip with strict validation and legacy default`() {
+        val keys = com.justdataplease.spoon.data.preferences.AllowedRecipePublisherKeys
+        val settings = MealPreferenceSettings(excludedSourceKeys = keys, updatedAtEpochMillis = 10L)
+        assertEquals(keys.sorted(), settings.toFirestoreDocument()["excludedSourceKeys"])
+        assertEquals(settings, settings.normalizedForSync(10L))
+        assertEquals(settings, MealPreferenceDocument(excludedCategories = settings.excludedCategories.toList(),
+            excludedSourceKeys = keys.toList(), updatedAtEpochMillis = 10L).toSettingsOrNull())
+        assertEquals(emptySet<String>(), MealPreferenceDocument(updatedAtEpochMillis = 10L).toSettingsOrNull()?.excludedSourceKeys)
+        for (invalid in listOf(listOf("akis", "akis"), listOf("AKIS"), listOf("unknown"), listOf("personal"))) {
+            assertNull(MealPreferenceDocument(excludedSourceKeys = invalid, updatedAtEpochMillis = 10L).toSettingsOrNull())
+        }
+        assertEquals(setOf("akis", "cookpad"), MealPreferenceSettings(excludedSourceKeys = setOf(" AKIS ", "cookpad", "bad"))
+            .normalizedForSync(10L).excludedSourceKeys)
+    }
+
+    @Test
+    fun `all sources enabled keeps the legacy document shape and normalizes missing exclusions`() {
+        val settings = MealPreferenceSettings(updatedAtEpochMillis = 10L)
+        val document = settings.toFirestoreDocument()
+
+        assertEquals(
+            setOf(
+                "excludedCategories", "veganOnly", "excludedIngredientTerms",
+                "updatedAtEpochMillis", "weekdayCategories", "dessertWeekdayCategories",
+                "sideWeekdayCategories", "favoritesOnly",
+            ),
+            document.keys,
+        )
+        assertEquals(settings, settings.normalizedForSync(10L))
+        assertEquals(
+            emptySet<String>(),
+            MealPreferenceDocument(updatedAtEpochMillis = 10L).toSettingsOrNull()?.excludedSourceKeys,
+        )
+    }
+
+    @Test
+    fun `source exclusions sanitized to empty also omit the optional field`() {
+        val settings = MealPreferenceSettings(
+            excludedSourceKeys = setOf(" ", "unknown", "personal"),
+            updatedAtEpochMillis = 10L,
+        )
+
+        assertFalse(settings.toFirestoreDocument().containsKey("excludedSourceKeys"))
+        assertEquals(emptySet<String>(), settings.normalizedForSync(20L).excludedSourceKeys)
+    }
+
+    @Test
+    fun `enabling every source emits a replacement document that removes prior exclusions`() {
+        val prior = MealPreferenceSettings(
+            excludedSourceKeys = setOf("akis", "cookpad"),
+            excludedIngredientTerms = setOf("γάλα"),
+            updatedAtEpochMillis = 10L,
+        )
+        val cleared = prior.copy(excludedSourceKeys = emptySet()).normalizedForSync(20L)
+        val replacement = cleared.toFirestoreDocument()
+
+        assertEquals(listOf("akis", "cookpad"), prior.toFirestoreDocument()["excludedSourceKeys"])
+        // FirestoreSpoonRepository uses full set() without merge: this complete replacement
+        // removes the absent field instead of retaining the remote document's previous list.
+        assertEquals(prior.toFirestoreDocument().keys - "excludedSourceKeys", replacement.keys)
+        assertFalse(replacement.containsKey("excludedSourceKeys"))
+        assertEquals(listOf("γάλα"), replacement["excludedIngredientTerms"])
+        assertEquals(20L, replacement["updatedAtEpochMillis"])
+        assertEquals(emptySet<String>(), cleared.excludedSourceKeys)
+    }
+
     @Test
     fun `weekday and favorites settings survive cloud serialization with legacy defaults`() {
         val settings = MealPreferenceSettings(

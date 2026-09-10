@@ -39,12 +39,13 @@ data class MealPreferenceSettings(
     val sideWeekdayCategories: Map<String, String> = emptyMap(),
     val dessertWeekdayCategories: Map<String, String> = emptyMap(),
     val favoritesOnly: Boolean = false,
+    val excludedSourceKeys: Set<String> = emptySet(),
 ) {
     fun hasActiveSelections(): Boolean =
         excludedCategories != DEFAULT_EXCLUDED_CATEGORIES || veganOnly ||
             excludedIngredientTerms.isNotEmpty() ||
             weekdayCategories.isNotEmpty() || sideWeekdayCategories.isNotEmpty() ||
-            dessertWeekdayCategories.isNotEmpty() || favoritesOnly
+            dessertWeekdayCategories.isNotEmpty() || favoritesOnly || excludedSourceKeys.isNotEmpty()
 }
 
 internal val DEFAULT_EXCLUDED_CATEGORIES = setOf(MealCategory.OTHER.key)
@@ -107,6 +108,7 @@ class MealPreferenceSettingsStore internal constructor(
             preferences.remove(DESSERT_WEEKDAY_CATEGORIES)
             preferences.remove(SIDE_WEEKDAY_CATEGORIES)
             preferences.remove(FAVORITES_ONLY)
+            preferences.remove(EXCLUDED_SOURCE_KEYS)
             clearPending(preferences)
         }
     }
@@ -126,6 +128,7 @@ class MealPreferenceSettingsStore internal constructor(
             preferences[PENDING_DESSERT_WEEKDAY_CATEGORIES] = settings.dessertWeekdayCategories.encodedWeekdayCategories()
             preferences[PENDING_SIDE_WEEKDAY_CATEGORIES] = settings.sideWeekdayCategories.encodedWeekdayCategories()
             preferences[PENDING_FAVORITES_ONLY] = settings.favoritesOnly
+            preferences[PENDING_EXCLUDED_SOURCE_KEYS] = settings.excludedSourceKeys.canonicalExcludedSourceKeys()
             preferences[PENDING_EXCLUDED_INGREDIENT_TERMS] =
                 settings.excludedIngredientTerms.cleanedPreferenceValues()
             preferences[PENDING_UPDATED_AT_EPOCH_MILLIS] = settings.updatedAtEpochMillis
@@ -198,6 +201,7 @@ class MealPreferenceSettingsStore internal constructor(
         private val DESSERT_WEEKDAY_CATEGORIES = stringSetPreferencesKey("dessert_weekday_categories")
         private val SIDE_WEEKDAY_CATEGORIES = stringSetPreferencesKey("side_weekday_categories")
         private val FAVORITES_ONLY = booleanPreferencesKey("favorites_only")
+        private val EXCLUDED_SOURCE_KEYS = stringSetPreferencesKey("excluded_source_keys")
         private val EXCLUDED_INGREDIENT_TERMS = stringSetPreferencesKey("excluded_ingredient_terms")
         private val UPDATED_AT_EPOCH_MILLIS = longPreferencesKey("updated_at_epoch_millis")
         private val OWNER_UID = stringPreferencesKey("owner_uid")
@@ -209,6 +213,7 @@ class MealPreferenceSettingsStore internal constructor(
         private val PENDING_DESSERT_WEEKDAY_CATEGORIES = stringSetPreferencesKey("pending_dessert_weekday_categories")
         private val PENDING_SIDE_WEEKDAY_CATEGORIES = stringSetPreferencesKey("pending_side_weekday_categories")
         private val PENDING_FAVORITES_ONLY = booleanPreferencesKey("pending_favorites_only")
+        private val PENDING_EXCLUDED_SOURCE_KEYS = stringSetPreferencesKey("pending_excluded_source_keys")
         private val PENDING_EXCLUDED_INGREDIENT_TERMS =
             stringSetPreferencesKey("pending_excluded_ingredient_terms")
         private val PENDING_UPDATED_AT_EPOCH_MILLIS =
@@ -223,6 +228,7 @@ class MealPreferenceSettingsStore internal constructor(
             dessertWeekdayCategories = preferences[DESSERT_WEEKDAY_CATEGORIES].orEmpty().decodedWeekdayCategories(),
             sideWeekdayCategories = preferences[SIDE_WEEKDAY_CATEGORIES].orEmpty().decodedWeekdayCategories(),
             favoritesOnly = preferences[FAVORITES_ONLY] ?: false,
+            excludedSourceKeys = preferences[EXCLUDED_SOURCE_KEYS].orEmpty().canonicalExcludedSourceKeys(),
             excludedIngredientTerms = preferences[EXCLUDED_INGREDIENT_TERMS]
                 .orEmpty()
                 .cleanedPreferenceValues(),
@@ -240,6 +246,7 @@ class MealPreferenceSettingsStore internal constructor(
             preferences[DESSERT_WEEKDAY_CATEGORIES] = settings.dessertWeekdayCategories.encodedWeekdayCategories()
             preferences[SIDE_WEEKDAY_CATEGORIES] = settings.sideWeekdayCategories.encodedWeekdayCategories()
             preferences[FAVORITES_ONLY] = settings.favoritesOnly
+            preferences[EXCLUDED_SOURCE_KEYS] = settings.excludedSourceKeys.canonicalExcludedSourceKeys()
             preferences[EXCLUDED_INGREDIENT_TERMS] = settings.excludedIngredientTerms
                 .cleanedPreferenceValues()
             preferences[UPDATED_AT_EPOCH_MILLIS] = settings.updatedAtEpochMillis
@@ -257,6 +264,7 @@ class MealPreferenceSettingsStore internal constructor(
                 dessertWeekdayCategories = preferences[PENDING_DESSERT_WEEKDAY_CATEGORIES].orEmpty().decodedWeekdayCategories(),
                 sideWeekdayCategories = preferences[PENDING_SIDE_WEEKDAY_CATEGORIES].orEmpty().decodedWeekdayCategories(),
                 favoritesOnly = preferences[PENDING_FAVORITES_ONLY] ?: false,
+                excludedSourceKeys = preferences[PENDING_EXCLUDED_SOURCE_KEYS].orEmpty().canonicalExcludedSourceKeys(),
                 excludedIngredientTerms = preferences[PENDING_EXCLUDED_INGREDIENT_TERMS]
                     .orEmpty()
                     .cleanedPreferenceValues(),
@@ -276,6 +284,7 @@ class MealPreferenceSettingsStore internal constructor(
             preferences.remove(PENDING_DESSERT_WEEKDAY_CATEGORIES)
             preferences.remove(PENDING_SIDE_WEEKDAY_CATEGORIES)
             preferences.remove(PENDING_FAVORITES_ONLY)
+            preferences.remove(PENDING_EXCLUDED_SOURCE_KEYS)
             preferences.remove(PENDING_EXCLUDED_INGREDIENT_TERMS)
             preferences.remove(PENDING_UPDATED_AT_EPOCH_MILLIS)
         }

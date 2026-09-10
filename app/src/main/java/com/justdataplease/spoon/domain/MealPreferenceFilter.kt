@@ -4,9 +4,11 @@ import com.justdataplease.spoon.data.expandedIngredientAliasTokens
 import com.justdataplease.spoon.data.local.normalizedCatalogToken
 import com.justdataplease.spoon.data.model.Recipe
 import com.justdataplease.spoon.data.preferences.MealPreferenceSettings
+import com.justdataplease.spoon.data.preferences.canonicalExcludedSourceKeys
 
 /** Global discovery rules. Saved recipes and history deliberately bypass these rules. */
 internal fun Recipe.matchesMealPreferences(settings: MealPreferenceSettings): Boolean {
+    if (effectiveSourceKey in settings.excludedSourceKeys.canonicalExcludedSourceKeys()) return false
     val excludedCategories = settings.excludedCategories
         .map(String::normalizedCatalogToken)
         .filter(String::isNotBlank)

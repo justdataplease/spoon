@@ -31,6 +31,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.justdataplease.spoon.ui.components.GradientHeroCard
+import com.justdataplease.spoon.ui.settings.AboutAppButton
 
 @Composable
 fun MoreScreen(
@@ -67,6 +68,7 @@ fun MoreScreen(
         }
         item { MoreCard("Λογαριασμός", "Σύνδεση και συγχρονισμός", Icons.Outlined.AccountCircle, onOpenAccount) }
         item { MoreCard("Νέα δική μου συνταγή", "Υλικά, βήματα και φωτογραφία", Icons.AutoMirrored.Outlined.NoteAdd, onCreateRecipe) }
+        item { AboutAppButton(modifier = Modifier.fillMaxWidth()) }
     }
 }
 

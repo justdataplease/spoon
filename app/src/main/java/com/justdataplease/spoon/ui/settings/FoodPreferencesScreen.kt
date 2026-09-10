@@ -19,6 +19,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.outlined.Category
+import androidx.compose.material.icons.outlined.Public
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Restaurant
 import androidx.compose.material.icons.outlined.Spa
@@ -54,6 +55,9 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.justdataplease.spoon.data.preferences.MealPreferenceSettings
+import com.justdataplease.spoon.data.preferences.RecipePublisherOptions
+import com.justdataplease.spoon.data.preferences.AllowedRecipePublisherKeys
+import com.justdataplease.spoon.ui.components.PublisherBadge
 import com.justdataplease.spoon.data.model.MealCourse
 import com.justdataplease.spoon.data.model.MealCategory
 import com.justdataplease.spoon.domain.WeeklyPlanDefaults
@@ -147,6 +151,49 @@ fun FoodPreferencesScreen(
                                 style = MaterialTheme.typography.bodyMedium,
                             )
                         }
+                    }
+                }
+            }
+
+            item {
+                PreferenceCard(
+                    title = "Πηγές συνταγών",
+                    subtitle = "Όλες οι πηγές είναι αρχικά ενεργές. Αποεπίλεξε όσες δεν θέλεις στις αναζητήσεις και στις νέες προτάσεις σου.",
+                    icon = Icons.Outlined.Public,
+                ) {
+                    val selectedCount = RecipePublisherOptions.count { it.key !in draft.excludedSourceKeys }
+                    Text("$selectedCount από ${RecipePublisherOptions.size} ενεργές", style = MaterialTheme.typography.labelLarge)
+                    FilterChip(
+                        selected = draft.excludedSourceKeys.isEmpty(),
+                        onClick = { draft = draft.copy(excludedSourceKeys = emptySet()) },
+                        label = { Text("Όλες οι πηγές") },
+                        leadingIcon = if (draft.excludedSourceKeys.isEmpty()) {
+                            { Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(18.dp)) }
+                        } else null,
+                    )
+                    RecipePublisherOptions.forEach { publisher ->
+                        val selected = publisher.key !in draft.excludedSourceKeys
+                        FilterChip(
+                            selected = selected,
+                            onClick = {
+                                draft = draft.copy(excludedSourceKeys = if (selected) {
+                                    draft.excludedSourceKeys + publisher.key
+                                } else draft.excludedSourceKeys - publisher.key)
+                            },
+                            label = { Text(publisher.name) },
+                            leadingIcon = {
+                                PublisherBadge(sourceKey = publisher.key, sourceName = publisher.name,
+                                    modifier = Modifier.size(24.dp))
+                            },
+                            trailingIcon = if (selected) {
+                                { Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(18.dp)) }
+                            } else null,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                    if (draft.excludedSourceKeys.containsAll(AllowedRecipePublisherKeys)) {
+                        Text("Δεν έχεις επιλέξει καμία πηγή. Θα εμφανίζονται μόνο οι προσωπικές σου συνταγές, εφόσον ταιριάζουν στα υπόλοιπα φίλτρα.",
+                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }
@@ -471,6 +518,7 @@ fun FoodPreferencesScreen(
                     }
                 }
             }
+            item { AboutAppButton(modifier = Modifier.fillMaxWidth()) }
         }
 
         Surface(

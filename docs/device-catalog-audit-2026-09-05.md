@@ -63,7 +63,10 @@ Catalog content hash:
 
 ## Reproduction
 
-Start an Android emulator, then run:
+Start a disposable Android emulator, then run. For an existing multi-user AVD,
+use the explicit test-user install/instrument commands in
+[Android device validation](android-device-validation.md) instead of the connected
+Gradle task, whose cleanup uninstalls packages across users:
 
 ```powershell
 .\gradlew.bat testDebugUnitTest connectedDebugAndroidTest assembleRelease lintVitalRelease --console=plain

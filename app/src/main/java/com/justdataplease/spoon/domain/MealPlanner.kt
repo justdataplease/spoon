@@ -156,6 +156,9 @@ class MealPlanner @Inject constructor(
         // arriving halfway through the loop must not produce a week with mixed policies.
         val preferences = mealPreferenceSettings.first()
         val favorites = favoritePool(preferences)
+        // Changing publisher choices affects future picks, while saved selections stay visible.
+        val existingPreferences = preferences.copy(excludedSourceKeys = emptySet())
+        val existingFavorites = if (preferences.excludedSourceKeys.isEmpty()) favorites else favoritePool(existingPreferences)
         val existing = repository.mealPlans.first().associateBy(DayMealPlan::date)
         val recipesById = repository.getRecipesByIds(
             existing.values.mapNotNullTo(mutableSetOf()) { it.recipeId.takeIf(String::isNotBlank) },
@@ -166,7 +169,7 @@ class MealPlanner @Inject constructor(
             val resetCategory = (date.dayOfWeek in resetWeekdays ||
                 date.dayOfWeek in resetCourseWeekdays[MealCourse.MAIN].orEmpty()) &&
                 current?.completed != true && current?.locked != true
-            var plan = if (current != null && !resetCategory && current.isUsable(recipesById, preferences, favorites)) {
+            var plan = if (current != null && !resetCategory && current.isUsable(recipesById, existingPreferences, existingFavorites)) {
                 current
             } else {
                 val replacement = createDay(

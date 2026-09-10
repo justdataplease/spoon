@@ -33,7 +33,7 @@ class RecipeShareLinkTest {
         listOf("custom_01234567-89ab-4def-8123-456789abcdef", "custom_123")
             .forEach { recipeId ->
                 assertNull(RecipeShareLink.create(recipeId))
-                assertNull(RecipeShareLink.shareText(recipeId, "Ιδιωτική συνταγή"))
+                assertNull(RecipeShareLink.shareText(recipeId, "Ιδιωτική συνταγή", "Τι θα φάμε;"))
                 assertNull(RecipeShareLink.parse("https://justdataplease.github.io/spoon/recipe/$recipeId"))
                 assertNull(RecipeShareLink.parse("spoon://recipe/$recipeId"))
             }
@@ -110,12 +110,12 @@ class RecipeShareLinkTest {
     @Test
     fun `share message includes normalized title and a clickable HTTPS link`() {
         assertEquals(
-            "Δες τη συνταγή «Φακές με λεμόνι» στο Spoon:\nhttps://justdataplease.github.io/spoon/recipe/9959",
-            RecipeShareLink.shareText("9959", "  Φακές\nμε  λεμόνι  "),
+            "Δες τη συνταγή «Φακές με λεμόνι» στο «Τι θα φάμε;»:\nhttps://justdataplease.github.io/spoon/recipe/9959",
+            RecipeShareLink.shareText("9959", "  Φακές\nμε  λεμόνι  ", "Τι θα φάμε;"),
         )
         assertEquals(
-            "Δες αυτή τη συνταγή στο Spoon:\nhttps://justdataplease.github.io/spoon/recipe/9959",
-            RecipeShareLink.shareText("9959", " \n "),
+            "Δες αυτή τη συνταγή στο «Τι θα φάμε;»:\nhttps://justdataplease.github.io/spoon/recipe/9959",
+            RecipeShareLink.shareText("9959", " \n ", "Τι θα φάμε;"),
         )
     }
 }

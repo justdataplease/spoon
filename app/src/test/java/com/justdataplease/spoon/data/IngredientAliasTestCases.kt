@@ -9,9 +9,9 @@ internal data class IngredientAliasTestCase(
 }
 
 internal val ReviewedIngredientAliasCases = listOf(
-    ingredientCase("Αυγό", "Αυγό", "Αυγά"),
+    ingredientCase("Αυγό", "Αυγό", "Αυγά", "Αβγό", "Αβγά", "Αυγών", "Αβγών"),
     ingredientCase("Πατάτα", "Πατάτα", "Πατάτες"),
-    ingredientCase("Ντομάτα", "Ντομάτα", "Ντομάτες"),
+    ingredientCase("Ντομάτα", "Ντομάτα", "Ντομάτες", "Ντομάτας", "Τομάτα", "Τομάτες", "Τομάτας"),
     ingredientCase("Αγκινάρα", "Αγκινάρα", "Αγκινάρες"),
     ingredientCase("Καρότο", "Καρότο", "Καρότα"),
     ingredientCase("Παντζάρι", "Παντζάρι", "Παντζάρια"),
@@ -25,30 +25,36 @@ internal val ReviewedIngredientAliasCases = listOf(
     ingredientCase("Σουπιά", "Σουπιά", "Σουπιές"),
     ingredientCase("Ελιά", "Ελιά", "Ελιές"),
     ingredientCase("Χουρμάς", "Χουρμάς", "Χουρμάδες"),
-    ingredientCase(
-        "Αποξηραμένα φρούτα",
-        "Αποξηραμένα φρούτα",
-        "Ξερά φρούτα",
-    ),
+    ingredientCase("Αποξηραμένα φρούτα", "Αποξηραμένα φρούτα", "Ξερά φρούτα"),
     ingredientCase("Ψάρι", "Ψάρι", "Ψάρια"),
     ingredientCase("Φουντούκι", "Φουντούκι", "Φουντούκια"),
 
     // Single-token groups still lock provider capitalization to the reviewed display label.
-    ingredientCase("Κοτόπουλο", "Κοτόπουλο", "ΚΟΤΟΠΟΥΛΟ"),
-    ingredientCase("Κιμάς", "Κιμάς", "ΚΙΜΑΣ"),
-    ingredientCase("Μοσχάρι", "Μοσχάρι", "ΜΟΣΧΑΡΙ"),
-    ingredientCase("Χοιρινό", "Χοιρινό", "ΧΟΙΡΙΝΟ"),
-    ingredientCase("Τυρί", "Τυρί", "ΤΥΡΙ"),
-    ingredientCase("Αλεύρι", "Αλεύρι", "ΑΛΕΥΡΙ"),
-    ingredientCase("Αλεύρι (ζύμες)", "Αλεύρι (ζύμες)", "ΑΛΕΥΡΙ (ΖΥΜΕΣ)"),
-    ingredientCase("Ζυμαρικά", "Ζυμαρικά", "ΖΥΜΑΡΙΚΑ"),
-    ingredientCase("Σοκολάτα", "Σοκολάτα", "ΣΟΚΟΛΑΤΑ"),
-    ingredientCase("Γιαούρτι", "Γιαούρτι", "ΓΙΑΟΥΡΤΙ"),
+    ingredientCase("Κοτόπουλο", "Κοτόπουλο", "Κοτόπουλου"),
+    ingredientCase("Κιμάς", "Κιμάς"),
+    ingredientCase("Μοσχάρι", "Μοσχάρι", "Μοσχαράκι"),
+    ingredientCase("Χοιρινό", "Χοιρινό"),
+    ingredientCase("Τυρί", "Τυρί", "Τυριά"),
+    ingredientCase("Αλεύρι", "Αλεύρι"),
+    ingredientCase("Αλεύρι (ζύμες)", "Αλεύρι (ζύμες)"),
+    ingredientCase("Ζυμαρικά", "Ζυμαρικά"),
+    ingredientCase("Σοκολάτα", "Σοκολάτα", "Σοκολάτας"),
+    ingredientCase("Γιαούρτι", "Γιαούρτι"),
 )
 
 internal val DistinctIngredientConceptCases = listOf(
     "Αλεύρι" to "Αλεύρι (ζύμες)",
     "Γάλα αμυγδάλου" to "Γάλα βρώμης",
+    "Γάλα" to "Ζαχαρούχο γάλα",
+    "Γάλα εβαπορέ" to "Ζαχαρούχο γάλα",
+    "Αλεύρι βρώμης" to "Αλεύρι ολικής άλεσης",
+    "Τυρί" to "Τυρί κότατζ",
+    "Μυζήθρα" to "Κεφαλοτύρι",
+    "Αυγό" to "Ασπράδι αυγού",
+    "Αυγό" to "Κρόκος αυγού",
+    "Ασπράδι αυγού" to "Κρόκος αυγού",
+    "Κρόκος αυγού" to "Σαφράν",
+    "Μπέικιν πάουντερ" to "Μαγειρική σόδα",
 )
 
 private fun ingredientCase(canonical: String, vararg aliases: String) =

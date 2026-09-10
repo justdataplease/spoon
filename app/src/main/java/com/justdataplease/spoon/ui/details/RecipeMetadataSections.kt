@@ -66,7 +66,7 @@ internal fun TaxonomySection(recipe: RecipeDetailUi) {
         taxonomyGroup("Κουζίνα / χώρα", recipe.cuisineLabels, ProviderLabelKind.CUISINE),
         taxonomyGroup("Κύριο υλικό", recipe.ingredientLabels, ProviderLabelKind.INGREDIENT),
         taxonomyGroup("Ετικέτες", recipe.tags.filterNot { it == "demo" }, ProviderLabelKind.TAG),
-        if (recipe.quickRecipe) taxonomyGroup("Χρόνος", listOf("Γρήγορη συνταγή"), ProviderLabelKind.TAG) else null,
+        if (recipe.totalMinutes in 1..29) taxonomyGroup("Χρόνος", listOf("Γρήγορη · κάτω από 30 λεπτά"), ProviderLabelKind.TAG) else null,
     )
     if (groups.isEmpty()) return
 

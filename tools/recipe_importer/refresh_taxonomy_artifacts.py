@@ -9,6 +9,7 @@ import argparse
 from collections import Counter
 from datetime import datetime, timezone
 import json
+import hashlib
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -27,7 +28,7 @@ from .full_schema import (
 )
 from .import_catalog import compute_catalog_hash, validate_manifest
 
-SOURCES = ("akis", "argiro", "gastronomos")
+SOURCES = ("akis", "argiro", "gastronomos", "tsoulis", "lucacos", "funkycook", "cookpad")
 TAXONOMY_FIELDS = ("categoryKeys", "category", "categoryLabel", "tags")
 
 
@@ -106,9 +107,24 @@ def _updated_manifest(
         if source == "argiro":
             result["parserContractHash"] = argiro_contract_hash()
             result["checkpointRunKey"] = argiro_run_key()
-        else:
+        elif source == "gastronomos":
             result["parserContractHash"] = gastronomos_contract_hash()
             result["checkpointRunKey"] = gastronomos_run_key()
+        else:
+            # Raw public-source checkpoints deliberately survive parser changes.
+            files = ["public_recipe_schema.py", "ingredient_aliases.json", "facet_aliases.json"]
+            adapter = Path(__file__).with_name(source + "_schema.py")
+            if adapter.exists():
+                files.append(adapter.name)
+            contract = hashlib.sha256()
+            for name in sorted(files):
+                contract.update(name.encode())
+                contract.update(Path(__file__).with_name(name).read_bytes())
+            result["parserContractHash"] = contract.hexdigest()
+            result.pop("checkpointRunKey", None)
+    if "artifactSha256" in result:
+        encoded = "".join(json.dumps(record, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False) + "\n" for record in records)
+        result["artifactSha256"] = hashlib.sha256(encoded.encode("utf-8")).hexdigest()
     return result
 
 
@@ -175,10 +191,11 @@ def main() -> int:
         default=Path(__file__).with_name("output"),
     )
     parser.add_argument("--commit", action="store_true")
+    parser.add_argument("--source", action="append", choices=SOURCES, help="refresh selected sources; repeat as needed (defaults to all)")
     args = parser.parse_args()
     result = [
         refresh_source(args.catalog_directory, source, commit=args.commit)
-        for source in SOURCES
+        for source in (args.source or SOURCES)
     ]
     print(json.dumps({"mode": "committed" if args.commit else "dry-run", "sources": result}))
     return 0

@@ -34,6 +34,8 @@ private val LabelWhitespace = Regex("\\s+")
 private val LatinLetter = Regex("[A-Za-z]")
 
 private val KnownProviderLabels = mapOf(
+    "χριστούγεννα" to "Χριστουγεννιάτικη",
+    "christmas" to "Χριστουγεννιάτικη",
     "air fryer" to "Φριτέζα αέρος",
     "barbeque" to "Μπάρμπεκιου",
     "bbq" to "Μπάρμπεκιου",

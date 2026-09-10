@@ -10,6 +10,27 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class MealPreferenceFilterTest {
+    @Test
+    fun `all publishers are enabled by default and exclusions intersect explicit explore filters`() {
+        val keys = com.justdataplease.spoon.data.preferences.AllowedRecipePublisherKeys
+        val recipes = keys.map { Recipe(id = "${it}_one", sourceKey = it, title = it, category = "meat") }
+        assertTrue(recipes.all { it.matchesMealPreferences(MealPreferenceSettings()) })
+        val disabled = MealPreferenceSettings(excludedSourceKeys = setOf("akis"))
+        assertFalse(recipes.first { it.sourceKey == "akis" }.matchesMealPreferences(disabled))
+        assertTrue(recipes.filter { it.sourceKey != "akis" }.all { it.matchesMealPreferences(disabled) })
+        assertTrue(ExploreRecipeFilter.filter(recipes, ExploreCriteria(sourceKeys = setOf("akis")), disabled).isEmpty())
+        assertTrue(ExploreRecipeFilter.filter(recipes, preferences = MealPreferenceSettings(excludedSourceKeys = keys)).isEmpty())
+    }
+
+    @Test
+    fun `source exclusions resolve legacy domains and leave personal and future sources available`() {
+        val disabled = MealPreferenceSettings(excludedSourceKeys = setOf(" TSoulis "))
+        assertFalse(Recipe(source = "www.giorgostsoulis.com", category = "meat").matchesMealPreferences(disabled))
+        val allDisabled = MealPreferenceSettings(excludedSourceKeys = com.justdataplease.spoon.data.preferences.AllowedRecipePublisherKeys)
+        assertTrue(Recipe(id = "custom_recipe", sourceKey = "personal", category = "meat").matchesMealPreferences(allDisabled))
+        assertTrue(Recipe(sourceKey = "future_publisher", category = "meat").matchesMealPreferences(allDisabled))
+    }
+
     private val veganOnly = MealPreferenceSettings(veganOnly = true)
 
     private val veganRecipe = Recipe(

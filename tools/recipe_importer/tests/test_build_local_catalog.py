@@ -337,7 +337,7 @@ def test_builds_exact_rows_metadata_query_columns_and_omits_import_payload(tmp_p
         ).fetchall()
         assert ("diet", "vegan") in facets
         assert ("diet", "χωρισ γλουτενη") in facets
-        assert ("cuisine", "ελληνικη κουζινα") in facets
+        assert ("cuisine", "ελληνικη") in facets
         options = json.loads(metadata["facet_options_json"])
         assert {option["token"] for option in options["ingredient"]} == {
             "καροτο",
@@ -507,3 +507,87 @@ def test_vegan_eligibility_also_checks_ingredient_facets():
     record["ingredientLabels"] = ["Αυγά"]
     record["ingredientSections"] = [{"ingredients": [{"title": "λαχανικά", "info": ""}]}]
     assert prepare_recipe(record)[0].vegan_eligible == 0
+
+
+@pytest.mark.parametrize("minutes,expected", [(0, 0), (1, 1), (29, 1), (30, 0), (90, 0)])
+def test_quick_index_uses_known_total_time_not_publisher_label(minutes, expected):
+    record = _record("quick", "tsoulis", title="Quick recipe")
+    record["totalMinutes"] = minutes
+    record["quickRecipe"] = not bool(expected)
+    prepared, _ = prepare_recipe(record)
+    assert prepared.quick_recipe == expected
+
+
+def test_partial_snapshot_requires_explicit_opt_in_and_retains_coverage(tmp_path):
+    record = _record("partial", "cookpad", title="Partial recipe")
+    artifact = _artifact(tmp_path, record["sourceKey"], [record])
+    manifest = json.loads(artifact.manifest_path.read_text(encoding="utf-8"))
+    manifest.update(artifactSha256=hashlib.sha256(artifact.catalog_path.read_bytes()).hexdigest(),
+                    complete=False, discoveryComplete=False, snapshotValidated=True,
+                    normalizationFailureCount=0, pendingRecipeCount=20,
+                    coverageNote="Public discovery is still running.")
+    artifact.manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(CatalogBuildError, match="not complete"):
+        build_catalog([artifact], tmp_path / "rejected.db")
+    output = tmp_path / "partial.db"
+    build_catalog([SourceArtifact(artifact.catalog_path, artifact.manifest_path, allow_partial=True)], output)
+    with sqlite3.connect(output) as db:
+        coverage = json.loads(db.execute("SELECT value FROM catalog_meta WHERE key='source_coverage'").fetchone()[0])
+    assert coverage[record["sourceKey"]]["complete"] is False
+    assert coverage[record["sourceKey"]]["pendingRecipeCount"] == 20
+
+
+def test_partial_snapshot_rejects_unvalidated_or_failed_normalization(tmp_path):
+    record = _record("partial", "cookpad", title="Partial recipe")
+    artifact = _artifact(tmp_path, record["sourceKey"], [record])
+    manifest = json.loads(artifact.manifest_path.read_text(encoding="utf-8"))
+    manifest.update(complete=False, coverageNote="Download in progress.")
+    partial = SourceArtifact(artifact.catalog_path, artifact.manifest_path, allow_partial=True)
+    artifact.manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(CatalogBuildError, match="not been validated"):
+        build_catalog([partial], tmp_path / "bad.db")
+    manifest.update(snapshotValidated=True, normalizationFailureCount=1)
+    artifact.manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(CatalogBuildError, match="normalization failures"):
+        build_catalog([partial], tmp_path / "bad.db")
+
+
+def test_partial_snapshot_rejects_changed_file_with_same_record_count(tmp_path):
+    record = _record("partial", "cookpad", title="Original")
+    artifact = _artifact(tmp_path, "cookpad", [record])
+    manifest = json.loads(artifact.manifest_path.read_text(encoding="utf-8"))
+    manifest.update(complete=False, snapshotValidated=True, normalizationFailureCount=0,
+                    coverageNote="Discovery ongoing.",
+                    artifactSha256=hashlib.sha256(artifact.catalog_path.read_bytes()).hexdigest())
+    artifact.manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    record["title"] = "Changed"
+    artifact.catalog_path.write_text(json.dumps(record), encoding="utf-8")
+    with pytest.raises(CatalogBuildError, match="checksum mismatch"):
+        build_catalog([SourceArtifact(artifact.catalog_path, artifact.manifest_path, allow_partial=True)], tmp_path / "bad.db")
+
+
+def test_mandatory_wait_contradiction_updates_quick_index_and_recipe_payload(tmp_path):
+    records = []
+    for recipe_id, instruction in [
+        ("fixture_wait", "Τοποθετούμε το μείγμα στο ψυγείο για 8 ώρες."),
+        ("fixture_optional", "Σερβίρουμε αμέσως ή προαιρετικά αφήνουμε στο ψυγείο για 8 ώρες."),
+    ]:
+        record = _record(recipe_id, "fixture", title="Κρέμα")
+        record.update(totalMinutes=20, prepMinutes=0, cookMinutes=20, quickRecipe=True)
+        record["methodSections"] = [{"title": "Εκτέλεση", "steps": [instruction]}]
+        records.append(record)
+    output = tmp_path / "timing.db"
+    build_catalog([_artifact(tmp_path, "fixture", records)], output)
+    with _open_read_only(output) as database:
+        for recipe_id, expected_total, expected_quick in [
+            ("fixture_wait", 0, 0), ("fixture_optional", 20, 1),
+        ]:
+            quick, compressed = database.execute(
+                "SELECT quick_recipe, recipe_json FROM recipes WHERE id = ?", (recipe_id,),
+            ).fetchone()
+            recipe = json.loads(zlib.decompress(compressed))
+            assert quick == expected_quick
+            assert recipe.get("totalMinutes", 0) == expected_total
+            assert recipe["cookMinutes"] == 20
+            assert "8 ώρες" in recipe["methodSections"][0]["steps"][0]
+    assert records[0]["totalMinutes"] == 20

@@ -1,12 +1,12 @@
 # Τι θα φάμε; (Spoon)
 
-Spoon is an Android meal planner written in Kotlin and Jetpack Compose. The entire
+«Τι θα φάμε;» is an Android meal planner written in Kotlin and Jetpack Compose. The entire
 user interface is Greek. It builds a weekly food plan, proposes a matching recipe
 for each day, and makes it easy to reroll, filter, save, replace, and mark meals as
 cooked.
 
-The Android application ID is `com.spoon.app`. Its complete public catalog of
-20,861 Greek recipes is bundled as an indexed SQLite database, while Firebase
+The Android application ID is `com.spoon.app`. Its Greek recipe catalog from seven publishers is bundled as an indexed SQLite
+database, while Firebase
 project `spoontheplanner` provides account-backed synchronization for personal
 data.
 
@@ -30,7 +30,7 @@ data.
   Already-cooked meals are automatically kept too. Locks persist offline and sync
   with the plan; unlocking makes the day eligible for weekly regeneration again.
 - Independent random reroll for one day or the whole week. Every matching recipe
-  has the same selection probability across Akis, Argiro, Gastronomos, and custom
+  has the same selection probability across the seven publishers and custom
   recipes; no provider receives priority. Existing selections, other days/weeks,
   and cooked history do not remove recipes from the pool for eligible days.
 - Per-day constraints for category, difficulty, minimum rating on a 0–10 scale,
@@ -51,20 +51,33 @@ data.
 - An Explore screen with accent-insensitive Greek search and combined filters for
   category, effort, rating, preparation time, quick recipes, special diet, meal
   type, occasion, cooking method, country/cuisine, and main ingredient.
+- The quick filter means known total time strictly under 30 minutes, including
+  preparation, cooking, and waiting. A dedicated «Χριστουγεννιάτικη» filter uses
+  the same Christmas occasion identity across publishers. Common ingredient and
+  facet aliases are shared with the importer and checked against Android.
+- All seven publishers are selected by default in Settings. Deselect any source
+  to exclude it from Explore matches and new meal suggestions; existing saved
+  meals remain intact. Source choices persist offline; cross-phone synchronization
+  requires the accompanying source-preference Firestore rules. Their production
+  deployment is pending approval; source exclusions already work locally.
+- An Android home-screen widget shows today's planned main recipe with only its
+  picture and name. Tapping opens that recipe. See [widget details](docs/today-recipe-widget.md).
+- A discreet personal-use and linked publisher credit appears at the start of
+  each recipe. The Settings «Σχετικά» button lists all publishers and credits.
 - Photo-rich cards and a complete recipe page with gallery, descriptions, timing,
   difficulty, servings, rating distribution, grouped ingredients and conversions,
   numbered method steps, tips, nutrition, equipment, publication metadata, and the
   canonical source link.
-- Share any built-in catalog recipe with another Spoon user from the recipe's
+- Share any built-in catalog recipe with another «Τι θα φάμε;» user from the recipe's
   «Κοινοποίηση συνταγής» button. The Android share sheet sends a clickable HTTPS
-  link that opens the same recipe in Spoon, including on a cold launch. Both
-  phones need version 0.8.6 or later. The recipe is read from the recipient's
+  link that opens the same recipe in «Τι θα φάμε;», including on a cold launch. Both
+  phones need version 0.8.6 or later and a catalog containing that recipe; the four
+  new publishers require version 0.9.0 or later. The recipe is read from the recipient's
   offline catalog; private notes and personal recipes are never included.
 - User-initiated inline video for YouTube, Vimeo, and direct HTTPS video files.
   Nothing autoplays, unsafe URLs/navigation are blocked, loading failures are shown
   instead of a blank player, and an external fallback remains available.
-- The complete 20,861-recipe Greek catalog works offline from indexed local
-  SQLite. Explore loads 24 rows at a time, so opening and filtering the catalog
+- The bundled Greek recipe catalog works offline from indexed local SQLite. Explore loads 24 rows at a time, so opening and filtering the catalog
   does not download every recipe or issue Firestore recipe reads.
 - Sign-in-only Firebase Authentication with email/password, sign-out, and password
   reset. The app does not register users or create anonymous Firebase accounts.
@@ -109,6 +122,10 @@ tools/recipe_importer/
   crawl_catalog.py    complete permission-gated Akis Greek crawler
   crawl_argiro.py     complete permission-gated Argiro Greek crawler
   crawl_gastronomos.py complete permission-gated Gastronomos Greek crawler
+  crawl_tsoulis.py    permission-gated Tsoulis sitemap crawler
+  crawl_lucacos.py    permission-gated Lucacos sitemap crawler
+  crawl_funkycook.py  permission-gated Funky Cook post crawler
+  crawl_cookpad.py    resumable public Greek Cookpad link-graph crawler
   build_local_catalog.py deterministic indexed SQLite catalog builder
   full_schema.py      rich normalization and Firestore projections
   ingredient_taxonomy.py shared ingredient identities for Firestore projections
@@ -139,7 +156,10 @@ $env:ANDROID_SDK_ROOT=$env:ANDROID_HOME
 ```
 
 For catalog, taxonomy, or filtering changes, also run the full catalog contract
-on a connected Android emulator before distributing an APK:
+before distributing an APK. Use the connected Gradle task below on a disposable
+Android emulator. For an existing multi-user AVD, follow the explicit test-user
+install/instrument commands in [Android device validation](docs/android-device-validation.md);
+Gradle's automatic cleanup uninstalls its app packages across users.
 
 ```powershell
 .\gradlew.bat connectedDebugAndroidTest
@@ -159,7 +179,7 @@ This executes production SQLite queries and Kotlin filters against all bundled
 recipes, checks every published facet, repeated planning across every category,
 cache eviction, saved-state reopening, and catalog replacement on upgrade.
 The tests keep their catalog and personal preferences in an isolated namespace.
-See [the device verification report](docs/device-catalog-audit-2026-09-05.md).
+See [the device verification report](docs/device-catalog-audit-2026-09-10.md).
 
 The optimized, signed personal release APK is delivered at `dist/spoon.apk`. To
 install or upgrade it over USB:
@@ -187,13 +207,13 @@ static site and association, deployed to the root of the separate
 [the website deployment notes](website/README.md).
 
 When a messaging app keeps links in its own browser, the landing page offers
-«Άνοιγμα στο Spoon». If the app is absent or outdated, it also links to the current
+«Άνοιγμα στο Τι θα φάμε;». If the app is absent or outdated, it also links to the current
 APK. After upgrading, tap the original recipe link again. No account identifier
 or personal content is placed in these links, and opening one does not add a
 favorite or change a meal plan. Manually created recipes remain owner-private.
 
 Links are validated before catalog lookup. Unknown recipes show a Greek update
-message; malformed or private IDs are rejected. Incoming links work while Spoon
+message; malformed or private IDs are rejected. Incoming links work while the app
 is running, survive activity recreation, and can be dismissed while loading.
 
 ## Firebase configuration
@@ -309,18 +329,19 @@ python tools/recipe_importer/import_catalog.py `
   --i-have-permission --i-have-gastronomos-permission --commit `
   --project-id spoontheplanner
 
-python tools/recipe_importer/build_local_catalog.py
+python tools/recipe_importer/build_local_catalog.py `
+  --partial-artifact build/recipe-importer/cookpad/cookpad-full.jsonl `
+  build/recipe-importer/cookpad/cookpad-full.manifest.json
 ```
 
-The catalog builder validates all three complete artifacts and their manifests,
+The catalog builder validates each selected artifact and its manifest,
 then deterministically writes the indexed Android asset. It records recipe counts
 and content hashes so a truncated, stale, or mismatched input cannot silently
 become an APK catalog.
 
-The crawlers identify themselves exactly as
-`PeltesSpoonRecipeImporter/1.0 (+mailto:hey@spoon.gr)`, read `robots.txt`, restrict
-themselves to same-site HTTPS, wait at least one second globally between requests,
-honor retries/`Retry-After`, and resume through SQLite. Any failed recipe prevents
+The crawlers identify themselves, read `robots.txt`, restrict themselves to
+allowed publisher HTTPS hosts, honor publisher crawl delays and `Retry-After`,
+pace requests independently per source, and resume through SQLite. Any failed recipe prevents
 a complete artifact. The importer recomputes counts and hashes, fully replaces
 normalized documents, tombstones disappeared active IDs instead of deleting them,
 and writes `spoon_catalog/status` only after every batch succeeds.
@@ -370,8 +391,8 @@ window these permissions apply across every Firestore document in the project.
 Outside the window, the binding grants no catalog data access.
 
 A quarterly backend import does not replace the catalog already inside an
-installed app. After a successful three-provider refresh, run
-`python tools/recipe_importer/build_local_catalog.py`, verify the recorded counts
+installed app. After a successful refresh, rebuild the bundled catalog using the source pairs
+documented in [the download workflow](docs/new-source-downloads.md), verify the recorded counts
 and hashes, build the optimized release, and distribute a new `dist/spoon.apk`.
 
 ## Privacy and operating notes
@@ -386,3 +407,5 @@ and hashes, build the optimized release, and distribute a new `dist/spoon.apk`.
   does not pass a positive time cap.
 - Recipe pages preserve source attribution and a link to the canonical publisher
   page.
+
+New source onboarding is documented in [the Claude project skill](.claude/skills/add-recipe-source/SKILL.md), invoked with `/add-recipe-source <publisher URL>`. Download coverage and resumable commands for the four additional publishers are in [the source download notes](docs/new-source-downloads.md).

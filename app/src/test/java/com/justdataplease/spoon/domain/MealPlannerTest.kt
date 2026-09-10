@@ -28,6 +28,26 @@ import org.junit.Test
 
 class MealPlannerTest {
     @Test
+    fun `source exclusions preserve saved plans but block new picks including favorites mode`() = runBlocking {
+        val date = LocalDate.of(2026, 9, 7)
+        val recipe = Recipe(id = "akis_recipe", title = "Saved recipe", sourceKey = "akis", category = "meat")
+        for (favoritesOnly in listOf(false, true)) {
+            val settings = MealPreferenceSettings(favoritesOnly = favoritesOnly,
+                weekdayCategories = java.time.DayOfWeek.entries.associate { it.name to "meat" })
+            val repository = FakeRepository(initialRecipes = listOf(recipe), initialFavorites = setOf(recipe.id), initialPreferences = settings)
+            val planner = MealPlanner(repository, RecipeSelector())
+            val saved = planner.ensureWeek(date)
+            assertTrue(saved.all { it.recipeId == recipe.id })
+            (repository.mealPreferenceSettings as MutableStateFlow).value = settings.copy(
+                excludedSourceKeys = com.justdataplease.spoon.data.preferences.AllowedRecipePublisherKeys)
+            assertEquals(saved, planner.ensureWeek(date))
+            assertEquals(recipe, planner.getRecipeDetails(recipe.id))
+            assertTrue(planner.ensureWeek(date.plusWeeks(1)).all { it.recipeId.isBlank() })
+            assertTrue(planner.reroll(date.plusWeeks(1), RecipeFilters(category = "meat")) is MealPlanSelection.NoMatch)
+        }
+    }
+
+    @Test
     fun `ensure week creates all seven days once`() = runBlocking {
         val repository = FakeRepository()
         val planner = MealPlanner(repository, RecipeSelector())

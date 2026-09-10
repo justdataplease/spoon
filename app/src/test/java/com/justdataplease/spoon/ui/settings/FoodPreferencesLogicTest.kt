@@ -92,14 +92,16 @@ class FoodPreferencesLogicTest {
     @Test
     fun `ingredient suggestions ignore Greek accents and rank prefixes first`() {
         val options = listOf(
-            "Σούπα με κοτόπουλο",
+            "Ασιατική σούπα με κοτόπουλο",
             "ΚΟΤΟΠΟΥΛΟ",
             "Κοτόπουλο μπούτι",
             "Μοσχάρι",
         )
 
+        // A provider alias still earns prefix priority while displaying its reviewed name.
+        // The alphabetically earlier soup must follow both prefix matches.
         assertEquals(
-            listOf("Κοτόπουλο", "Κοτόπουλο μπούτι", "Σούπα με κοτόπουλο"),
+            listOf("Κοτόπουλο", "Μπούτι κοτόπουλου", "Ασιατική σούπα με κοτόπουλο"),
             ingredientSuggestions(options, emptySet(), "κοτοπουλο"),
         )
     }

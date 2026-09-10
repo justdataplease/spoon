@@ -13,7 +13,7 @@ import hashlib
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
-from urllib.parse import unquote, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, unquote, urlsplit, urlunsplit
 
 
 DOCUMENT_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
@@ -36,6 +36,8 @@ class RecipeProvider:
     url_id_must_match: bool = True
     legacy_numeric_document_ids: bool = False
     image_path_prefixes: tuple[str, ...] = ()
+    image_hosts: frozenset[str] = frozenset()
+    image_query_keys: frozenset[str] = frozenset()
 
 
 AKIS = RecipeProvider(
@@ -70,7 +72,55 @@ GASTRONOMOS = RecipeProvider(
     image_path_prefixes=("/wp-content/", "/uploads/", "/images/"),
 )
 
-PROVIDERS = {provider.key: provider for provider in (AKIS, ARGIRO, GASTRONOMOS)}
+TSOULIS = RecipeProvider(
+    key="tsoulis",
+    source="giorgostsoulis.com",
+    display_name="Γιώργος Τσούλης",
+    hosts=frozenset({"giorgostsoulis.com", "www.giorgostsoulis.com", "app.giorgostsoulis.com"}),
+    canonical_host="www.giorgostsoulis.com",
+    recipe_path=re.compile(r"^/syntages/[^/?#]+/(?P<id>[^/?#]+)/?$"),
+    url_id_must_match=False,
+    image_path_prefixes=("/storage/", "/images/", "/media/"),
+    image_hosts=frozenset({"api.giorgostsoulis.com"}),
+)
+
+LUCACOS = RecipeProvider(
+    key="lucacos",
+    source="yiannislucacos.gr",
+    display_name="Γιάννης Λουκάκος",
+    hosts=frozenset({"yiannislucacos.gr", "www.yiannislucacos.gr"}),
+    canonical_host="www.yiannislucacos.gr",
+    recipe_path=re.compile(r"^/recipe/(?:[^/?#]+/)?(?P<id>\d+)/[^/?#]+/?$"),
+    image_path_prefixes=("/sites/",),
+    image_query_keys=frozenset({"itok"}),
+)
+
+FUNKYCOOK = RecipeProvider(
+    key="funkycook",
+    source="funkycook.gr",
+    display_name="Funky Cook",
+    hosts=frozenset({"funkycook.gr", "www.funkycook.gr"}),
+    canonical_host="funkycook.gr",
+    recipe_path=re.compile(r"^/(?P<id>[^/?#]+)/?$"),
+    url_id_must_match=False,
+    image_path_prefixes=("/wp-content/",),
+)
+
+COOKPAD = RecipeProvider(
+    key="cookpad",
+    source="cookpad.com",
+    display_name="Cookpad",
+    hosts=frozenset({"cookpad.com", "www.cookpad.com"}),
+    canonical_host="cookpad.com",
+    recipe_path=re.compile(r"^/gr/sintages/(?P<id>\d+)(?:-[^/?#]+)?/?$"),
+    image_path_prefixes=("/recipes/",),
+    image_hosts=frozenset({"img-global.cpcdn.com"}),
+)
+
+PROVIDERS = {
+    provider.key: provider
+    for provider in (AKIS, ARGIRO, GASTRONOMOS, TSOULIS, LUCACOS, FUNKYCOOK, COOKPAD)
+}
 _ALIASES = {
     alias: provider.key
     for provider in PROVIDERS.values()
@@ -175,8 +225,8 @@ def canonical_image_url(provider: RecipeProvider, value: object) -> str:
         raise ProviderError("imageUrl must be a non-empty HTTPS URL")
     parts = urlsplit(value.strip())
     host = (parts.hostname or "").casefold().rstrip(".")
-    if parts.scheme.casefold() != "https" or host not in provider.hosts:
-        raise ProviderError(f"imageUrl must use HTTPS on {provider.source}")
+    if parts.scheme.casefold() != "https" or host not in provider.hosts | provider.image_hosts:
+        raise ProviderError(f"imageUrl must use HTTPS on an approved {provider.source} image host")
     if parts.username or parts.password or parts.port not in (None, 443):
         raise ProviderError("imageUrl must not contain credentials or a non-standard port")
     decoded_path = unquote(parts.path)
@@ -186,11 +236,13 @@ def canonical_image_url(provider: RecipeProvider, value: object) -> str:
         or decoded_path.endswith("/")
         or "\\" in decoded_path
         or any(segment in {".", ".."} for segment in segments)
-        or parts.query
+        or any(key not in provider.image_query_keys for key, _ in parse_qsl(parts.query, keep_blank_values=True))
+        or (bool(parts.query) and not provider.image_query_keys)
         or parts.fragment
     ):
         raise ProviderError("imageUrl path must identify an approved provider-hosted file")
-    return urlunsplit(("https", provider.canonical_host, parts.path, "", ""))
+    image_host = host if host in provider.image_hosts else provider.canonical_host
+    return urlunsplit(("https", image_host, parts.path, parts.query, ""))
 
 
 def stable_recipe_random_key(provider: RecipeProvider, provider_recipe_id: object) -> float:

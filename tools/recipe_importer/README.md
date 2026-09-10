@@ -1,10 +1,11 @@
 # Permission-gated full Greek recipe catalog pipeline
 
 This directory contains the crawlers, normalizers, validators, deterministic
-local-catalog builder, and Firestore importer used by Spoon. It is designed to
-capture every currently published
-canonical Greek recipe exposed by `akispetretzikis.com`, `argiro.gr`, and
-`gastronomos.gr`, including the details and filter taxonomy needed by the app.
+local-catalog builder, and Firestore importer used by «Τι θα φάμε;». It supports
+Akis, Argiro, Gastronomos, Tsoulis, Lucacos, Funky Cook, and Greek Cookpad recipes,
+including full details and common filter taxonomy. The first six have exhaustive
+publisher indexes; Cookpad uses a public link graph and cannot certify full-source
+coverage. See [the four new source commands](../../docs/new-source-downloads.md).
 
 Run the full-content commands only when the publisher has authorized the intended
 collection, storage, media display, and refresh cadence. The required permission
@@ -16,10 +17,10 @@ checkpoints, reports, and credentials are ignored by Git.
 ## Multiple recipe providers
 
 Records include additive provenance fields: source (legacy publisher domain),
-sourceKey (`akis`, `argiro`, or `gastronomos`), string providerRecipeId, legacy
+sourceKey (`akis`, `argiro`, `gastronomos`, `tsoulis`, `lucacos`, `funkycook`, or `cookpad`), string providerRecipeId, legacy
 numeric sourceRecipeId, sourceUrl/canonicalUrl, and Greek sourceName. Existing
 Akis document IDs remain numeric so saved plans, favorites, history, and notes do
-not break. Other providers are namespaced (`argiro_...` and `gastronomos_...`),
+not break. Other providers are namespaced (`<sourceKey>_<native-id>`),
 with a deterministic hash fallback only when a native ID is not document-safe.
 
 Full imports are deliberately single-provider. Retirement inventory is filtered
@@ -163,14 +164,16 @@ import after a crawler exit code other than zero.
 
 ## Build the bundled Android catalog
 
-After all three complete artifacts and manifests have been produced, build the
+After all six indexed-source artifacts and manifests have been produced, build the
 indexed SQLite asset used by the app:
 
 ```powershell
-python tools/recipe_importer/build_local_catalog.py
+python tools/recipe_importer/build_local_catalog.py `
+  --partial-artifact build/recipe-importer/cookpad/cookpad-full.jsonl `
+  build/recipe-importer/cookpad/cookpad-full.manifest.json
 ```
 
-The builder deterministically combines all 20,861 active Greek recipes, including
+The builder deterministically combines the selected active Greek recipes, including
 their summaries, ingredients, steps, filter facets, source links, and image/video
 URLs. It verifies the input counts and hashes against the manifests and records
 the resulting catalog count and content hashes in SQLite metadata. A missing,
@@ -489,7 +492,9 @@ commit it after reviewing the changed recipe counts and hashes:
 ```powershell
 python -m tools.recipe_importer.refresh_taxonomy_artifacts
 python -m tools.recipe_importer.refresh_taxonomy_artifacts --commit
-python tools/recipe_importer/build_local_catalog.py
+python tools/recipe_importer/build_local_catalog.py `
+  --partial-artifact build/recipe-importer/cookpad/cookpad-full.jsonl `
+  build/recipe-importer/cookpad/cookpad-full.manifest.json
 ```
 
 The refresh command revalidates each existing artifact and manifest before it
@@ -532,3 +537,29 @@ and personal-data collections are never written.
 A taxonomy-only repair clears stale whole-document summary/detail status hashes,
 because it cannot certify unrelated fields. Original catalog/source hashes remain
 intact; a subsequent complete import restores the full projection hashes.
+
+## Shared filters and source coverage
+
+`ingredient_aliases.json` and `facet_aliases.json` contain reviewed common Greek
+identities and aliases. Android mirrors these vocabularies and tests every entry
+with `CommonTaxonomyContractTest`. New public parsers preserve raw publisher
+keywords, ingredient lines, and source evidence, while exposing only reviewed
+ingredient identities as facets. Do not promote adjective fragments or search
+links to independent ingredient identities.
+
+The offline quick index uses `0 < totalMinutes < 30`; an absent time or a
+publisher's quick label alone does not qualify. Equivalent Christmas labels map
+to the occasion `Χριστούγεννα` and display as `Χριστουγεννιάτικη`.
+
+The default builder reads six complete `<source>-greek-full` pairs. Cookpad is
+always an explicit `--partial-artifact` until an exhaustive publisher index is
+available. Supplying any `--artifact` pairs replaces the complete defaults, so
+include every intended complete source when building with additional partial
+Tsoulis/Lucacos snapshots. Partial manifests require a matching file checksum,
+zero normalization failures, `snapshotValidated: true`, and a coverage note.
+They retain incomplete discovery, pending counts, and fetch failures in the
+SQLite `catalog_meta.source_coverage` field. They cannot authorize a full
+Firestore import or retirement.
+
+The SQLite database and distributed APKs are tracked with Git LFS. Raw downloaded
+HTML, JSONL archives, manifests and checkpoints remain local ignored artifacts.

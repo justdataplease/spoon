@@ -6,10 +6,13 @@ import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteException
 import androidx.core.content.pm.PackageInfoCompat
 import com.justdataplease.spoon.data.expandedIngredientAliasTokens
+import com.justdataplease.spoon.data.canonicalFacetTokens
 import com.justdataplease.spoon.data.model.MealCategory
 import com.justdataplease.spoon.data.model.Recipe
 import com.justdataplease.spoon.data.model.RecipeFilters
 import com.justdataplease.spoon.data.preferences.MealPreferenceSettings
+import com.justdataplease.spoon.data.preferences.RecipePublisherOptions
+import com.justdataplease.spoon.data.preferences.canonicalExcludedSourceKeys
 import com.justdataplease.spoon.data.requireSafeRecipeDocumentId
 import com.justdataplease.spoon.domain.ExploreCriteria
 import com.justdataplease.spoon.domain.repository.CatalogFacetOptions
@@ -387,11 +390,7 @@ class BundledRecipeCatalog(
         private const val FACET_METHOD = "method"
         private const val FACET_CUISINE = "cuisine"
         private const val FACET_INGREDIENT = "ingredient"
-        private val SOURCE_LABELS = mapOf(
-            "akis" to "Άκης Πετρετζίκης",
-            "argiro" to "Αργυρώ Μπαρμπαρίγου",
-            "gastronomos" to "Γαστρονόμος",
-        )
+        private val SOURCE_LABELS = RecipePublisherOptions.associate { it.key to it.name }
     }
 }
 
@@ -498,6 +497,11 @@ internal object CatalogSqlBuilder {
         arguments: MutableList<String>,
         preferences: MealPreferenceSettings,
     ) {
+        val excludedSources = preferences.excludedSourceKeys.canonicalExcludedSourceKeys().sorted()
+        if (excludedSources.isNotEmpty()) {
+            predicates += "r.source_key NOT IN (${placeholders(excludedSources.size)})"
+            arguments += excludedSources
+        }
         // Category values are stable machine keys, not searchable labels. Text
         // normalization turns pasta_rice/street_food into values absent from SQLite.
         val excludedCategories = preferences.excludedCategories
@@ -554,7 +558,7 @@ internal object CatalogSqlBuilder {
         val values = if (expandIngredientAliases) {
             rawValues.expandedIngredientTokens()
         } else {
-            rawValues.normalizedTokens()
+            canonicalFacetTokens(facetType, rawValues).toList()
         }
         if (values.isEmpty()) return
         predicates += """

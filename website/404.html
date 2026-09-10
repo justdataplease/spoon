@@ -3,27 +3,39 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="theme-color" content="#416447">
+    <meta name="theme-color" content="#B8442E">
     <meta name="referrer" content="no-referrer">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; base-uri 'none'; form-action 'none'">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'">
     <meta name="robots" content="noindex">
-    <title>Συνταγή στο Spoon</title>
+    <title>Συνταγή στο «Τι θα φάμε;»</title>
+    <meta property="og:site_name" content="Τι θα φάμε;">
+    <meta property="og:title" content="Τι θα φάμε;">
+    <meta property="og:description" content="Μια καλή ιδέα για κάθε μέρα. Οργάνωσε το μενού σου και μοιράσου αγαπημένες συνταγές.">
+    <meta property="og:type" content="website">
+    <meta property="og:locale" content="el_GR">
+    <meta property="og:image" content="https://justdataplease.github.io/app-icon.png">
+    <meta property="og:image:width" content="512">
+    <meta property="og:image:height" content="512">
+    <meta property="og:image:alt" content="Το εικονίδιο της εφαρμογής Τι θα φάμε;">
+    <meta name="twitter:card" content="summary">
+    <link rel="icon" type="image/svg+xml" href="/app-icon.svg">
+    <link rel="apple-touch-icon" href="/app-icon.png">
     <link rel="stylesheet" href="/styles.css">
     <script type="module" src="/recipe-page.mjs"></script>
   </head>
   <body>
     <main class="card">
-      <a class="brand home" href="/"><span aria-hidden="true">🥄</span> Spoon</a>
+      <a class="brand home" href="/"><img class="app-icon" src="/app-icon.svg" width="46" height="46" alt=""> Τι θα φάμε;</a>
       <p class="eyebrow">Μοιράσου κάτι νόστιμο</p>
       <div aria-live="polite">
         <h1 id="page-title">Ο σύνδεσμος δεν είναι διαθέσιμος.</h1>
         <p class="description" id="page-description">Έλεγξε ότι αντέγραψες ολόκληρο τον σύνδεσμο της συνταγής.</p>
       </div>
-      <a class="button" id="open-recipe" hidden>Άνοιγμα στο Spoon</a>
+      <a class="button" id="open-recipe" hidden>Άνοιγμα στο «Τι θα φάμε;»</a>
       <noscript><p class="hint">Για να ανοίξεις τη συνταγή από αυτή τη σελίδα, ενεργοποίησε τη JavaScript και δοκίμασε ξανά.</p></noscript>
       <div class="download">
         <p>Χρειάζεσαι την εφαρμογή;</p>
-        <a class="download-link" href="https://media.githubusercontent.com/media/justdataplease/spoon/main/dist/spoon.apk">Λήψη Spoon για Android <span aria-hidden="true">↗</span></a>
+        <a class="download-link" href="https://media.githubusercontent.com/media/justdataplease/spoon/main/dist/spoon.apk">Λήψη «Τι θα φάμε;» για Android <span aria-hidden="true">↗</span></a>
         <p class="hint">Εγκατάστησε την τελευταία έκδοση και μετά πάτησε ξανά τον σύνδεσμο της συνταγής.</p>
       </div>
     </main>

@@ -40,7 +40,11 @@ except ImportError:  # pragma: no cover - direct script execution
 DETAIL_SCHEMA_VERSION = "akis-full-v1"
 ARGIRO_DETAIL_SCHEMA_VERSION = "argiro-jsonld-html-v3"
 GASTRONOMOS_DETAIL_SCHEMA_VERSION = "gastronomos-jsonld-html-v1"
+PUBLIC_DETAIL_SCHEMA_PROVIDERS = {
+    f"{key}-full-v1": key for key in ("tsoulis", "lucacos", "funkycook", "cookpad")
+}
 SUPPORTED_DETAIL_SCHEMA_VERSIONS = {
+    *PUBLIC_DETAIL_SCHEMA_PROVIDERS,
     DETAIL_SCHEMA_VERSION,
     ARGIRO_DETAIL_SCHEMA_VERSION,
     GASTRONOMOS_DETAIL_SCHEMA_VERSION,
@@ -666,6 +670,7 @@ def ensure_full_record(record: Mapping[str, Any]) -> None:
         except ProviderError as exc:
             raise FullSchemaError(str(exc)) from exc
         expected_provider_key = {
+            **PUBLIC_DETAIL_SCHEMA_PROVIDERS,
             ARGIRO_DETAIL_SCHEMA_VERSION: "argiro",
             GASTRONOMOS_DETAIL_SCHEMA_VERSION: "gastronomos",
         }.get(str(schema_version))
@@ -702,6 +707,16 @@ def ensure_full_record(record: Mapping[str, Any]) -> None:
             raise FullSchemaError(
                 f"cannot derive Argiro source taxonomy: {exc}"
             ) from exc
+        expected_category_keys = expected_taxonomy["categoryKeys"]
+    elif schema_version in PUBLIC_DETAIL_SCHEMA_PROVIDERS:
+        try:
+            if __package__ in (None, ""):
+                from public_recipe_schema import derive_public_recipe_taxonomy
+            else:
+                from .public_recipe_schema import derive_public_recipe_taxonomy
+            expected_taxonomy = derive_public_recipe_taxonomy(payload)
+        except (ImportError, FullSchemaError) as exc:
+            raise FullSchemaError(f"cannot derive publisher source taxonomy: {exc}") from exc
         expected_category_keys = expected_taxonomy["categoryKeys"]
     else:
         # Gastronomos uses the same fail-closed rule: normalized categories are

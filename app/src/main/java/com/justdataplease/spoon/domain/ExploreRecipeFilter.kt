@@ -1,6 +1,7 @@
 package com.justdataplease.spoon.domain
 
 import com.justdataplease.spoon.data.expandedIngredientAliasTokens
+import com.justdataplease.spoon.data.canonicalFacetTokens
 import com.justdataplease.spoon.data.model.EaseLevel
 import com.justdataplease.spoon.data.model.MealCategory
 import com.justdataplease.spoon.data.model.Recipe
@@ -50,11 +51,11 @@ object ExploreRecipeFilter {
         val queryTerms = criteria.query.normalizedSearchText()
             .split(Whitespace)
             .filter(String::isNotBlank)
-        val selectedDiets = criteria.dietLabels.normalizedFacetSelection()
-        val selectedMealTypes = criteria.mealTypeLabels.normalizedFacetSelection()
-        val selectedOccasions = criteria.occasionLabels.normalizedFacetSelection()
-        val selectedMethods = criteria.methodLabels.normalizedFacetSelection()
-        val selectedCuisines = criteria.cuisineLabels.normalizedFacetSelection()
+        val selectedDiets = canonicalFacetTokens("diet", criteria.dietLabels)
+        val selectedMealTypes = canonicalFacetTokens("meal", criteria.mealTypeLabels)
+        val selectedOccasions = canonicalFacetTokens("occasion", criteria.occasionLabels)
+        val selectedMethods = canonicalFacetTokens("method", criteria.methodLabels)
+        val selectedCuisines = canonicalFacetTokens("cuisine", criteria.cuisineLabels)
         val selectedIngredients = criteria.ingredientLabels.expandedIngredientFacetTokens()
         val selectedSources = criteria.sourceKeys.normalizedFacetSelection()
 
@@ -74,11 +75,11 @@ object ExploreRecipeFilter {
                 criteria.maxPrepMinutes == 0 ||
                     (it.prepMinutes > 0 && it.prepMinutes <= criteria.maxPrepMinutes)
             }
-            .filter { selectedDiets.matchesFacet(it.dietLabels) }
-            .filter { selectedMealTypes.matchesFacet(it.mealTypeLabels) }
-            .filter { selectedOccasions.matchesFacet(it.occasionLabels) }
-            .filter { selectedMethods.matchesFacet(it.methodLabels) }
-            .filter { selectedCuisines.matchesFacet(it.cuisineLabels) }
+            .filter { selectedDiets.matchesFacet(it.dietLabels, "diet") }
+            .filter { selectedMealTypes.matchesFacet(it.mealTypeLabels, "meal") }
+            .filter { selectedOccasions.matchesFacet(it.occasionLabels, "occasion") }
+            .filter { selectedMethods.matchesFacet(it.methodLabels, "method") }
+            .filter { selectedCuisines.matchesFacet(it.cuisineLabels, "cuisine") }
             .filter { selectedIngredients.matchesIngredientFacet(it.ingredientLabels) }
             .filter { recipe ->
                 selectedSources.isEmpty() ||
@@ -86,7 +87,7 @@ object ExploreRecipeFilter {
                         .map(String::normalizedSearchText)
                         .any { it in selectedSources }
             }
-            .filter { !criteria.quickOnly || it.quickRecipe }
+            .filter { !criteria.quickOnly || it.totalMinutes in 1..29 }
             .filter { recipe ->
                 queryTerms.isEmpty() || recipe.searchableText().let { searchable ->
                     queryTerms.all(searchable::contains)
@@ -109,12 +110,8 @@ private fun Set<String>.normalizedFacetSelection(): Set<String> = asSequence()
     .filter(String::isNotBlank)
     .toSet()
 
-private fun Set<String>.matchesFacet(actualValues: List<String>): Boolean {
-    if (isEmpty()) return true
-    return actualValues.asSequence()
-        .map(String::normalizedSearchText)
-        .any { normalized -> normalized in this }
-}
+private fun Set<String>.matchesFacet(actualValues: List<String>, facet: String): Boolean =
+    isEmpty() || canonicalFacetTokens(facet, actualValues).any { it in this }
 
 private fun Set<String>.expandedIngredientFacetTokens(): Set<String> = asSequence()
     .flatMap { ingredient -> expandedIngredientAliasTokens(ingredient).asSequence() }

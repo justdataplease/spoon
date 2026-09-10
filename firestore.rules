@@ -80,6 +80,12 @@ service cloud.firestore {
         validCategory(values.get('SUNDAY', 'any'));
     }
 
+    function validExcludedSourceKeys(values) {
+      return values is list && values.size() <= 7 &&
+        values.size() == values.toSet().size() &&
+        values.hasOnly(['akis', 'argiro', 'gastronomos', 'tsoulis', 'cookpad', 'lucacos', 'funkycook']);
+    }
+
     function validMealPreferences(data) {
       return data.keys().hasAll([
           'excludedCategories',
@@ -95,12 +101,14 @@ service cloud.firestore {
           'weekdayCategories',
           'sideWeekdayCategories',
           'dessertWeekdayCategories',
-          'favoritesOnly'
+          'favoritesOnly',
+          'excludedSourceKeys'
         ]) &&
         validWeekdayCategories(data.get('weekdayCategories', {})) &&
         validWeekdayCategories(data.get('sideWeekdayCategories', {})) &&
         validWeekdayCategories(data.get('dessertWeekdayCategories', {})) &&
         data.get('favoritesOnly', false) is bool &&
+        validExcludedSourceKeys(data.get('excludedSourceKeys', [])) &&
         data.excludedCategories is list &&
         data.excludedCategories.size() <= 10 &&
         data.excludedCategories.size() == data.excludedCategories.toSet().size() &&

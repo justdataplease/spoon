@@ -4,6 +4,8 @@ import com.justdataplease.spoon.data.model.MealCategory
 import com.justdataplease.spoon.data.model.MealPreferenceDocument
 import com.justdataplease.spoon.data.preferences.MAX_MEAL_PREFERENCE_EPOCH_MILLIS
 import com.justdataplease.spoon.data.preferences.MealPreferenceSettings
+import com.justdataplease.spoon.data.preferences.AllowedRecipePublisherKeys
+import com.justdataplease.spoon.data.preferences.canonicalExcludedSourceKeys
 import com.justdataplease.spoon.data.preferences.nextMealPreferenceTimestamp
 import com.justdataplease.spoon.data.preferences.validWeekdayCategories
 
@@ -29,6 +31,7 @@ internal fun MealPreferenceSettings.toFirestoreDocument(): Map<String, Any> {
         .distinct()
         .sorted()
         .take(MAX_EXCLUDED_INGREDIENT_TERMS)
+    val sources = excludedSourceKeys.canonicalExcludedSourceKeys().sorted()
     return mapOf(
         "excludedCategories" to categories,
         "veganOnly" to veganOnly,
@@ -38,7 +41,11 @@ internal fun MealPreferenceSettings.toFirestoreDocument(): Map<String, Any> {
         "dessertWeekdayCategories" to dessertWeekdayCategories.validWeekdayCategories(),
         "sideWeekdayCategories" to sideWeekdayCategories.validWeekdayCategories(),
         "favoritesOnly" to favoritesOnly,
-    )
+    ).let { document ->
+        // Absence means all sources, preserving the legacy rules contract for ordinary saves.
+        // Repository writes replace the entire document, so absence also clears old exclusions.
+        if (sources.isEmpty()) document else document + ("excludedSourceKeys" to sources)
+    }
 }
 
 internal fun MealPreferenceDocument.toSettingsOrNull(): MealPreferenceSettings? {
@@ -51,6 +58,10 @@ internal fun MealPreferenceDocument.toSettingsOrNull(): MealPreferenceSettings? 
         excludedCategories.size > AllowedExcludedCategories.size ||
         excludedCategories.any { it !in AllowedExcludedCategories } ||
         excludedCategories.distinct().size != excludedCategories.size
+    ) return null
+    if (excludedSourceKeys.size > AllowedRecipePublisherKeys.size ||
+        excludedSourceKeys.any { it !in AllowedRecipePublisherKeys } ||
+        excludedSourceKeys.distinct().size != excludedSourceKeys.size
     ) return null
     val ingredients = excludedIngredientTerms.map { it.trim().replace(PreferenceWhitespace, " ") }
     if (
@@ -69,6 +80,7 @@ internal fun MealPreferenceDocument.toSettingsOrNull(): MealPreferenceSettings? 
         dessertWeekdayCategories = dessertWeekdayCategories,
         sideWeekdayCategories = sideWeekdayCategories,
         favoritesOnly = favoritesOnly,
+        excludedSourceKeys = excludedSourceKeys.toSet(),
     )
 }
 
@@ -85,6 +97,7 @@ internal fun MealPreferenceSettings.normalizedForSync(timestamp: Long): MealPref
         dessertWeekdayCategories = dessertWeekdayCategories.validWeekdayCategories(),
         sideWeekdayCategories = sideWeekdayCategories.validWeekdayCategories(),
         favoritesOnly = favoritesOnly,
+        excludedSourceKeys = (document["excludedSourceKeys"] as? List<String>).orEmpty().toSet(),
     )
 }
 

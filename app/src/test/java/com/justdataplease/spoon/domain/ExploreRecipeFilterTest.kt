@@ -88,10 +88,10 @@ class ExploreRecipeFilterTest {
 
     @Test
     fun `rating preparation time and quick constraints are applied`() {
-        val match = recipe(id = "match", rating = 8.5, prepMinutes = 25, quickRecipe = true)
+        val match = recipe(id = "match", rating = 8.5, prepMinutes = 25, totalMinutes = 25, quickRecipe = true)
         val recipes = listOf(
             match,
-            recipe(id = "low", rating = 7.9, prepMinutes = 25, quickRecipe = true),
+            recipe(id = "low", rating = 7.9, prepMinutes = 25, totalMinutes = 25, quickRecipe = true),
             recipe(id = "long", rating = 9.0, prepMinutes = 31, quickRecipe = true),
             recipe(id = "unknown", rating = 9.0, prepMinutes = 0, quickRecipe = true),
             recipe(id = "not-quick", rating = 9.0, prepMinutes = 20),
@@ -99,6 +99,41 @@ class ExploreRecipeFilterTest {
         val criteria = ExploreCriteria(minRating = 8.0, maxPrepMinutes = 30, quickOnly = true)
 
         assertEquals(listOf(match), ExploreRecipeFilter.filter(recipes, criteria))
+    }
+
+    @Test
+    fun `quick uses known total time strictly below thirty regardless of publisher flag`() {
+        val short = recipe(id = "short", totalMinutes = 29, quickRecipe = false)
+        val recipes = listOf(
+            short,
+            recipe(id = "zero", totalMinutes = 0, quickRecipe = true),
+            recipe(id = "negative", totalMinutes = -1, quickRecipe = true),
+            recipe(id = "thirty", prepMinutes = 5, totalMinutes = 30, quickRecipe = true),
+            recipe(id = "long", prepMinutes = 5, totalMinutes = 90, quickRecipe = true),
+        )
+        assertEquals(listOf(short), ExploreRecipeFilter.filter(recipes, ExploreCriteria(quickOnly = true)))
+    }
+
+    @Test
+    fun `equivalent publisher tags match common filters including combined cuisines`() {
+        val first = recipe(id = "first", dietLabels = listOf("VEGETARIAN"),
+            occasionLabels = listOf("Christmas"), cuisineLabels = listOf("ΑΜΕΡΙΚΑΝΙΚΗ, ΕΛΛΗΝΙΚΗ"))
+        val second = recipe(id = "second", dietLabels = listOf("Χορτοφαγικά"),
+            occasionLabels = listOf("Χριστούγεννα"), cuisineLabels = listOf("Greek"))
+        val criteria = ExploreCriteria(dietLabels = setOf("Χορτοφαγική"),
+            occasionLabels = setOf("Χριστουγεννιάτικη"), cuisineLabels = setOf("Ελλάδα"))
+        assertEquals(setOf("first", "second"), ExploreRecipeFilter.filter(listOf(first, second), criteria).map { it.id }.toSet())
+    }
+
+    @Test
+    fun `christmas occasion combines with quick and provider constraints`() {
+        val match = recipe(id = "christmas", totalMinutes = 20, sourceKey = "tsoulis",
+            occasionLabels = listOf("Χριστούγεννα"))
+        val recipes = listOf(match, match.copy(id = "long", totalMinutes = 60),
+            match.copy(id = "easter", occasionLabels = listOf("Πάσχα")),
+            match.copy(id = "source", sourceKey = "argiro"))
+        assertEquals(listOf(match), ExploreRecipeFilter.filter(recipes, ExploreCriteria(
+            quickOnly = true, sourceKeys = setOf("tsoulis"), occasionLabels = setOf("Χριστούγεννα"))))
     }
 
     @Test
@@ -252,6 +287,7 @@ class ExploreRecipeFilterTest {
             dietLabels = listOf("Vegan"),
             cuisineLabels = listOf("Greek"),
             quickRecipe = true,
+            totalMinutes = 25,
         )
         val wrongDiet = match.copy(id = "wrong-diet", dietLabels = listOf("Vegetarian"))
         val wrongCategory = match.copy(id = "wrong-category", category = MealCategory.MEAT.key)
@@ -349,6 +385,7 @@ class ExploreRecipeFilterTest {
         category: String = MealCategory.ANY.key,
         rating: Double = 8.0,
         prepMinutes: Int = 20,
+        totalMinutes: Int = 0,
         stepCount: Int = 4,
         preparationCount: Int = 1,
         language: String = "el",
@@ -371,6 +408,7 @@ class ExploreRecipeFilterTest {
         category = category,
         rating = rating,
         prepMinutes = prepMinutes,
+        totalMinutes = totalMinutes,
         stepCount = stepCount,
         preparationCount = preparationCount,
         language = language,

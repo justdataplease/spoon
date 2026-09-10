@@ -22,6 +22,7 @@ class SpoonApplication : Application() {
             }
         }
         CatalogFreshnessScheduler.schedule(this)
+        com.justdataplease.spoon.widget.widgetCoordinator(this).startIfNeeded()
     }
 }
 
