@@ -8,22 +8,30 @@ below the weekly planner header have been removed.
 
 ## Cloud synchronization
 
-A fresh production read confirmed that the active Firestore rules reject the
+The predeployment production read confirmed that the previous Firestore rules rejected the
 app's side/dessert weekday preferences, source exclusions and drinks category.
-They also reject archived cooking-history imports and exact history retries.
-These failures keep valid changes in the durable local upload queue.
+They also rejected archived cooking-history imports and exact history retries.
+These failures kept valid changes in the durable local upload queue.
 
-The prepared rules accept the existing preference fields and categories, plus
+The deployed rules accept the existing preference fields and categories, plus
 owner-authored valid history imports, exact unchanged history replays, and retries
 of already absent history deletions. Ownership restrictions, history content
 immutability, completed-plan/history matching, active-course deletion protection,
 and forbidden favorite updates remain enforced.
 
-Production deployment is pending explicit approval. Automatic approval review
-rejected the deployment because the production access-control change requires
-specific user approval. Building the APK and pushing main do not deploy these
-rules. Until deployment, affected uploads remain queued and are shown as waiting.
-Firebase account-signup configuration is outside this release's changes.
+The user explicitly approved production deployment. The tested rules were
+deployed to `spoontheplanner`, and two reads of the active ruleset confirmed
+that its complete source matches the checked-in `firestore.rules`. Existing
+0.11.1 installations can retry queued uploads without another APK update.
+The user's phone has not been directly inspected for upload completion.
+Firebase account-signup configuration was not changed.
+
+- Deployment time: `2026-09-10T20:59:26.493553Z` (UTC).
+- Active ruleset: `projects/spoontheplanner/rulesets/0a007621-d633-4d29-9071-bab635321519`.
+- Source SHA-256: `3af0c7ac1c167c61e0ab52fbe4d2508d7d17fd5c650f6eaa9048ea9dcb9e1bd6`.
+- Deployment/readback evidence: `build/production-rules-deployed-0.11.1.json`
+  and `build/release-0.11.1-rules-deploy.log`. The previous rules remain backed
+  up in `build/production-rules-backup-0.11.1.json`.
 
 ## Verification
 

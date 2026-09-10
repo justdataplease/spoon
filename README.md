@@ -57,9 +57,8 @@ data.
   facet aliases are shared with the importer and checked against Android.
 - All seven publishers are selected by default in Settings. Deselect any source
   to exclude it from Explore matches and new meal suggestions; existing saved
-  meals remain intact. Source choices persist offline; cross-phone synchronization
-  requires the accompanying source-preference Firestore rules. Their production
-  deployment is pending approval; source exclusions already work locally.
+  meals remain intact. Source choices persist offline and synchronize across
+  signed-in phones under the deployed owner-only Firestore rules.
 - An Android home-screen widget shows today's planned main recipe with only its
   picture and name. Tapping opens that recipe. See [widget details](docs/today-recipe-widget.md).
 - A discreet personal-use and linked publisher credit appears at the start of
@@ -83,9 +82,9 @@ data.
   reset. The app does not create anonymous Firebase accounts. Every personal feature
   works before sign-in. Creating an account or signing in automatically attaches
   existing device data without an export/import step. Interrupted uploads remain
-  queued locally. Production signup activation and cloud history rules require
-  the pending approvals described below. Account metadata checks are throttled to
-  once per 15 seconds.
+  queued locally. Production signup activation still requires the separate
+  approval described below. Account metadata checks are throttled to once per
+  15 seconds.
 
 Strict filters are never silently relaxed. If no recipe matches a valid request,
 the day is saved as unavailable, keeping its category and filters for the next
@@ -121,14 +120,14 @@ clear matching queued revisions. The account screen distinguishes device storage
 syncing, waiting, and acknowledged synchronization. Password/account errors remain
 possible for explicit account actions; they do not gate local personal features.
 
-**Cloud activation pending:** Firebase currently disables new-user signup project-wide.
-The explicit production setting approval is pending. Archived-history imports and safe history retries
-require approval and deployment of the exact owner-only change in
-[the history sync rules proposal](docs/local-history-sync-rules-proposal.md).
-Production also rejects the current preference fields and drinks category;
-[the exact validator update](docs/current-app-sync-rules-proposal.md) awaits approval.
-The APK retains rejected changes locally and retries; it does not label them synced. Pushing an APK does not
-deploy these rules. The owner-scoped rules fix is implemented and emulator-tested; production deployment still requires explicit approval. See [0.11.1 verification](docs/release-0.11.1.md).
+**Cloud sync rules deployed:** The approved owner-only rules for preferences,
+drinks categories, archived cooking-history imports and safe history retries
+were deployed to `spoontheplanner` on 2026-09-10 (UTC). The live source matches
+the tested rules. Queued changes retry automatically when the signed-in app
+reconnects. See [0.11.1 verification](docs/release-0.11.1.md).
+
+**Signup activation pending:** Firebase new-user signup remains disabled
+project-wide. Changing that separate production setting still requires approval.
 
 ```text
 app/src/main/java/com/justdataplease/spoon/

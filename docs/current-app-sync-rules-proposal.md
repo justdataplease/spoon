@@ -1,14 +1,18 @@
 # Proposed rules for the current app's categories and preferences
 
-> Current status (0.11.1): the exact owner-scoped changes below are implemented
-> locally and passed the isolated Firestore emulator tests. Production deployment
-> still requires explicit approval after automatic approval review rejected it.
-> See [release verification](release-0.11.1.md). The proposal and baseline below
-> are retained as historical context; statements that edits/tests have not run
-> describe the earlier proposal stage.
+> Current status (2026-09-10 UTC): the exact owner-scoped changes below
+> passed the isolated Firestore tests, received explicit user approval, and
+> were deployed to `spoontheplanner`. The live source matches the tested
+> rules. See [release verification](release-0.11.1.md). Firebase signup
+> configuration was not changed.
 
+## Archived proposal and predeployment baseline
 
-Status: inert review proposal. These category and preference changes have not
+The remaining document preserves the earlier proposal and production
+baseline. References to pending approval, unapplied changes or production
+restrictions below describe that earlier stage.
+
+Original proposal status: inert review proposal. These category and preference changes have not
 been approved for deployment, applied by this document, loaded into an emulator,
 or deployed. Approval of Firebase signup or the separate history proposal does
 not by itself approve the additional category and preference fields below.

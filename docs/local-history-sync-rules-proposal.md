@@ -1,14 +1,18 @@
 # Proposed rules for local history synchronization
 
-> Current status (0.11.1): the exact owner-scoped changes below are implemented
-> locally and passed the isolated Firestore emulator tests. Production deployment
-> still requires explicit approval after automatic approval review rejected it.
-> See [release verification](release-0.11.1.md). The proposal and baseline below
-> are retained as historical context; statements that edits/tests have not run
-> describe the earlier proposal stage.
+> Current status (2026-09-10 UTC): the exact owner-scoped changes below
+> passed the isolated Firestore tests, received explicit user approval, and
+> were deployed to `spoontheplanner`. The live source matches the tested
+> rules. See [release verification](release-0.11.1.md). Firebase signup
+> configuration was not changed.
 
+## Archived proposal and predeployment baseline
 
-Status: review proposal only. This document has not changed Firestore rules or
+The remaining document preserves the earlier proposal and production
+baseline. References to pending approval, unapplied changes or production
+restrictions below describe that earlier stage.
+
+Original proposal status: review proposal only. This document has not changed Firestore rules or
 production configuration. Automatic approval review rejected the attempted local policy edit
 because the exact change to owner history creation and favorite updates had not
 been explicitly authorized.
