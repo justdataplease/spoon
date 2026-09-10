@@ -1,6 +1,8 @@
 package com.justdataplease.spoon.widget
 
 import com.justdataplease.spoon.data.model.DayMealPlan
+import com.justdataplease.spoon.data.model.CustomRecipe
+import com.justdataplease.spoon.data.model.Recipe
 import com.justdataplease.spoon.domain.repository.AccountState
 import java.time.LocalDate
 import java.time.YearMonth
@@ -88,6 +90,62 @@ class CalendarMealWidgetModelTest {
         assertEquals("", calendarWidgetDayDescription(CalendarWidgetDay(null)))
     }
 
+    @Test fun selectionFollowsTodayUntilChosenAndStaysInsideTheShownMonth() {
+        val december = YearMonth.of(2026, 12)
+        val plans = listOf(
+            DayMealPlan(date = "2026-12-18", recipeId = "akis_18"),
+            DayMealPlan(date = "2026-12-03", recipeId = "akis_3"),
+            DayMealPlan(date = "2026-11-01", recipeId = "akis_1"),
+            DayMealPlan(date = "2026-12-01", recipeId = "../invalid"),
+        )
+        assertEquals(today, calendarWidgetSelectedDate(YearMonth.from(today), today, null, plans))
+        assertEquals(today.plusDays(1), calendarWidgetSelectedDate(YearMonth.from(today), today.plusDays(1), null, plans))
+        assertEquals(today.minusDays(2), calendarWidgetSelectedDate(YearMonth.from(today), today, "2026-09-08", plans))
+        assertEquals(december.atDay(3), calendarWidgetSelectedDate(december, today, "2026-09-08", plans))
+        assertEquals(december.atDay(25), calendarWidgetSelectedDate(december, today, "2026-12-25", plans))
+        assertEquals(december.atDay(1), calendarWidgetSelectedDate(december, today, "bad", emptyList()))
+        assertEquals(december.atDay(2), calendarWidgetSelectedDate(december, today, null,
+            plans + DayMealPlan(date = "2026-12-02", locked = true)))
+    }
+
+    @Test fun chosenDayAndTodayHaveSeparateStatesAndUseHydratedCategory() {
+        val selected = today.plusDays(1)
+        val month = calendarWidgetMonth(YearMonth.from(today), today,
+            listOf(DayMealPlan(date = selected.toString(), recipeId = "akis_1", recipeTitle = "Saved", category = "any")),
+            listOf(Recipe(id = "akis_1", title = "Current recipe title", category = "poultry")), selected)
+        val chosen = month.days.single { it.isSelected }
+        assertEquals(selected, chosen.date)
+        assertFalse(chosen.isToday)
+        assertEquals("Current recipe title", chosen.recipeTitle)
+        assertEquals("poultry", chosen.category)
+        assertEquals("🍗", calendarWidgetCategorySymbol(chosen.category))
+        assertFalse(month.days.single { it.isToday }.isSelected)
+        assertTrue(calendarWidgetDayDescription(chosen).contains("Επιλεγμένη ημέρα"))
+        assertTrue(calendarWidgetDayDescription(chosen).contains("Προβολή ημέρας στο widget"))
+    }
+
+    @Test fun categorySymbolsMatchCanonicalAndEditableAppKeys() {
+        for ((canonical, alias, symbol) in listOf(
+            Triple("poultry", "chicken", "🍗"), Triple("vegetables", "vegetarian", "🥬"),
+            Triple("pasta_rice", "pasta", "🍝"), Triple("street_food", "dirty", "🍔"),
+        )) {
+            assertEquals(symbol, calendarWidgetCategorySymbol(canonical))
+            assertEquals(symbol, calendarWidgetCategorySymbol(alias))
+        }
+        assertEquals("🐟", calendarWidgetCategorySymbol("fish"))
+        assertEquals("🍽️", calendarWidgetCategorySymbol("unknown"))
+    }
+
+    @Test fun intentionallyBlankDayIsDistinguishedFromAnUnplannedDay() {
+        val days = calendarWidgetMonth(YearMonth.from(today), today,
+            listOf(DayMealPlan(date = today.toString(), locked = true))).days
+        val blank = days.single { it.date == today }
+        assertTrue(blank.isIntentionallyBlank)
+        assertFalse(blank.hasMeal)
+        assertTrue(calendarWidgetDayDescription(blank).contains("Δεν θα μαγειρέψω"))
+        assertFalse(days.single { it.date == today.plusDays(1) }.isIntentionallyBlank)
+    }
+
     @Test fun calendarRejectsOldOwnersAndAnyChangedDayAcrossTheViewedPlan() {
         val original = TodayRecipeWidgetSnapshot(
             plans = listOf(DayMealPlan(date = today.plusDays(5).toString(), recipeId = "akis_1")),
@@ -99,6 +157,7 @@ class CalendarMealWidgetModelTest {
             original.copy(account = AccountState.Anonymous("owner-b")),
             original.copy(today = today.plusDays(1)),
             original.copy(plans = emptyList()),
+            original.copy(custom = listOf(CustomRecipe(id = "custom_private", photoDataUri = "new photo"))),
             original.copy(plans = original.plans.map { it.copy(completed = true) }),
         )) assertFalse(canPublishCalendarWidgetSnapshot(original, changed))
     }

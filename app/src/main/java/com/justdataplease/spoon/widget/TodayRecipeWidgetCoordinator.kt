@@ -6,22 +6,15 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
-import android.graphics.Canvas
-import android.graphics.Paint
-import android.graphics.RectF
 import android.util.Log
 import android.widget.RemoteViews
-import androidx.core.graphics.drawable.toBitmap
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
-import coil.imageLoader
-import coil.request.ImageRequest
 import com.justdataplease.spoon.MainActivity
 import com.justdataplease.spoon.R
 import com.justdataplease.spoon.domain.repository.SpoonRepository
 import com.justdataplease.spoon.data.model.isIntentionallyBlank
-import com.justdataplease.spoon.ui.components.normalizeRecipeImageSource
 import dagger.Lazy
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.time.LocalDate
@@ -35,6 +28,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
@@ -152,24 +146,27 @@ class TodayRecipeWidgetCoordinator @Inject constructor(
         }
     }
 
-    private suspend fun render(snapshot: TodayRecipeWidgetSnapshot) {
+    private suspend fun render(snapshot: TodayRecipeWidgetSnapshot) = coroutineScope {
         val request = generation.incrementAndGet()
-        if (calendarRenderer.widgetIds().isNotEmpty()) {
-            val current = TodayRecipeWidgetSnapshot(
-                plans = repository.mealPlans.first(),
-                custom = repository.customRecipes.first(),
-                account = repository.accountState.value,
-                today = LocalDate.now(),
-            )
-            currentCoroutineContext().ensureActive()
-            if (generation.get() != request || !canPublishCalendarWidgetSnapshot(snapshot, current)) return
-            calendarRenderer.publish(
-                plans = snapshot.plans,
-                today = snapshot.today,
-            )
+        if (calendarRenderer.widgetIds().isNotEmpty()) launch {
+            val customIds = snapshot.custom.mapTo(mutableSetOf()) { it.id }
+            val ids = snapshot.plans.mapNotNull { validWidgetRecipeId(it.recipeId) }.toSet() - customIds
+            val recipes = if (ids.isEmpty()) emptyList() else repository.getRecipesByIds(ids)
+            calendarRenderer.publish(snapshot, recipes) {
+                currentCoroutineContext().ensureActive()
+                val current = TodayRecipeWidgetSnapshot(
+                    plans = repository.mealPlans.first(),
+                    custom = repository.customRecipes.first(),
+                    account = repository.accountState.value,
+                    today = LocalDate.now(),
+                )
+                generation.get() == request && canPublishCalendarWidgetSnapshot(snapshot, current)
+            }
         }
-        // The calendar needs only the saved plan, without recipe/photo lookups.
-        if (widgetIds().isEmpty()) return
+        if (widgetIds().isNotEmpty()) launch { renderToday(snapshot, request) }
+    }
+
+    private suspend fun renderToday(snapshot: TodayRecipeWidgetSnapshot, request: Long) {
         val plan = snapshot.plans.firstOrNull { it.date == snapshot.today.toString() }
         val initial = todayRecipeWidgetContent(snapshot.plans, emptyList(), snapshot.today)
         // Clear the previous photo immediately, including across sign-out/account changes.
@@ -179,28 +176,8 @@ class TodayRecipeWidgetCoordinator @Inject constructor(
         val recipes = if (custom != null) listOf(custom) else repository.getRecipesByIds(setOf(id))
         val content = todayRecipeWidgetContent(listOfNotNull(plan), recipes, snapshot.today)
         publish(snapshot, request, content, null)
-        val image = normalizeRecipeImageSource(content?.imageUrl.orEmpty()) ?: return
-        val bitmap = withTimeoutOrNull(15_000) {
-            context.imageLoader.execute(
-                ImageRequest.Builder(context)
-                    .data(image)
-                    .size(480, 320)
-                    .allowHardware(false)
-                    .build(),
-            ).drawable?.toBitmap()?.let(::cropRecipePhoto)
-        }
+        val bitmap = loadWidgetRecipePhoto(context, content?.imageUrl.orEmpty(), widgetIds())
         publish(snapshot, request, content, bitmap)
-    }
-
-    private fun cropRecipePhoto(source: Bitmap): Bitmap {
-        val scale = maxOf(480f / source.width, 320f / source.height)
-        val width = source.width * scale
-        val height = source.height * scale
-        return Bitmap.createBitmap(480, 320, Bitmap.Config.ARGB_8888).also { target ->
-            Canvas(target).drawBitmap(source, null,
-                RectF((480 - width) / 2, (320 - height) / 2, (480 + width) / 2, (320 + height) / 2),
-                Paint(Paint.FILTER_BITMAP_FLAG))
-        }
     }
 
     private suspend fun publish(

@@ -324,7 +324,7 @@ private fun SelectedDayCard(
                         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
                     ) {
                         Text(
-                            if (meal.isCompleted) "Αναίρεση" else "Το έφτιαξα",
+                            if (meal.isCompleted) "Άκυρο" else "Το έφτιαξα",
                             maxLines = 1,
                         )
                     }

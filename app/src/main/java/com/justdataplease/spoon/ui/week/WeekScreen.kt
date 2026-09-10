@@ -169,7 +169,7 @@ fun WeekScreen(
                                 favoritesOnly = favoritesOnly,
                                 onOpenMenu = { onOpenMenu(plan.date) },
                             )
-                            TextButton(onClick = { onBlankDay(plan.date) }) { Text("Κενή ημέρα") }
+                            TextButton(onClick = { onBlankDay(plan.date) }) { Text("Δεν θα μαγειρέψω") }
                         }
                     } else {
                         DayRecipeCard(
@@ -229,7 +229,7 @@ internal fun BlankDayCard(
         modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             DayDateHeader(plan.date)
-            Text("Κενή ημέρα", style = MaterialTheme.typography.titleLarge)
+            Text("Δεν θα μαγειρέψω", style = MaterialTheme.typography.titleLarge)
             Text("Θα μείνει κενή και στις νέες προτάσεις της εβδομάδας.",
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
             Button(onClick = onAddMeal) { Text("Προσθήκη γεύματος") }
@@ -446,11 +446,11 @@ internal fun DayRecipeCard(
                         modifier = Modifier.size(18.dp),
                     )
                     Spacer(Modifier.size(6.dp))
-                    Text(if (plan.isCompleted) "Έγινε" else "Το έφτιαξα")
+                    Text(if (plan.isCompleted) "Άκυρο" else "Το έφτιαξα")
                 }
             }
             if (onBlankDay != null) {
-                TextButton(onClick = onBlankDay) { Text("Κενή ημέρα") }
+                TextButton(onClick = onBlankDay) { Text("Δεν θα μαγειρέψω") }
             }
         }
     }

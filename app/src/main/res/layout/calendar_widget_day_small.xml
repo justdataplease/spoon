@@ -1,25 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="0dp" android:layout_height="match_parent"
-    android:layout_weight="1" android:padding="1dp">
+    android:layout_weight="1" android:paddingHorizontal="1dp">
     <FrameLayout android:id="@+id/calendar_widget_day_content"
         android:layout_width="match_parent" android:layout_height="match_parent"
         android:focusable="true" android:importantForAccessibility="yes"
         android:background="@drawable/calendar_widget_day_background">
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:layout_gravity="center" android:orientation="vertical" android:gravity="center"
+            android:layout_gravity="center" android:orientation="horizontal" android:gravity="center"
             android:importantForAccessibility="noHideDescendants">
             <TextView android:id="@+id/calendar_widget_day_number"
-                android:layout_width="match_parent" android:layout_height="wrap_content"
-                android:gravity="center" android:textColor="#2D2520" android:textSize="13sp"
+                android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:gravity="center" android:textColor="#2D2520" android:textSize="12sp"
                 android:fontFamily="sans-serif-medium" android:includeFontPadding="false" />
             <TextView android:id="@+id/calendar_widget_day_marker"
-                android:layout_width="match_parent" android:layout_height="18dp"
-                android:gravity="center" android:textSize="14sp" android:includeFontPadding="false" />
+                android:layout_width="16dp" android:layout_height="wrap_content"
+                android:gravity="center" android:textSize="12sp" android:includeFontPadding="false" />
         </LinearLayout>
         <ImageView android:id="@+id/calendar_widget_day_completed"
-            android:layout_width="6dp" android:layout_height="6dp" android:layout_gravity="top|end"
-            android:layout_marginTop="3dp" android:layout_marginEnd="3dp"
+            android:layout_width="4dp" android:layout_height="4dp" android:layout_gravity="top|end"
+            android:layout_marginTop="0dp" android:layout_marginEnd="0dp"
             android:src="@drawable/calendar_widget_completed" android:visibility="gone"
             android:contentDescription="@null" android:importantForAccessibility="no" />
     </FrameLayout>

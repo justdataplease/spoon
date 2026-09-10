@@ -39,6 +39,13 @@ class CalendarMealWidgetProvider : AppWidgetProvider() {
                 })
                 requestWidgetUpdate(context)
             }
+            SELECT_DAY_ACTION -> {
+                val widgetId = intent.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, AppWidgetManager.INVALID_APPWIDGET_ID)
+                val renderer = CalendarMealWidgetRenderer(context)
+                val date = validatedWidgetCalendarDate(intent.getStringExtra(DATE_EXTRA)) ?: return
+                if (!renderer.isActive(widgetId) || !renderer.selectDay(widgetId, date)) return
+                requestWidgetUpdate(context)
+            }
             Intent.ACTION_DATE_CHANGED, Intent.ACTION_TIME_CHANGED, Intent.ACTION_TIMEZONE_CHANGED ->
                 requestWidgetUpdate(context, clockChanged = true)
         }
@@ -47,6 +54,7 @@ class CalendarMealWidgetProvider : AppWidgetProvider() {
     companion object {
         const val OPEN_CALENDAR_DAY_ACTION = "com.justdataplease.spoon.widget.OPEN_CALENDAR_DAY"
         const val DATE_EXTRA = "widget_calendar_date"
+        internal const val SELECT_DAY_ACTION = "com.justdataplease.spoon.widget.CALENDAR_SELECT_DAY"
         internal const val PREVIOUS_MONTH_ACTION = "com.justdataplease.spoon.widget.CALENDAR_PREVIOUS_MONTH"
         internal const val NEXT_MONTH_ACTION = "com.justdataplease.spoon.widget.CALENDAR_NEXT_MONTH"
         internal const val CURRENT_MONTH_ACTION = "com.justdataplease.spoon.widget.CALENDAR_CURRENT_MONTH"

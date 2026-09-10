@@ -14,6 +14,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.ImageView
+import android.widget.LinearLayout
 import android.widget.RemoteViews
 import android.widget.TextView
 import androidx.lifecycle.ViewModelProvider
@@ -79,7 +80,7 @@ class WidgetProviderDeviceTest {
     fun allThreeProvidersPublishInflatableRemoteViewsAtTheirSupportedSizes() {
         val large = bind(TodayRecipeWidgetProvider::class.java, width = 280, height = 190)
         val compact = bind(TodayRecipeCompactWidgetProvider::class.java, width = 320, height = 90)
-        val calendar = bind(CalendarMealWidgetProvider::class.java, width = 320, height = 340)
+        val calendar = bind(CalendarMealWidgetProvider::class.java, width = 320, height = 440)
 
         listOf(large, compact).forEach { widget ->
             assertPhotoCard(widget)
@@ -92,13 +93,15 @@ class WidgetProviderDeviceTest {
         assertPhotoCard(large)
         resize(compact, width = 180, height = 40)
         assertPhotoCard(compact)
+        resize(calendar, width = 250, height = 400)
+        assertCalendar(calendar)
         resize(calendar, width = 250, height = 280)
         assertCalendar(calendar)
     }
 
     @Test
     fun calendarMonthButtonsNavigateAndReturnToTheCurrentMonth() {
-        val calendar = bind(CalendarMealWidgetProvider::class.java, width = 320, height = 340)
+        val calendar = bind(CalendarMealWidgetProvider::class.java, width = 320, height = 440)
         assertCalendar(calendar)
         val initialLabel = label(calendar)
 
@@ -125,7 +128,7 @@ class WidgetProviderDeviceTest {
     }
 
     @Test
-    fun calendarDayPendingIntentsNavigateAnAlreadyOpenActivityAcrossMonths() {
+    fun calendarDaySelectionStaysInWidgetAndDateCaptionOpensSelectedDayAcrossMonths() {
         val activity = instrumentation.startActivitySync(Intent(context, MainActivity::class.java).apply {
             action = Intent.ACTION_MAIN
             addCategory(Intent.CATEGORY_LAUNCHER)
@@ -135,21 +138,31 @@ class WidgetProviderDeviceTest {
         awaitCondition("MainActivity should be active before tapping a widget day") {
             onMain { activity.hasWindowFocus() }
         }
-        val calendar = bind(CalendarMealWidgetProvider::class.java, width = 320, height = 340)
+        val calendar = bind(CalendarMealWidgetProvider::class.java, width = 320, height = 440)
         val firstDate = YearMonth.now().atDay(5)
+        val initialAction = onMain { activity.intent.action }
+        val initialSelection = onMain { ViewModelProvider(activity)[SpoonViewModel::class.java].calendarSelectedDate.value }
         clickDay(calendar, firstDate.dayOfMonth)
+        awaitWidgetSelectedDay(calendar, firstDate)
+        assertEquals("Selecting a day must not open the app", initialAction, onMain { activity.intent.action })
+        assertEquals("Selecting a day stays inside the widget", initialSelection,
+            onMain { ViewModelProvider(activity)[SpoonViewModel::class.java].calendarSelectedDate.value })
+        click(calendar, R.id.calendar_widget_selected_date)
         awaitCalendarDay(activity, firstDate)
         val firstMonthLabel = label(calendar)
 
-        // Both date selections travel through the widget's real PendingIntent.
-        // A new month and second warm launch must not be ignored as an already
-        // consumed navigation event or reopen the first date.
+        // Each day first updates the widget through its broadcast PendingIntent.
+        // The overlaid date caption then opens that date in the already-running app.
         click(calendar, R.id.calendar_widget_next)
         awaitCondition("Widget should render the next month's days") {
             label(calendar).isNotBlank() && label(calendar) != firstMonthLabel
         }
         val secondDate = YearMonth.from(firstDate).plusMonths(1).atDay(12)
         clickDay(calendar, secondDate.dayOfMonth)
+        awaitWidgetSelectedDay(calendar, secondDate)
+        assertEquals("Choosing another month must not reopen the app", firstDate.toString(),
+            onMain { activity.intent.getStringExtra(CalendarMealWidgetProvider.DATE_EXTRA) })
+        click(calendar, R.id.calendar_widget_selected_date)
         awaitCalendarDay(activity, secondDate)
         assertTrue("Warm widget navigation should retain the same activity", onMain { !activity.isDestroyed })
     }
@@ -161,7 +174,23 @@ class WidgetProviderDeviceTest {
                 view.findViewById<TextView>(R.id.calendar_widget_day_number)?.text?.toString() == number.toString()
         }
         assertNotNull("Widget date $number is missing", day)
-        assertTrue("Date $number should execute its activity PendingIntent", checkNotNull(day).performClick())
+        assertTrue("Date $number should execute its selection broadcast PendingIntent", checkNotNull(day).performClick())
+    }
+
+    private fun awaitWidgetSelectedDay(widget: BoundWidget, date: LocalDate) {
+        awaitCondition("Widget should highlight $date and update its recipe footer") {
+            onMain {
+                layout(widget)
+                val selected = descendants(widget.view).filter { view ->
+                    view.id == R.id.calendar_widget_day_content && view.visibility == View.VISIBLE &&
+                        view.contentDescription?.contains("Επιλεγμένη ημέρα") == true
+                }
+                selected.size == 1 && selected.single().findViewById<TextView>(R.id.calendar_widget_day_number)
+                    .text.toString() == date.dayOfMonth.toString() &&
+                    widget.view.findViewById<TextView>(R.id.calendar_widget_selected_date).text.toString() ==
+                        calendarWidgetSelectedDateLabel(date, LocalDate.now())
+            }
+        }
     }
 
     private fun awaitCalendarDay(activity: MainActivity, date: LocalDate) {
@@ -214,8 +243,14 @@ class WidgetProviderDeviceTest {
         widget.width = width
         widget.height = height
         manager.updateAppWidgetOptions(widget.id, dimensions(width, height))
-        awaitCondition("Provider ${widget.component} should publish after resize") {
-            widget.view.updates.get() > before
+        awaitCondition("Provider ${widget.component} should publish the resized layout") {
+            // A photo delivery queued before resize is also an update. Wait for
+            // the actual layout transition before asserting its minimum size.
+            widget.view.updates.get() > before && onMain {
+                widget.component.className != CalendarMealWidgetProvider::class.java.name ||
+                    widget.view.findViewById<TextView>(R.id.calendar_widget_recipe_title)?.maxLines ==
+                    if (height < 420) 1 else 2
+            }
         }
     }
 
@@ -271,9 +306,25 @@ class WidgetProviderDeviceTest {
             it.findViewById<TextView>(R.id.calendar_widget_day_number).text.toString().toInt()
         })
         dates.forEach { day ->
-            assertTrue("Each visible date must open the corresponding day", day.isClickable)
-            assertTrue("Date accessibility label must identify its action", day.contentDescription?.contains("Άνοιγμα ημέρας") == true)
+            assertTrue("Each visible date must select the corresponding day", day.isClickable)
+            assertTrue("Date accessibility label must identify its action", day.contentDescription?.contains("Προβολή ημέρας στο widget") == true)
+            val number = day.findViewById<TextView>(R.id.calendar_widget_day_number)
+            val symbol = day.findViewById<TextView>(R.id.calendar_widget_day_marker)
+            val inline = (number.parent as LinearLayout).orientation == LinearLayout.HORIZONTAL
+            val requiredHeight = if (inline) maxOf(number.height, symbol.height) else number.height + symbol.height
+            assertTrue("Date and category symbol must fit at ${widget.width}x${widget.height}dp: " +
+                "number=${number.height}, category=${symbol.height}, available=${day.height}, inline=$inline", requiredHeight <= day.height)
         }
+        val footer = widget.view.findViewById<ViewGroup>(R.id.calendar_widget_recipe)
+        val photo = widget.view.findViewById<ImageView>(R.id.calendar_widget_recipe_photo)
+        val title = widget.view.findViewById<TextView>(R.id.calendar_widget_recipe_title)
+        val selectedDate = widget.view.findViewById<TextView>(R.id.calendar_widget_selected_date)
+        assertNotNull("Calendar must show the selected recipe photo", photo.drawable)
+        assertTrue("Recipe footer must remain clickable", footer.isClickable)
+        assertTrue("Date caption must open the selected app day", selectedDate.isClickable)
+        assertTrue("Selected date and recipe title must remain readable", selectedDate.text.isNotBlank() && title.text.isNotBlank())
+        assertEquals("Photo must cover the complete footer behind its title", footer.height, photo.height)
+        assertTrue("Calendar footer should have room for its photograph", footer.height >= (96 * context.resources.displayMetrics.density).toInt())
     }
 
     private fun descendants(view: View): List<View> = buildList {

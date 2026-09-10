@@ -6,5 +6,5 @@
     <string name="today_recipe_widget_preview_title">Το σημερινό σου πιάτο</string>
     <string name="today_recipe_compact_widget_name">Σημερινή συνταγή · μικρή κάρτα</string>
     <string name="today_recipe_compact_widget_description">Μια οριζόντια κάρτα με τη φωτογραφία και το όνομα του σημερινού κυρίως πιάτου.</string>
-    <string name="today_recipe_widget_blank">Κενή ημέρα</string>
+    <string name="today_recipe_widget_blank">Δεν θα μαγειρέψω</string>
 </resources>

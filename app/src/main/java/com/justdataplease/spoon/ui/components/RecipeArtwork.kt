@@ -23,11 +23,11 @@ fun RecipeArtwork(
 ) {
     val bundledArtwork = painterResource(R.drawable.food_hero)
     val description = "Φωτογραφία συνταγής: $title"
-    val safeImageUrl = remember(imageUrl) { normalizeRecipeImageSource(imageUrl) }
+    val safeImage = remember(imageUrl) { recipeImageModel(imageUrl) }
 
-    if (safeImageUrl != null) {
+    if (safeImage != null) {
         AsyncImage(
-            model = safeImageUrl,
+            model = safeImage,
             contentDescription = description,
             modifier = modifier,
             placeholder = bundledArtwork,
@@ -64,4 +64,12 @@ internal fun normalizeRecipeImageSource(raw: String): String? {
         return null
     }
     return candidate
+}
+
+/** Coil 2 accepts image bytes, but has no fetcher for the editor's data URI strings. */
+internal fun recipeImageModel(raw: String): Any? {
+    val source = normalizeRecipeImageSource(raw) ?: return null
+    return if (source.startsWith("data:", ignoreCase = true)) {
+        runCatching { java.util.Base64.getDecoder().decode(source.substringAfter(',')) }.getOrNull()
+    } else source
 }

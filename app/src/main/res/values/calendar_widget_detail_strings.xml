@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="calendar_widget_choose_meal">Διάλεξε ένα γεύμα</string>
+    <string name="calendar_widget_open_selected_day">%1$s. Άνοιγμα ημέρας στην εφαρμογή</string>
+    <string name="calendar_widget_open_selected_recipe">%1$s. Άνοιγμα συνταγής</string>
+    <string name="calendar_widget_detail_description">Πάτησε μια ημέρα για φωτογραφία και συνταγή. Πάτησε τη φωτογραφία για να τη δεις.</string>
+    <string name="calendar_widget_preview_month">Σεπτέμβριος 2026</string>
+    <string name="calendar_widget_preview_date">Σήμερα · Πέμ 10 Σεπ</string>
+    <string name="calendar_widget_preview_recipe">Κοτόπουλο με λεμόνι και μυρωδικά</string>
+</resources>
