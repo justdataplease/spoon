@@ -1,6 +1,7 @@
 package com.justdataplease.spoon.ui
 
 import android.content.Context
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -8,6 +9,7 @@ import com.google.firebase.FirebaseException
 import com.justdataplease.spoon.data.canonicalIngredientDisplayLabel
 import com.justdataplease.spoon.data.canonicalIngredientIdentity
 import com.justdataplease.spoon.data.model.DayMealPlan
+import com.justdataplease.spoon.data.model.isIntentionallyBlank
 import com.justdataplease.spoon.data.model.MealCourse
 import com.justdataplease.spoon.data.model.coursePlan
 import com.justdataplease.spoon.data.model.CookedMeal
@@ -45,6 +47,7 @@ import com.justdataplease.spoon.ui.model.toDomainCategoryKey
 import com.justdataplease.spoon.ui.explore.ExploreFacetOptionsUi
 import com.justdataplease.spoon.ui.explore.ExploreFiltersUi
 import com.justdataplease.spoon.ui.explore.ExploreRecipeUi
+import com.justdataplease.spoon.ui.calendar.CalendarNavigationState
 import com.justdataplease.spoon.ui.explore.ExploreSearchState
 import com.justdataplease.spoon.ui.explore.ExploreSourceOptionUi
 import com.justdataplease.spoon.ui.explore.exploreFilterInputs
@@ -152,7 +155,6 @@ private data class AccountOperationStatus(
 )
 
 private data class ExploreSelection(
-    val query: String,
     val filters: ExploreFiltersUi,
     val favoriteReplacementDate: LocalDate?,
     val resultGeneration: Long,
@@ -167,6 +169,10 @@ class SpoonViewModel @Inject constructor(
     private val computationScope = CoroutineScope(viewModelScope.coroutineContext + Dispatchers.Default)
     private val exploreSearchState = ExploreSearchState(computationScope)
     private val favoritesSearchState = ExploreSearchState(computationScope)
+    // Read editor state directly in Compose; background result projection must never echo
+    // stale text, selection, or IME composition back into an active input field.
+    val exploreQueryValue: TextFieldValue get() = exploreSearchState.editorValue
+    val favoritesQueryValue: TextFieldValue get() = favoritesSearchState.editorValue
     private val favoritesFilters = MutableStateFlow(ExploreFiltersUi())
     private val customRecipeEditorStore = CustomRecipeEditorStore(savedStateHandle)
     private val recipeLinkState = savedStateHandle
@@ -191,7 +197,10 @@ class SpoonViewModel @Inject constructor(
         initialValue = "",
     )
     private val selectedWeekStart = MutableStateFlow(WeeklyPlanDefaults.weekStart(LocalDate.now()))
-    private val selectedMonth = MutableStateFlow(YearMonth.now())
+    private val calendarNavigationState = CalendarNavigationState()
+    private val selectedMonth = calendarNavigationState.shownMonth
+    val calendarSelectedDate = calendarNavigationState.selectedDate
+    val calendarNavigationDate = calendarNavigationState.navigationDate
     private val editingDate = MutableStateFlow<LocalDate?>(null)
     private val selectedRecipeId = MutableStateFlow<String?>(null)
     private val selectedRecipeDetails = MutableStateFlow<Recipe?>(null)
@@ -266,12 +275,10 @@ class SpoonViewModel @Inject constructor(
     val favoritesSearchUiState = combine(
         plannerSnapshot,
         exploreFilterInputs(favoritesSearchState.filterQuery, favoritesFilters),
-        favoritesSearchState.visibleQuery,
         mealPreferenceSettings,
-    ) { snapshot, input, query, preferences ->
+    ) { snapshot, input, preferences ->
         val favorites = snapshot.favoriteIds.mapNotNull(snapshot.catalog.recipesById::get)
         FavoritesSearchUiState(
-            query = query,
             filters = input.filters,
             favorites = ExploreRecipeFilter.filter(favorites, input.filters.toDomain(input.query), preferences)
                 .map(Recipe::toFavoriteUi),
@@ -336,13 +343,11 @@ class SpoonViewModel @Inject constructor(
     }
 
     private val exploreSelection = combine(
-        exploreSearchState.visibleQuery,
         exploreFilters,
         favoriteReplacementDate,
         exploreResultGeneration,
-    ) { query, filters, replacementDate, resultGeneration ->
-        ExploreSelection(query, filters, replacementDate, resultGeneration)
-    }
+        ::ExploreSelection,
+    )
 
     private val exploreFilterInput = exploreFilterInputs(
         exploreSearchState.filterQuery,
@@ -466,7 +471,6 @@ class SpoonViewModel @Inject constructor(
             shownMonth = dates.month,
             calendarMeals = calendarMeals,
             editingDate = dates.editingDate,
-            exploreQuery = explore.query,
             exploreRecipes = exploreResults.recipes,
             exploreTotalRecipeCount = exploreResults.totalCount,
             exploreResultGeneration = explore.resultGeneration,
@@ -509,15 +513,32 @@ class SpoonViewModel @Inject constructor(
     fun currentWeek() = showWeek(WeeklyPlanDefaults.weekStart(LocalDate.now()))
 
     fun previousMonth() {
-        selectedMonth.value = selectedMonth.value.minusMonths(1)
+        calendarNavigationState.showMonth(selectedMonth.value.minusMonths(1))
     }
 
     fun nextMonth() {
-        selectedMonth.value = selectedMonth.value.plusMonths(1)
+        calendarNavigationState.showMonth(selectedMonth.value.plusMonths(1))
     }
 
     fun currentMonth() {
-        selectedMonth.value = YearMonth.now()
+        calendarNavigationState.showMonth(YearMonth.now())
+    }
+
+    fun selectCalendarDate(date: LocalDate) {
+        calendarNavigationState.selectDate(date)
+    }
+
+    fun consumeCalendarNavigation(date: LocalDate) {
+        calendarNavigationState.consumeNavigation(date)
+    }
+
+    fun openCalendarDay(date: LocalDate) {
+        dismissCustomRecipeEditor()
+        dismissFavoriteReplacement()
+        dismissFilters()
+        dismissMealMenu()
+        dismissRecipeDetails()
+        calendarNavigationState.openDate(date)
     }
 
     fun editFilters(date: LocalDate) {
@@ -591,11 +612,11 @@ class SpoonViewModel @Inject constructor(
     private fun isCurrentRecipeRequest(generation: Long, recipeId: String): Boolean =
         recipeDetailsGeneration == generation && selectedRecipeId.value == recipeId
 
-    fun updateExploreQuery(query: String) {
+    fun updateExploreQuery(query: TextFieldValue) {
         exploreSearchState.update(query)
     }
 
-    fun updateFavoritesQuery(query: String) = favoritesSearchState.update(query)
+    fun updateFavoritesQuery(query: TextFieldValue) = favoritesSearchState.update(query)
 
     fun applyFavoritesFilters(filters: ExploreFiltersUi) {
         favoritesFilters.value = filters
@@ -793,6 +814,15 @@ class SpoonViewModel @Inject constructor(
     fun toggleLocked(date: LocalDate) {
         val plan = uiState.value.weekPlans.firstOrNull { it.date == date } ?: return
         launchReporting { mealPlanner.setLocked(date, !plan.isLocked) }
+    }
+
+    fun setDayBlank(date: LocalDate) {
+        dismissFilters()
+        dismissFavoriteReplacement()
+        dismissMealMenu()
+        launchReporting("Η ημέρα θα μείνει κενή μέχρι να προσθέσεις γεύμα.") {
+            mealPlanner.setDayBlank(date)
+        }
     }
 
     fun reroll(date: LocalDate) = launchSelection { mealPlanner.reroll(date) }
@@ -1083,7 +1113,7 @@ class SpoonViewModel @Inject constructor(
                 val plans = withUserActionTimeout {
                     withContext(Dispatchers.Default) { mealPlanner.ensureWeek(weekStart, resetCourseWeekdays = resetCourseWeekdays) }
                 }
-                if (plans.isNotEmpty() && plans.all { it.recipeId.isNotBlank() }) {
+                if (plans.isNotEmpty() && plans.all { it.recipeId.isNotBlank() || it.isIntentionallyBlank }) {
                     catalogWeekRetryGate.onAttemptSucceeded(weekStart)
                 }
             } catch (error: CancellationException) {

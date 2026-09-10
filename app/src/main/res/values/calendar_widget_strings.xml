@@ -1,0 +1,18 @@
+<resources>
+    <string name="calendar_widget_name">Ημερολόγιο γευμάτων</string>
+    <string name="calendar_widget_description">Ο μήνας σου με τις προγραμματισμένες συνταγές. Άγγιξε μια ημέρα για να δεις το γεύμα της.</string>
+    <string name="calendar_widget_heading">ΤΟ ΠΡΟΓΡΑΜΜΑ ΣΟΥ</string>
+    <string name="calendar_widget_loading_month">Ημερολόγιο</string>
+    <string name="calendar_widget_previous_month">Προηγούμενος μήνας</string>
+    <string name="calendar_widget_next_month">Επόμενος μήνας</string>
+    <string name="calendar_widget_current_month">%1$s. Άγγιξε για τον τρέχοντα μήνα.</string>
+    <string name="calendar_widget_planned_legend">● Με γεύμα</string>
+    <string name="calendar_widget_completed_legend">✓ Μαγειρεμένο</string>
+    <string name="calendar_widget_monday">Δευτέρα</string>
+    <string name="calendar_widget_tuesday">Τρίτη</string>
+    <string name="calendar_widget_wednesday">Τετάρτη</string>
+    <string name="calendar_widget_thursday">Πέμπτη</string>
+    <string name="calendar_widget_friday">Παρασκευή</string>
+    <string name="calendar_widget_saturday">Σάββατο</string>
+    <string name="calendar_widget_sunday">Κυριακή</string>
+</resources>

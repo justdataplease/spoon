@@ -28,6 +28,7 @@ import com.justdataplease.spoon.ui.explore.ActiveFilterSummary
 import com.justdataplease.spoon.ui.explore.RecipeSearchControls
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import com.justdataplease.spoon.ui.components.CompactFavoriteCard
 import com.justdataplease.spoon.ui.model.FavoriteUi
@@ -38,15 +39,15 @@ fun FavoritesScreen(
     onOpenRecipe: (String) -> Unit,
     onRemoveFavorite: (String) -> Unit,
     modifier: Modifier = Modifier,
-    query: String = "",
+    query: TextFieldValue = TextFieldValue(),
     filters: ExploreFiltersUi = ExploreFiltersUi(),
     options: ExploreFacetOptionsUi = ExploreFacetOptionsUi(),
     totalFavoriteCount: Int = favorites.size,
-    onQueryChange: (String) -> Unit = {},
+    onQueryChange: (TextFieldValue) -> Unit = {},
     onApplyFilters: (ExploreFiltersUi) -> Unit = {},
 ) {
     var showFilters by remember { mutableStateOf(false) }
-    if (totalFavoriteCount == 0 && query.isBlank() && filters.activeCount == 0) {
+    if (totalFavoriteCount == 0 && query.text.isBlank() && filters.activeCount == 0) {
         Box(modifier = modifier.fillMaxSize().padding(28.dp), contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Surface(
@@ -106,7 +107,7 @@ fun FavoritesScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     TextButton(onClick = {
-                        onQueryChange("")
+                        onQueryChange(TextFieldValue())
                         onApplyFilters(ExploreFiltersUi())
                     }) { Text("Καθαρισμός αναζήτησης και φίλτρων") }
                 }
@@ -140,7 +141,6 @@ fun FavoritesScreen(
 }
 
 data class FavoritesSearchUiState(
-    val query: String = "",
     val filters: ExploreFiltersUi = ExploreFiltersUi(),
     val favorites: List<FavoriteUi> = emptyList(),
     val totalCount: Int = 0,

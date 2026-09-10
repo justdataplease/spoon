@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="480dp"
+    android:height="320dp"
+    android:viewportWidth="480"
+    android:viewportHeight="320">
+    <path android:pathData="M0,0 H480 V320 H0 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="linear"
+                android:startX="0"
+                android:startY="0"
+                android:endX="420"
+                android:endY="320">
+                <item android:offset="0" android:color="#A4543A" />
+                <item android:offset="0.55" android:color="#743B2E" />
+                <item android:offset="1" android:color="#382623" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <path
+        android:fillColor="#0BFFF3E5"
+        android:pathData="M360,-96 A196,196 0 1,1 360,296 A196,196 0 1,1 360,-96" />
+    <path
+        android:fillColor="#09FFF3E5"
+        android:pathData="M65,145 A166,166 0 1,1 65,477 A166,166 0 1,1 65,145" />
+    <path
+        android:fillColor="#12FFF3E5"
+        android:pathData="M240,45 A77,77 0 1,1 240,199 A77,77 0 1,1 240,45" />
+    <path
+        android:strokeColor="#99FFF3E5"
+        android:strokeWidth="2"
+        android:fillColor="#00000000"
+        android:pathData="M240,59 A63,63 0 1,1 240,185 A63,63 0 1,1 240,59" />
+    <path
+        android:strokeColor="#45FFF3E5"
+        android:strokeWidth="1.5"
+        android:fillColor="#00000000"
+        android:pathData="M240,73 A49,49 0 1,1 240,171 A49,49 0 1,1 240,73" />
+    <path
+        android:strokeColor="#B3FFF3E5"
+        android:strokeWidth="3.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="#00000000"
+        android:pathData="M142,88 V112 Q142,124 153,124 Q164,124 164,112 V88 M153,88 V177 M328,88 Q319,91 319,109 Q319,124 328,128 Q337,124 337,109 Q337,91 328,88 M328,128 V177" />
+</vector>

@@ -61,6 +61,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -99,7 +101,7 @@ internal fun shouldLoadNextExplorePage(
 
 @Composable
 fun ExploreScreen(
-    query: String,
+    query: TextFieldValue,
     recipes: List<ExploreRecipeUi>,
     totalRecipeCount: Int,
     resultGeneration: Long,
@@ -107,7 +109,7 @@ fun ExploreScreen(
     hasMore: Boolean,
     filters: ExploreFiltersUi,
     options: ExploreFacetOptionsUi,
-    onQueryChange: (String) -> Unit,
+    onQueryChange: (TextFieldValue) -> Unit,
     onApplyFilters: (ExploreFiltersUi) -> Unit,
     onOpenRecipe: (String) -> Unit,
     onToggleFavorite: (String) -> Unit,
@@ -117,9 +119,11 @@ fun ExploreScreen(
 ) {
     var showFilters by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
+    var searchFocused by remember { mutableStateOf(false) }
 
     LaunchedEffect(resultGeneration) {
-        if (listState.firstVisibleItemIndex != 0 || listState.firstVisibleItemScrollOffset != 0) {
+        // Keep the editor where the keyboard brought it while results refresh.
+        if (!searchFocused && (listState.firstVisibleItemIndex != 0 || listState.firstVisibleItemScrollOffset != 0)) {
             listState.scrollToItem(0)
         }
     }
@@ -155,6 +159,7 @@ fun ExploreScreen(
                 filters = filters,
                 onQueryChange = onQueryChange,
                 onShowFilters = { showFilters = true },
+                onFocusChange = { searchFocused = it },
             )
         }
         if (filters.activeCount > 0) {
@@ -172,7 +177,7 @@ fun ExploreScreen(
         } else if (recipes.isEmpty()) {
             item {
                 EmptyExploreState(onClear = {
-                    onQueryChange("")
+                    onQueryChange(TextFieldValue())
                     onApplyFilters(ExploreFiltersUi())
                 })
             }
@@ -659,11 +664,12 @@ private fun Set<String>.toggled(value: String): Set<String> =
 /** Shared search field, filter button, and active count for Explore and Favorites. */
 @Composable
 internal fun RecipeSearchControls(
-    query: String,
+    query: TextFieldValue,
     filters: ExploreFiltersUi,
-    onQueryChange: (String) -> Unit,
+    onQueryChange: (TextFieldValue) -> Unit,
     onShowFilters: () -> Unit,
     filterDescription: String = "Φίλτρα εξερεύνησης",
+    onFocusChange: (Boolean) -> Unit = {},
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -673,13 +679,13 @@ internal fun RecipeSearchControls(
         OutlinedTextField(
             value = query,
             onValueChange = onQueryChange,
-            modifier = Modifier.weight(1f),
+            modifier = Modifier.weight(1f).onFocusChanged { onFocusChange(it.isFocused) },
             singleLine = true,
             shape = RoundedCornerShape(18.dp),
             leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
-            trailingIcon = if (query.isNotBlank()) {
+            trailingIcon = if (query.text.isNotBlank()) {
                 {
-                    IconButton(onClick = { onQueryChange("") }) {
+                    IconButton(onClick = { onQueryChange(TextFieldValue()) }) {
                         Icon(Icons.Outlined.Close, contentDescription = "Καθαρισμός αναζήτησης")
                     }
                 }

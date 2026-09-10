@@ -7,6 +7,7 @@ import com.justdataplease.spoon.data.model.MealCoursePlan
 import com.justdataplease.spoon.data.model.completionTimestamp
 import com.justdataplease.spoon.data.model.MealCourse
 import com.justdataplease.spoon.data.model.DayMealPlan
+import com.justdataplease.spoon.data.model.isIntentionallyBlank
 import com.justdataplease.spoon.data.model.EaseLevel
 import com.justdataplease.spoon.data.model.MealCategory
 import com.justdataplease.spoon.data.model.Recipe
@@ -23,6 +24,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -1045,6 +1047,131 @@ class MealPlannerTest {
         assertEquals(saved.side!!.filters.copy(category = "meat"), week.first().side!!.filters)
         assertEquals(tuesday.side, week[1].side)
         assertTrue(week.drop(2).all { it.side == null && it.dessert == null })
+    }
+
+    @Test
+    fun `choosing blank clears every course and completion while retaining filters and increasing revision`() = runBlocking {
+        val date = LocalDate.of(2026, 9, 7)
+        val filters = RecipeFilters(category = "legumes", minRating = 8.0, maxPrepMinutes = 30)
+        val original = DayMealPlan(date = date.toString(), recipeId = "main", recipeTitle = "Main",
+            filters = filters, category = "legumes", locked = true, completed = true,
+            completionEventId = "main-event", completedAtEpochMillis = 500L,
+            updatedAtEpochMillis = System.currentTimeMillis() + 10_000L,
+            side = MealCoursePlan(recipeId = "side", recipeTitle = "Side", completed = true),
+            dessert = MealCoursePlan(recipeId = "dessert", recipeTitle = "Dessert", locked = true))
+        val repository = FakeRepository(initialPlans = listOf(original))
+        val planner = MealPlanner(repository, RecipeSelector())
+
+        planner.setDayBlank(date)
+
+        val blank = repository.plans.value.single()
+        assertTrue(blank.isIntentionallyBlank)
+        assertEquals(date.toString(), blank.id)
+        assertEquals(filters, blank.filters)
+        assertEquals("", blank.recipeId)
+        assertEquals("", blank.recipeTitle)
+        assertEquals("", blank.completionEventId)
+        assertEquals(0L, blank.completedAtEpochMillis)
+        assertFalse(blank.completed)
+        assertEquals(null, blank.side)
+        assertEquals(null, blank.dessert)
+        assertTrue(blank.updatedAtEpochMillis > original.updatedAtEpochMillis)
+        planner.setDayBlank(date)
+        assertEquals(blank, repository.plans.value.single())
+        assertEquals(1, repository.upsertCount)
+    }
+
+    @Test
+    fun `blank day survives repeated week hydration all course resets and weekly regeneration`() = runBlocking {
+        val date = LocalDate.of(2026, 9, 7)
+        val repository = FakeRepository()
+        val planner = MealPlanner(repository, RecipeSelector())
+        planner.ensureWeek(date)
+        planner.setDayBlank(date)
+        val blank = repository.plans.value.single { it.date == date.toString() }
+        repeat(2) { assertEquals(blank, planner.ensureWeek(date).first()) }
+        (repository.mealPreferenceSettings as MutableStateFlow).value = MealPreferenceSettings(
+            weekdayCategories = mapOf("MONDAY" to "meat"),
+            sideWeekdayCategories = mapOf("MONDAY" to "vegetables"),
+            dessertWeekdayCategories = mapOf("MONDAY" to "dessert"))
+
+        val refreshed = planner.ensureWeek(date, resetWeekdays = setOf(date.dayOfWeek),
+            resetCourseWeekdays = MealCourse.entries.associateWith { setOf(date.dayOfWeek) })
+        assertEquals(blank, refreshed.first())
+        val selections = planner.rerollWeek(date)
+        assertEquals(18, selections.size)
+        assertEquals(blank, repository.plans.value.single { it.date == date.toString() })
+        assertEquals(blank, planner.ensureWeek(date).first())
+    }
+
+    @Test
+    fun `opening menu on intentional blank neither generates extra courses nor writes the day`() = runBlocking {
+        val date = LocalDate.of(2026, 9, 7)
+        val repository = FakeRepository()
+        val planner = MealPlanner(repository, RecipeSelector())
+        planner.setDayBlank(date)
+        val blank = repository.plans.value.single()
+        val writes = repository.upsertCount
+
+        assertEquals(MealMenuProposal(null, null, null), planner.suggestMenu(date))
+        assertEquals(blank, repository.plans.value.single())
+        assertEquals(writes, repository.upsertCount)
+    }
+
+    @Test
+    fun `explicit successful add restores blank day and removes its protection`() = runBlocking {
+        val date = LocalDate.of(2026, 9, 7)
+        val recipe = Recipe(id = "main", title = "Φασολάδα", category = "legumes")
+        val repository = FakeRepository(initialRecipes = listOf(recipe))
+        val planner = MealPlanner(repository, RecipeSelector())
+        planner.setDayBlank(date)
+
+        val result = planner.reroll(date)
+
+        assertTrue(result is MealPlanSelection.Selected)
+        val restored = repository.plans.value.single()
+        assertEquals(recipe.id, restored.recipeId)
+        assertFalse(restored.locked)
+        assertFalse(restored.isIntentionallyBlank)
+        assertFalse(restored.completed)
+        assertEquals(null, restored.side)
+        assertEquals(null, restored.dessert)
+    }
+
+    @Test
+    fun `failed add keeps intentional blank while an ordinary no-match day remains refillable`() = runBlocking {
+        val date = LocalDate.of(2026, 9, 7)
+        val repository = FakeRepository(initialRecipes = emptyList())
+        val planner = MealPlanner(repository, RecipeSelector())
+        planner.setDayBlank(date)
+        val blank = repository.plans.value.single()
+        assertTrue(planner.reroll(date) is MealPlanSelection.NoMatch)
+        assertEquals(blank, repository.plans.value.single())
+        val ordinaryDate = date.plusWeeks(1)
+        assertTrue(planner.reroll(ordinaryDate) is MealPlanSelection.NoMatch)
+        assertFalse(repository.plans.value.single { it.date == ordinaryDate.toString() }.isIntentionallyBlank)
+        (repository.recipes as MutableStateFlow).value = listOf(
+            Recipe(id = "main", title = "Φασολάδα", category = "legumes"))
+
+        assertEquals(blank, planner.ensureWeek(date).first())
+        assertEquals("main", planner.ensureWeek(ordinaryDate).first().recipeId)
+    }
+
+    @Test
+    fun `favorite selection explicitly restores a blank day without stale course state`() = runBlocking {
+        val date = LocalDate.of(2026, 9, 7)
+        val recipe = Recipe(id = "favorite", title = "Σούπα", category = "soup")
+        val repository = FakeRepository(initialRecipes = listOf(recipe), initialFavorites = setOf(recipe.id))
+        val planner = MealPlanner(repository, RecipeSelector())
+        planner.setDayBlank(date)
+
+        assertTrue(planner.replaceWithFavorite(date, recipe.id) is FavoriteReplacementResult.Selected)
+        val restored = repository.plans.value.single()
+        assertEquals(recipe.id, restored.recipeId)
+        assertFalse(restored.locked)
+        assertFalse(restored.isIntentionallyBlank)
+        assertEquals(null, restored.side)
+        assertEquals(null, restored.dessert)
     }
 
     private fun assertMainPreserved(expected: DayMealPlan, actual: DayMealPlan) {

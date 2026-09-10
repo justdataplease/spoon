@@ -16,38 +16,27 @@ import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.components.SingletonComponent
 
 class TodayRecipeWidgetProvider : AppWidgetProvider() {
-    override fun onEnabled(context: Context) = requestUpdate(context)
+    override fun onEnabled(context: Context) = requestWidgetUpdate(context)
 
     override fun onUpdate(context: Context, manager: AppWidgetManager, ids: IntArray) =
-        requestUpdate(context)
+        requestWidgetUpdate(context)
 
     override fun onAppWidgetOptionsChanged(
         context: Context,
         manager: AppWidgetManager,
         appWidgetId: Int,
         newOptions: Bundle,
-    ) = requestUpdate(context)
+    ) = requestWidgetUpdate(context)
 
     override fun onDisabled(context: Context) {
-        widgetCoordinator(context).stop()
+        widgetCoordinator(context).widgetsChanged()
     }
 
     override fun onReceive(context: Context, intent: Intent) {
         super.onReceive(context, intent)
         if (intent.action in setOf(Intent.ACTION_DATE_CHANGED, Intent.ACTION_TIME_CHANGED, Intent.ACTION_TIMEZONE_CHANGED)) {
-            requestUpdate(context, clockChanged = true)
+            requestWidgetUpdate(context, clockChanged = true)
         }
-    }
-
-    private fun requestUpdate(context: Context, clockChanged: Boolean = false) {
-        val coordinator = widgetCoordinator(context)
-        coordinator.startIfNeeded()
-        if (clockChanged) coordinator.clockChanged() else coordinator.requestRefresh()
-        WorkManager.getInstance(context).enqueueUniqueWork(
-            REFRESH_WORK,
-            ExistingWorkPolicy.REPLACE,
-            OneTimeWorkRequestBuilder<TodayRecipeWidgetWorker>().build(),
-        )
     }
 
     companion object {
@@ -74,3 +63,19 @@ interface TodayRecipeWidgetEntryPoint {
 internal fun widgetCoordinator(context: Context): TodayRecipeWidgetCoordinator =
     EntryPointAccessors.fromApplication(context.applicationContext, TodayRecipeWidgetEntryPoint::class.java)
         .todayRecipeWidgetCoordinator()
+
+/** All launcher variants share one repository observer and refresh worker. */
+internal fun requestWidgetUpdate(context: Context, clockChanged: Boolean = false) {
+    val coordinator = widgetCoordinator(context)
+    if (!coordinator.hasWidgets()) {
+        coordinator.stop()
+        return
+    }
+    coordinator.startIfNeeded()
+    if (clockChanged) coordinator.clockChanged() else coordinator.requestRefresh()
+    WorkManager.getInstance(context).enqueueUniqueWork(
+        TodayRecipeWidgetProvider.REFRESH_WORK,
+        ExistingWorkPolicy.REPLACE,
+        OneTimeWorkRequestBuilder<TodayRecipeWidgetWorker>().build(),
+    )
+}

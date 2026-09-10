@@ -1,5 +1,10 @@
 package com.justdataplease.spoon.ui.explore
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.Flow
@@ -22,14 +27,19 @@ internal data class ExploreFilterInput(
 )
 
 /**
- * Keeps text input synchronous while exposing a quieter query for the 20k+ recipe scan.
+ * Owns the synchronous editor, including selection and IME composition.
+ * Only the filtering query travels through asynchronous flows and debounce.
  * Clearing the field is immediate; non-blank typeahead waits for the user's short pause.
  */
 internal class ExploreSearchState(
     scope: CoroutineScope,
     debounceMillis: Long = EXPLORE_SEARCH_DEBOUNCE_MILLIS,
 ) {
+    private var mutableEditorValue by mutableStateOf(TextFieldValue())
     private val mutableVisibleQuery = MutableStateFlow("")
+
+    // Read directly from Compose; result snapshots must never feed text back into the editor.
+    val editorValue: TextFieldValue get() = mutableEditorValue
 
     val visibleQuery: StateFlow<String> = mutableVisibleQuery.asStateFlow()
     val filterQuery: StateFlow<String> = mutableVisibleQuery
@@ -40,8 +50,17 @@ internal class ExploreSearchState(
             initialValue = mutableVisibleQuery.value,
         )
 
+    fun update(value: TextFieldValue) {
+        val accepted = if (value.text.length > MAX_EXPLORE_QUERY_LENGTH) {
+            value.copy(text = value.text.take(MAX_EXPLORE_QUERY_LENGTH))
+        } else value
+        mutableEditorValue = accepted
+        mutableVisibleQuery.value = accepted.text
+    }
+
     fun update(query: String) {
-        mutableVisibleQuery.value = query.take(MAX_EXPLORE_QUERY_LENGTH)
+        val text = query.take(MAX_EXPLORE_QUERY_LENGTH)
+        update(TextFieldValue(text, selection = TextRange(text.length)))
     }
 }
 

@@ -7,7 +7,7 @@
     android:targetCellWidth="3"
     android:targetCellHeight="2"
     android:initialLayout="@layout/today_recipe_widget"
-    android:previewLayout="@layout/today_recipe_widget"
+    android:previewLayout="@layout/today_recipe_widget_preview"
     android:description="@string/today_recipe_widget_description"
     android:resizeMode="horizontal|vertical"
     android:updatePeriodMillis="0"

@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="24dp"
+    android:gravity="center_vertical" android:orientation="horizontal">
+    <TextView android:layout_width="0dp" android:layout_height="match_parent"
+        android:layout_weight="1" android:gravity="center" android:text="Δ"
+        android:contentDescription="@string/calendar_widget_monday"
+        android:textColor="#77675D" android:textSize="11sp" android:fontFamily="sans-serif-medium" />
+    <TextView android:layout_width="0dp" android:layout_height="match_parent"
+        android:layout_weight="1" android:gravity="center" android:text="Τ"
+        android:contentDescription="@string/calendar_widget_tuesday"
+        android:textColor="#77675D" android:textSize="11sp" android:fontFamily="sans-serif-medium" />
+    <TextView android:layout_width="0dp" android:layout_height="match_parent"
+        android:layout_weight="1" android:gravity="center" android:text="Τ"
+        android:contentDescription="@string/calendar_widget_wednesday"
+        android:textColor="#77675D" android:textSize="11sp" android:fontFamily="sans-serif-medium" />
+    <TextView android:layout_width="0dp" android:layout_height="match_parent"
+        android:layout_weight="1" android:gravity="center" android:text="Π"
+        android:contentDescription="@string/calendar_widget_thursday"
+        android:textColor="#77675D" android:textSize="11sp" android:fontFamily="sans-serif-medium" />
+    <TextView android:layout_width="0dp" android:layout_height="match_parent"
+        android:layout_weight="1" android:gravity="center" android:text="Π"
+        android:contentDescription="@string/calendar_widget_friday"
+        android:textColor="#77675D" android:textSize="11sp" android:fontFamily="sans-serif-medium" />
+    <TextView android:layout_width="0dp" android:layout_height="match_parent"
+        android:layout_weight="1" android:gravity="center" android:text="Σ"
+        android:contentDescription="@string/calendar_widget_saturday"
+        android:textColor="#77675D" android:textSize="11sp" android:fontFamily="sans-serif-medium" />
+    <TextView android:layout_width="0dp" android:layout_height="match_parent"
+        android:layout_weight="1" android:gravity="center" android:text="Κ"
+        android:contentDescription="@string/calendar_widget_sunday"
+        android:textColor="#77675D" android:textSize="11sp" android:fontFamily="sans-serif-medium" />
+</LinearLayout>

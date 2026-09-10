@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@android:id/background"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="12dp"
+    android:background="@drawable/calendar_widget_background"
+    android:clipToOutline="true">
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="20dp"
+        android:gravity="center"
+        android:text="@string/calendar_widget_heading"
+        android:textColor="#B8442E"
+        android:textSize="12sp"
+        android:fontFamily="sans-serif-medium" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="48dp"
+        android:gravity="center_vertical">
+        <ImageButton
+            android:id="@+id/calendar_widget_previous"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:padding="12dp"
+            android:background="@drawable/calendar_widget_day_background"
+            android:src="@drawable/calendar_widget_previous"
+            android:contentDescription="@string/calendar_widget_previous_month" />
+        <TextView
+            android:id="@+id/calendar_widget_month"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:text="@string/calendar_widget_loading_month"
+            android:textColor="#2D2520"
+            android:textSize="18sp"
+            android:fontFamily="sans-serif-medium"
+            android:maxLines="1"
+            android:ellipsize="end"
+            android:background="@drawable/calendar_widget_day_background" />
+        <ImageButton
+            android:id="@+id/calendar_widget_next"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:padding="12dp"
+            android:background="@drawable/calendar_widget_day_background"
+            android:src="@drawable/calendar_widget_next"
+            android:contentDescription="@string/calendar_widget_next_month" />
+    </LinearLayout>
+
+    <include layout="@layout/calendar_widget_weekdays" />
+
+    <LinearLayout
+        android:id="@+id/calendar_widget_weeks"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:orientation="vertical" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="24dp"
+        android:gravity="center">
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/calendar_widget_planned_legend"
+            android:textColor="#B8442E"
+            android:textSize="11sp" />
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="18dp"
+            android:text="@string/calendar_widget_completed_legend"
+            android:textColor="#2F6D62"
+            android:textSize="11sp" />
+    </LinearLayout>
+</LinearLayout>

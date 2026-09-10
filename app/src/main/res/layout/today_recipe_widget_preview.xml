@@ -10,7 +10,7 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:scaleType="centerCrop"
-        android:src="@drawable/today_recipe_widget_placeholder"
+        android:src="@drawable/food_hero"
         android:importantForAccessibility="no" />
     <ImageView
         android:layout_width="match_parent"
@@ -37,5 +37,5 @@
         android:shadowRadius="2"
         android:maxLines="3"
         android:ellipsize="end"
-        android:text="@string/today_recipe_widget_empty" />
+        android:text="@string/today_recipe_widget_preview_title" />
 </FrameLayout>

@@ -90,6 +90,9 @@ data class DayPlanUi(
     val isLocked: Boolean = false,
     val filters: FiltersUi = FiltersUi(categoryKey = categoryKey),
 ) {
+    val isIntentionallyBlank: Boolean
+        get() = isLocked && recipeId.isBlank() && !isCompleted
+
     val category: CategoryUi
         get() = categoryForKey(categoryKey)
 
@@ -234,7 +237,6 @@ data class SpoonUiState(
     val calendarMeals: List<CalendarMealUi> = emptyList(),
     val editingDate: LocalDate? = null,
     val favoriteReplacementDate: LocalDate? = null,
-    val exploreQuery: String = "",
     val exploreRecipes: List<ExploreRecipeUi> = emptyList(),
     val exploreTotalRecipeCount: Int = 0,
     val exploreResultGeneration: Long = 0L,

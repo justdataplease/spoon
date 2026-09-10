@@ -109,6 +109,7 @@ fun WeekScreen(
     favoritesOnly: Boolean = false,
     onToggleLock: (LocalDate) -> Unit = {},
     onOpenMenu: (LocalDate) -> Unit = {},
+    onBlankDay: (LocalDate) -> Unit = {},
 ) {
     val editingPlan = state.editingDate?.let { date -> state.weekPlans.firstOrNull { it.date == date } }
 
@@ -137,7 +138,7 @@ fun WeekScreen(
             }
             item {
                 Text(
-                    "Οι κλειδωμένες και μαγειρεμένες συνταγές δεν αλλάζουν στην ανανέωση της εβδομάδας.",
+                    "Οι κενές ημέρες, οι κλειδωμένες και οι μαγειρεμένες συνταγές διατηρούνται στην ανανέωση της εβδομάδας.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -156,20 +157,27 @@ fun WeekScreen(
                 }
             } else {
                 items(state.weekPlans, key = { it.date.toString() }) { plan ->
-                    if (plan.recipeId.isBlank()) {
-                        EmptyRecipeCard(
-                            plan = plan,
-                            onPick = { onReroll(plan.date) },
-                            onEdit = { onEdit(plan.date) },
-                            favoritesOnly = favoritesOnly,
-                            onOpenMenu = { onOpenMenu(plan.date) },
-                        )
+                    if (plan.isIntentionallyBlank) {
+                        BlankDayCard(plan, onAddMeal = { onReroll(plan.date) },
+                            onChooseFavorite = { onChooseFavorite(plan.date) }, onEdit = { onEdit(plan.date) })
+                    } else if (plan.recipeId.isBlank()) {
+                        Column {
+                            EmptyRecipeCard(
+                                plan = plan,
+                                onPick = { onReroll(plan.date) },
+                                onEdit = { onEdit(plan.date) },
+                                favoritesOnly = favoritesOnly,
+                                onOpenMenu = { onOpenMenu(plan.date) },
+                            )
+                            TextButton(onClick = { onBlankDay(plan.date) }) { Text("Κενή ημέρα") }
+                        }
                     } else {
                         DayRecipeCard(
                             plan = plan,
                             isToday = plan.date == LocalDate.now(),
                             onOpenMenu = { onOpenMenu(plan.date) },
                             onToggleLock = { onToggleLock(plan.date) },
+                            onBlankDay = { onBlankDay(plan.date) },
                             onReroll = { onReroll(plan.date) },
                             onEdit = { onEdit(plan.date) },
                             onToggleFavorite = { onToggleFavorite(plan.recipeId) },
@@ -207,6 +215,27 @@ fun WeekScreen(
             onDismiss = onDismissEditor,
             onSave = { onSaveFilters(editingPlan.date, it) },
         )
+    }
+}
+
+@Composable
+internal fun BlankDayCard(
+    plan: DayPlanUi,
+    onAddMeal: () -> Unit,
+    onChooseFavorite: () -> Unit,
+    onEdit: () -> Unit,
+) {
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            DayDateHeader(plan.date)
+            Text("Κενή ημέρα", style = MaterialTheme.typography.titleLarge)
+            Text("Θα μείνει κενή και στις νέες προτάσεις της εβδομάδας.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Button(onClick = onAddMeal) { Text("Προσθήκη γεύματος") }
+            TextButton(onClick = onChooseFavorite) { Text("Από τη συλλογή") }
+            TextButton(onClick = onEdit) { Text("Αλλαγή κατηγορίας / φίλτρων") }
+        }
     }
 }
 
@@ -282,6 +311,7 @@ internal fun DayRecipeCard(
     onToggleLock: () -> Unit,
     onOpenMenu: (() -> Unit)? = null,
     courseTitle: String? = null,
+    onBlankDay: (() -> Unit)? = null,
 ) {
     Card(
         onClick = onOpenRecipe,
@@ -418,6 +448,9 @@ internal fun DayRecipeCard(
                     Spacer(Modifier.size(6.dp))
                     Text(if (plan.isCompleted) "Έγινε" else "Το έφτιαξα")
                 }
+            }
+            if (onBlankDay != null) {
+                TextButton(onClick = onBlankDay) { Text("Κενή ημέρα") }
             }
         }
     }

@@ -84,7 +84,10 @@ fun MealMenuScreen(
         MealCourse.entries.forEach { course ->
             state.plans[course]?.let { plan ->
                 item(key = course.name) {
-                    if (plan.recipeId.isBlank()) {
+                    if (plan.isIntentionallyBlank) {
+                        BlankDayCard(plan, onAddMeal = { onReroll(course) },
+                            onChooseFavorite = { onChooseFavorite(course) }, onEdit = { editingCourse = course })
+                    } else if (plan.recipeId.isBlank()) {
                         Column {
                             EmptyRecipeCard(plan = plan, onPick = { onReroll(course) },
                                 onEdit = { editingCourse = course }, favoritesOnly = state.favoritesOnly,

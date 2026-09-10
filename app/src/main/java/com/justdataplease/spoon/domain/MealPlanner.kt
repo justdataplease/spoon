@@ -7,6 +7,7 @@ import com.justdataplease.spoon.data.model.MealCourse
 import com.justdataplease.spoon.data.model.coursePlan
 import com.justdataplease.spoon.data.model.withCourse
 import com.justdataplease.spoon.data.model.allCourses
+import com.justdataplease.spoon.data.model.isIntentionallyBlank
 import com.justdataplease.spoon.data.model.MealCategory
 import com.justdataplease.spoon.data.model.Recipe
 import com.justdataplease.spoon.data.model.RecipeFilters
@@ -98,6 +99,19 @@ class MealPlanner @Inject constructor(
     suspend fun setLocked(date: LocalDate, locked: Boolean, course: MealCourse = MealCourse.MAIN) =
         planMutationMutex.withLock { setLockedUnlocked(date, locked, course) }
 
+    /** Keeps an explicitly empty day until the user successfully adds a meal again. */
+    suspend fun setDayBlank(date: LocalDate) = planMutationMutex.withLock {
+        repository.ensureReady()
+        val previous = repository.mealPlans.first().firstOrNull { it.date == date.toString() }
+        if (previous?.isIntentionallyBlank == true) return@withLock
+        val filters = previous?.filters ?: WeeklyPlanDefaults.filtersFor(date, mealPreferenceSettings.first())
+        repository.upsertMealPlan(DayMealPlan(
+            id = date.toString(), date = date.toString(), category = filters.category,
+            filters = filters, locked = true,
+            updatedAtEpochMillis = maxOf(System.currentTimeMillis(), (previous?.updatedAtEpochMillis ?: 0L) + 1L),
+        ))
+    }
+
     suspend fun setCompleted(date: LocalDate, completed: Boolean, course: MealCourse = MealCourse.MAIN) =
         planMutationMutex.withLock { setCompletedUnlocked(date, completed, course) }
 
@@ -166,6 +180,7 @@ class MealPlanner @Inject constructor(
 
         return WeeklyPlanDefaults.dates(containingDate).map { date ->
             val current = existing[date.toString()]
+            if (current?.isIntentionallyBlank == true) return@map current
             val resetCategory = (date.dayOfWeek in resetWeekdays ||
                 date.dayOfWeek in resetCourseWeekdays[MealCourse.MAIN].orEmpty()) &&
                 current?.completed != true && current?.locked != true
@@ -218,6 +233,7 @@ class MealPlanner @Inject constructor(
         val plansByDate = repository.mealPlans.first().associateBy(DayMealPlan::date)
         return WeeklyPlanDefaults.dates(containingDate).flatMap { date ->
             val current = plansByDate[date.toString()]
+            if (current?.isIntentionallyBlank == true) return@flatMap emptyList()
             var plan = current ?: DayMealPlan(id = date.toString(), date = date.toString(),
                 filters = WeeklyPlanDefaults.filtersFor(date, preferences))
             val selections = mutableListOf<Pair<RecipeFilters, Recipe?>>()
@@ -263,6 +279,10 @@ class MealPlanner @Inject constructor(
             preferences = preferences,
             favorites = favorites,
         )
+        // A failed explicit add must not silently re-enable automatic generation later.
+        if (selected == null && existing?.isIntentionallyBlank == true) {
+            return MealPlanSelection.NoMatch(date, requestedFilters)
+        }
         val selectedPlan = newPlan(date, requestedFilters, selected)
         val plan = existing?.withCourse(MealCourse.MAIN, selectedPlan) ?: selectedPlan
         repository.upsertMealPlan(plan)
@@ -275,6 +295,7 @@ class MealPlanner @Inject constructor(
         repository.ensureReady()
         var plan = repository.mealPlans.first().firstOrNull { it.date == date.toString() }
             ?: ensureWeekUnlocked(date, random).first { it.date == date.toString() }
+        if (plan.isIntentionallyBlank) return MealMenuProposal(null, null, null)
         if (plan.side == null || plan.dessert == null) {
             val preferences = mealPreferenceSettings.first()
             val favorites = favoritePool(preferences)

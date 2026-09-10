@@ -73,3 +73,8 @@ internal fun DayMealPlan.withCourse(course: MealCourse, changed: DayMealPlan): D
 }
 
 internal fun DayMealPlan.allCourses(): List<DayMealPlan> = MealCourse.entries.mapNotNull(::coursePlan)
+
+/** An explicit empty day reuses existing storage fields and protects every course from automatic picks. */
+internal val DayMealPlan.isIntentionallyBlank: Boolean
+    get() = locked && recipeId.isBlank() && recipeTitle.isBlank() && !completed &&
+        side == null && dessert == null

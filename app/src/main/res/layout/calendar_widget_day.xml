@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="0dp"
+    android:layout_height="match_parent"
+    android:layout_weight="1"
+    android:padding="2dp">
+    <LinearLayout
+        android:id="@+id/calendar_widget_day_content"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:gravity="center"
+        android:focusable="true"
+        android:importantForAccessibility="yes"
+        android:background="@drawable/calendar_widget_day_background">
+        <TextView
+            android:id="@+id/calendar_widget_day_number"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:textColor="#2D2520"
+            android:textSize="14sp"
+            android:fontFamily="sans-serif-medium"
+            android:includeFontPadding="false"
+            android:importantForAccessibility="no" />
+        <TextView
+            android:id="@+id/calendar_widget_day_marker"
+            android:layout_width="match_parent"
+            android:layout_height="14dp"
+            android:gravity="center"
+            android:textSize="10sp"
+            android:includeFontPadding="false"
+            android:importantForAccessibility="no" />
+    </LinearLayout>
+</FrameLayout>

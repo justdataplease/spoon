@@ -97,6 +97,16 @@ fun SpoonApp(
     val mealMenu by viewModel.mealMenu.collectAsStateWithLifecycle()
     val favoritesSearch by viewModel.favoritesSearchUiState.collectAsStateWithLifecycle()
     val mealPreferenceSettings by viewModel.mealPreferenceSettings.collectAsStateWithLifecycle()
+    val calendarSelectedDate by viewModel.calendarSelectedDate.collectAsStateWithLifecycle()
+    val calendarNavigationDate by viewModel.calendarNavigationDate.collectAsStateWithLifecycle()
+
+    LaunchedEffect(calendarNavigationDate) {
+        calendarNavigationDate?.let { date ->
+            selectedDestination = Destinations.indexOfFirst { it.key == PrimaryDestination.MORE }
+            morePage = MorePage.CALENDAR
+            viewModel.consumeCalendarNavigation(date)
+        }
+    }
 
     BackHandler(
         enabled = mealMenu != null || selectedRecipe != null || state.isRecipeDetailsLoading ||
@@ -224,6 +234,7 @@ fun SpoonApp(
                     favoritesOnly = mealPreferenceSettings.favoritesOnly,
                     onOpenMenu = viewModel::showMealMenu,
                     onToggleLock = viewModel::toggleLocked,
+                    onBlankDay = viewModel::setDayBlank,
                     onReroll = viewModel::reroll,
                     onEdit = viewModel::editFilters,
                     onToggleFavorite = viewModel::toggleFavorite,
@@ -237,7 +248,7 @@ fun SpoonApp(
                 )
 
                 PrimaryDestination.EXPLORE -> ExploreScreen(
-                    query = state.exploreQuery,
+                    query = viewModel.exploreQueryValue,
                     recipes = state.exploreRecipes,
                     totalRecipeCount = state.exploreTotalRecipeCount,
                     resultGeneration = state.exploreResultGeneration,
@@ -256,7 +267,7 @@ fun SpoonApp(
 
                 PrimaryDestination.FAVORITES -> FavoritesScreen(
                     favorites = favoritesSearch.favorites,
-                    query = favoritesSearch.query,
+                    query = viewModel.favoritesQueryValue,
                     filters = favoritesSearch.filters,
                     options = state.exploreOptions,
                     totalFavoriteCount = favoritesSearch.totalCount,
@@ -295,6 +306,8 @@ fun SpoonApp(
                     MorePage.CALENDAR -> CalendarScreen(
                         shownMonth = state.shownMonth,
                         meals = state.calendarMeals,
+                        selectedDate = calendarSelectedDate,
+                        onSelectDate = viewModel::selectCalendarDate,
                         onPreviousMonth = viewModel::previousMonth,
                         onNextMonth = viewModel::nextMonth,
                         onCurrentMonth = viewModel::currentMonth,

@@ -6,6 +6,12 @@ import android.os.SystemClock
 import android.view.KeyEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.async
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import androidx.test.platform.app.InstrumentationRegistry
 import com.justdataplease.spoon.MainActivity
 import com.justdataplease.spoon.ui.SpoonViewModel
@@ -60,13 +66,23 @@ class RecipeShareDeviceTest {
             assertFalse(state(activity).isRecipeDetailsLoading)
         }
 
-        deliverWarm(activity, "spoon://recipe/missing_shared_recipe_device_test")
-        awaitCondition("Missing recipe should report an unavailable shared recipe") {
-            val state = state(activity)
-            state.selectedRecipe == null && !state.isRecipeDetailsLoading &&
-                state.message?.contains("δεν βρέθηκε") == true
+        // Observe before delivery: waiting for Compose idle can outlast the snackbar.
+        val missingResult = onMain {
+            activity.lifecycleScope.async(start = CoroutineStart.UNDISPATCHED) {
+                ViewModelProvider(activity)[SpoonViewModel::class.java].uiState.first {
+                    it.selectedRecipe == null && !it.isRecipeDetailsLoading &&
+                        it.message?.contains("δεν βρέθηκε") == true
+                }
+            }
+        }
+        try {
+            deliverWarm(activity, "spoon://recipe/missing_shared_recipe_device_test")
+            runBlocking { withTimeout(30_000L) { missingResult.await() } }
+        } finally {
+            missingResult.cancel()
         }
         assertNull(state(activity).selectedRecipe)
+        assertFalse(state(activity).isRecipeDetailsLoading)
 
         // A failed link must not leave the activity unable to receive the next valid share.
         deliverWarm(activity, "spoon://recipe/argiro_15369")

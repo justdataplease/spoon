@@ -20,6 +20,7 @@ import coil.request.ImageRequest
 import com.justdataplease.spoon.MainActivity
 import com.justdataplease.spoon.R
 import com.justdataplease.spoon.domain.repository.SpoonRepository
+import com.justdataplease.spoon.data.model.isIntentionallyBlank
 import com.justdataplease.spoon.ui.components.normalizeRecipeImageSource
 import dagger.Lazy
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -59,11 +60,23 @@ class TodayRecipeWidgetCoordinator @Inject constructor(
     private var midnight: Job? = null
     private val manager get() = AppWidgetManager.getInstance(context)
     private val repository get() = repositoryProvider.get()
-    private fun widgetIds() = manager.getAppWidgetIds(ComponentName(context, TodayRecipeWidgetProvider::class.java))
+    private val calendarRenderer = CalendarMealWidgetRenderer(context)
+    private fun widgetIds() = manager.getAppWidgetIds(ComponentName(context, TodayRecipeWidgetProvider::class.java)) +
+        manager.getAppWidgetIds(ComponentName(context, TodayRecipeCompactWidgetProvider::class.java))
+    internal fun hasWidgets() = widgetIds().isNotEmpty() || calendarRenderer.widgetIds().isNotEmpty()
+
+    @Synchronized
+    fun widgetsChanged() {
+        if (!hasWidgets()) stop()
+        else {
+            startIfNeeded()
+            requestRefresh()
+        }
+    }
 
     @Synchronized
     fun startIfNeeded() {
-        if (widgetIds().isEmpty() || observer?.isActive == true) return
+        if (!hasWidgets() || observer?.isActive == true) return
         WorkManager.getInstance(context).enqueueUniquePeriodicWork(
             TodayRecipeWidgetProvider.PERIODIC_WORK,
             ExistingPeriodicWorkPolicy.KEEP,
@@ -116,7 +129,7 @@ class TodayRecipeWidgetCoordinator @Inject constructor(
     }
 
     suspend fun refresh(): Boolean {
-        if (widgetIds().isEmpty()) {
+        if (!hasWidgets()) {
             stop()
             return true
         }
@@ -141,6 +154,22 @@ class TodayRecipeWidgetCoordinator @Inject constructor(
 
     private suspend fun render(snapshot: TodayRecipeWidgetSnapshot) {
         val request = generation.incrementAndGet()
+        if (calendarRenderer.widgetIds().isNotEmpty()) {
+            val current = TodayRecipeWidgetSnapshot(
+                plans = repository.mealPlans.first(),
+                custom = repository.customRecipes.first(),
+                account = repository.accountState.value,
+                today = LocalDate.now(),
+            )
+            currentCoroutineContext().ensureActive()
+            if (generation.get() != request || !canPublishCalendarWidgetSnapshot(snapshot, current)) return
+            calendarRenderer.publish(
+                plans = snapshot.plans,
+                today = snapshot.today,
+            )
+        }
+        // The calendar needs only the saved plan, without recipe/photo lookups.
+        if (widgetIds().isEmpty()) return
         val plan = snapshot.plans.firstOrNull { it.date == snapshot.today.toString() }
         val initial = todayRecipeWidgetContent(snapshot.plans, emptyList(), snapshot.today)
         // Clear the previous photo immediately, including across sign-out/account changes.
@@ -187,7 +216,9 @@ class TodayRecipeWidgetCoordinator @Inject constructor(
                 account = repository.accountState.value,
                 today = LocalDate.now(),
             ))) return
-        val title = content?.title?.takeIf(String::isNotBlank) ?: context.getString(R.string.today_recipe_widget_empty)
+        val emptyTitle = if (snapshot.plans.any { it.date == snapshot.today.toString() && it.isIntentionallyBlank })
+            R.string.today_recipe_widget_blank else R.string.today_recipe_widget_empty
+        val title = content?.title?.takeIf(String::isNotBlank) ?: context.getString(emptyTitle)
         val intent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
             action = if (content == null) Intent.ACTION_MAIN else TodayRecipeWidgetProvider.OPEN_RECIPE_ACTION
@@ -196,15 +227,22 @@ class TodayRecipeWidgetCoordinator @Inject constructor(
         val pendingIntent = PendingIntent.getActivity(
             context, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
-        val views = RemoteViews(context.packageName, R.layout.today_recipe_widget).apply {
-            setTextViewText(R.id.widget_recipe_title, title)
-            setContentDescription(R.id.widget_recipe_photo, context.getString(R.string.today_recipe_widget_photo, title))
-            setOnClickPendingIntent(R.id.widget_recipe, pendingIntent)
-            if (bitmap == null) setImageViewResource(R.id.widget_recipe_photo, R.drawable.food_hero)
-            else setImageViewBitmap(R.id.widget_recipe_photo, bitmap)
+        val variants = listOf(
+            TodayRecipeWidgetProvider::class.java to R.layout.today_recipe_widget,
+            TodayRecipeCompactWidgetProvider::class.java to R.layout.today_recipe_compact_widget,
+        )
+        for ((provider, layout) in variants) {
+            val ids = manager.getAppWidgetIds(ComponentName(context, provider))
+            if (ids.isEmpty()) continue
+            val views = RemoteViews(context.packageName, layout).apply {
+                setTextViewText(R.id.widget_recipe_title, title)
+                setContentDescription(R.id.widget_recipe_photo, context.getString(R.string.today_recipe_widget_photo, title))
+                setOnClickPendingIntent(R.id.widget_recipe, pendingIntent)
+                if (bitmap == null) setImageViewResource(R.id.widget_recipe_photo, R.drawable.today_recipe_widget_placeholder)
+                else setImageViewBitmap(R.id.widget_recipe_photo, bitmap)
+            }
+            manager.updateAppWidget(ids, views)
         }
-        val ids = widgetIds()
-        if (ids.isNotEmpty()) manager.updateAppWidget(ids, views)
     }
 
     private companion object { const val TAG = "TodayRecipeWidget" }

@@ -5,6 +5,10 @@ import com.justdataplease.spoon.data.model.CookedMeal
 import com.justdataplease.spoon.data.model.MealCourse
 import com.justdataplease.spoon.data.model.MealCoursePlan
 import com.justdataplease.spoon.data.model.DayMealPlan
+import com.justdataplease.spoon.data.model.isIntentionallyBlank
+import com.justdataplease.spoon.domain.MealPlanner
+import com.justdataplease.spoon.domain.RecipeSelector
+import java.time.LocalDate
 import com.justdataplease.spoon.data.model.MealCategory
 import com.justdataplease.spoon.data.model.Recipe
 import com.justdataplease.spoon.data.model.RecipeFilters
@@ -21,6 +25,28 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class LocalSpoonRepositoryHistoryTest {
+    @Test
+    fun blank_day_survives_local_restart_and_keeps_existing_cooking_history() = runBlocking {
+        val memory = MemoryPreferences()
+        val repository = LocalSpoonRepository(memory.preferences, Json)
+        val date = LocalDate.of(2026, 9, 7)
+        repository.upsertMealPlan(DayMealPlan(date = date.toString(), recipeId = "cooked-main",
+            recipeTitle = "Μαγειρεμένο", category = "legumes", filters = RecipeFilters(category = "legumes")))
+        repository.setMealCompleted(date.toString(), true)
+        val history = repository.cookedHistory.first()
+        assertEquals(1, history.size)
+
+        MealPlanner(repository, RecipeSelector()).setDayBlank(date)
+        val blank = repository.mealPlans.first().single()
+        assertTrue(blank.isIntentionallyBlank)
+        assertEquals(history, repository.cookedHistory.first())
+
+        val restarted = LocalSpoonRepository(memory.preferences, Json)
+        assertEquals(blank, restarted.mealPlans.first().single())
+        assertEquals(history, restarted.cookedHistory.first())
+        assertEquals(blank, MealPlanner(restarted, RecipeSelector()).ensureWeek(date).first())
+    }
+
     @Test
     fun restart_hydrates_bounded_plan_favorite_and_history_recipe_details() = runBlocking {
         val memory = MemoryPreferences()

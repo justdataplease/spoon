@@ -10,11 +10,11 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:scaleType="centerCrop"
-        android:src="@drawable/today_recipe_widget_placeholder"
+        android:src="@drawable/food_hero"
         android:importantForAccessibility="no" />
     <ImageView
         android:layout_width="match_parent"
-        android:layout_height="144dp"
+        android:layout_height="96dp"
         android:layout_gravity="bottom"
         android:src="@drawable/today_recipe_widget_scrim"
         android:scaleType="fitXY"
@@ -25,17 +25,17 @@
         android:layout_height="wrap_content"
         android:layout_gravity="bottom"
         android:paddingHorizontal="16dp"
-        android:paddingTop="20dp"
-        android:paddingBottom="16dp"
+        android:paddingTop="4dp"
+        android:paddingBottom="8dp"
         android:fontFamily="sans-serif-medium"
         android:includeFontPadding="false"
         android:lineSpacingExtra="1dp"
         android:textColor="#FFFFFFFF"
-        android:textSize="19sp"
+        android:textSize="17sp"
         android:shadowColor="#55000000"
         android:shadowDy="1"
         android:shadowRadius="2"
-        android:maxLines="3"
+        android:maxLines="1"
         android:ellipsize="end"
-        android:text="@string/today_recipe_widget_empty" />
+        android:text="@string/today_recipe_widget_preview_title" />
 </FrameLayout>

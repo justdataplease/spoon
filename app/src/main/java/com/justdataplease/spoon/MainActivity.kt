@@ -15,6 +15,8 @@ import com.justdataplease.spoon.ui.SpoonViewModel
 import com.justdataplease.spoon.ui.model.RecipeDetailUi
 import com.justdataplease.spoon.ui.sharing.RecipeShareLink
 import com.justdataplease.spoon.ui.theme.SpoonTheme
+import com.justdataplease.spoon.widget.CalendarMealWidgetProvider
+import com.justdataplease.spoon.widget.validatedWidgetCalendarDate
 import com.justdataplease.spoon.widget.TodayRecipeWidgetProvider
 import com.justdataplease.spoon.widget.validWidgetRecipeId
 import dagger.hilt.android.AndroidEntryPoint
@@ -47,6 +49,11 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun handleRecipeLink(intent: Intent?) {
+        if (intent?.action == CalendarMealWidgetProvider.OPEN_CALENDAR_DAY_ACTION) {
+            validatedWidgetCalendarDate(intent.getStringExtra(CalendarMealWidgetProvider.DATE_EXTRA))
+                ?.let(viewModel::openCalendarDay)
+            return
+        }
         if (intent?.action == TodayRecipeWidgetProvider.OPEN_RECIPE_ACTION) {
             validWidgetRecipeId(intent.getStringExtra(TodayRecipeWidgetProvider.RECIPE_ID_EXTRA))
                 ?.let(viewModel::showRecipeDetails)

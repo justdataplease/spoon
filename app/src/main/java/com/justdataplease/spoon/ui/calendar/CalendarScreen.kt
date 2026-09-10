@@ -31,10 +31,6 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -60,6 +56,8 @@ private val FullDateFormatter = DateTimeFormatter.ofPattern("EEEE d MMMM yyyy", 
 fun CalendarScreen(
     shownMonth: YearMonth,
     meals: List<CalendarMealUi>,
+    selectedDate: LocalDate?,
+    onSelectDate: (LocalDate) -> Unit,
     onPreviousMonth: () -> Unit,
     onNextMonth: () -> Unit,
     onCurrentMonth: () -> Unit,
@@ -67,7 +65,6 @@ fun CalendarScreen(
     onToggleCompleted: (LocalDate) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var selectedDate by remember(shownMonth) { mutableStateOf<LocalDate?>(null) }
     val selectedMeal = selectedDate?.let { date -> meals.firstOrNull { it.date == date } }
 
     LazyColumn(
@@ -88,7 +85,7 @@ fun CalendarScreen(
                 month = shownMonth,
                 meals = meals,
                 selectedDate = selectedDate,
-                onSelectDate = { selectedDate = it },
+                onSelectDate = onSelectDate,
                 onPreviousMonth = onPreviousMonth,
                 onNextMonth = onNextMonth,
                 onCurrentMonth = onCurrentMonth,
