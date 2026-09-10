@@ -128,7 +128,7 @@ require approval and deployment of the exact owner-only change in
 Production also rejects the current preference fields and drinks category;
 [the exact validator update](docs/current-app-sync-rules-proposal.md) awaits approval.
 The APK retains rejected changes locally and retries; it does not label them synced. Pushing an APK does not
-deploy these rules. See [0.11.0 verification](docs/release-0.11.0.md).
+deploy these rules. The owner-scoped rules fix is implemented and emulator-tested; production deployment still requires explicit approval. See [0.11.1 verification](docs/release-0.11.1.md).
 
 ```text
 app/src/main/java/com/justdataplease/spoon/

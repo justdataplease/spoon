@@ -468,12 +468,15 @@ service cloud.firestore {
     match /spoon/{uid}/cookedHistory/{historyId} {
       allow get, list: if isOwner(uid);
       allow create: if isOwner(uid) &&
+        validCookedMeal(request.resource.data, historyId);
+      allow update: if isOwner(uid) &&
         validCookedMeal(request.resource.data, historyId) &&
-        historyMatchesCompletedPlan(uid, request.resource.data, historyId);
-      allow update: if false;
-      allow delete: if isOwner(uid) &&
-        validCookedMeal(resource.data, historyId) &&
-        historyCanBeDeleted(uid, resource.data, historyId);
+        request.resource.data == resource.data;
+      allow delete: if isOwner(uid) && validHistoryId(historyId) && (
+        !exists(/databases/$(database)/documents/spoon/$(uid)/cookedHistory/$(historyId)) ||
+        (validCookedMeal(resource.data, historyId) &&
+          historyCanBeDeleted(uid, resource.data, historyId))
+      );
     }
 
     // App Check enforcement is configured for Cloud Firestore in Firebase,

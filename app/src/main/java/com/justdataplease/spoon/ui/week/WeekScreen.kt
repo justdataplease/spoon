@@ -75,6 +75,7 @@ import com.justdataplease.spoon.ui.components.GreekLocale
 import com.justdataplease.spoon.ui.components.MetricPill
 import com.justdataplease.spoon.ui.components.RecipeArtwork
 import com.justdataplease.spoon.ui.components.StatusBanner
+import com.justdataplease.spoon.ui.components.CatalogStatusBanner
 import com.justdataplease.spoon.ui.components.MAX_RATING_THRESHOLD
 import com.justdataplease.spoon.ui.components.formatRating10
 import com.justdataplease.spoon.ui.components.greekDayLabel
@@ -129,25 +130,12 @@ fun WeekScreen(
                 )
             }
             item {
-                Text(
-                    if (favoritesOnly) "Προτάσεις μόνο από τη συλλογή · επιτρέπονται επαναλήψεις"
-                    else "Προτάσεις από όλες τις συνταγές",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                StatusBanner(syncState = state.account.syncState)
             }
-            item {
-                Text(
-                    "Οι κενές ημέρες, οι κλειδωμένες και οι μαγειρεμένες συνταγές διατηρούνται στην ανανέωση της εβδομάδας.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            item {
-                StatusBanner(
-                    backendState = state.backendState,
-                    isSignedIn = state.account.isSignedIn,
-                )
+            if (state.backendState is BackendState.Connecting || state.backendState is BackendState.Error) {
+                item {
+                    CatalogStatusBanner(backendState = state.backendState)
+                }
             }
             if (state.isLoading && state.weekPlans.isEmpty()) {
                 item {

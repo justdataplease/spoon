@@ -19,6 +19,9 @@ import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.ChevronRight
+import androidx.compose.material.icons.outlined.CloudDone
+import androidx.compose.material.icons.outlined.PhoneAndroid
+import androidx.compose.material.icons.outlined.Sync
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.RestaurantMenu
 import androidx.compose.material3.Button
@@ -44,6 +47,9 @@ import com.justdataplease.spoon.ui.model.DayPlanUi
 import com.justdataplease.spoon.ui.model.EaseUi
 import com.justdataplease.spoon.domain.repository.BackendFailureKind
 import com.justdataplease.spoon.domain.repository.BackendState
+import com.justdataplease.spoon.domain.repository.PersonalSyncState
+import com.justdataplease.spoon.ui.account.PersonalSyncIndicator
+import com.justdataplease.spoon.ui.account.personalSyncPresentation
 import com.justdataplease.spoon.ui.theme.Mint
 import com.justdataplease.spoon.ui.theme.PaprikaDark
 import com.justdataplease.spoon.ui.theme.Peach
@@ -282,24 +288,47 @@ fun CompactFavoriteCard(
 
 @Composable
 fun StatusBanner(
-    backendState: BackendState,
-    isSignedIn: Boolean = true,
+    syncState: PersonalSyncState,
     modifier: Modifier = Modifier,
 ) {
-    val isCloud = backendState is BackendState.Cloud
+    val status = personalSyncPresentation(syncState)
+    val icon = when (status.indicator) {
+        PersonalSyncIndicator.DEVICE -> Icons.Outlined.PhoneAndroid
+        PersonalSyncIndicator.UPLOADING -> Icons.Outlined.Sync
+        PersonalSyncIndicator.SYNCED -> Icons.Outlined.CloudDone
+        PersonalSyncIndicator.WAITING -> Icons.Outlined.Schedule
+    }
+    StatusMessage(
+        text = status.title,
+        icon = icon,
+        isPositive = status.indicator == PersonalSyncIndicator.SYNCED,
+        modifier = modifier,
+    )
+}
+
+@Composable
+fun CatalogStatusBanner(
+    backendState: BackendState,
+    modifier: Modifier = Modifier,
+) {
     val text = when (backendState) {
-        BackendState.Local -> "Έτοιμο για χρήση · οι αλλαγές αποθηκεύονται στη συσκευή"
-        BackendState.Connecting -> "Ετοιμάζεται ο κατάλογος συνταγών…"
-        BackendState.Cloud -> if (isSignedIn) {
-            "Ο κατάλογος συνταγών είναι έτοιμος"
-        } else {
-            "Ο κατάλογος είναι έτοιμος · μπορείς να συνεχίσεις χωρίς λογαριασμό"
-        }
+        BackendState.Local, BackendState.Cloud -> return
+        BackendState.Connecting -> "Φόρτωση καταλόγου"
         is BackendState.Error -> backendErrorText(backendState)
     }
+    StatusMessage(text = text, icon = Icons.Outlined.Schedule, modifier = modifier)
+}
+
+@Composable
+private fun StatusMessage(
+    text: String,
+    icon: ImageVector,
+    modifier: Modifier = Modifier,
+    isPositive: Boolean = false,
+) {
     Surface(
         modifier = modifier.fillMaxWidth(),
-        color = if (isCloud) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.tertiaryContainer,
+        color = if (isPositive) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.tertiaryContainer,
         shape = RoundedCornerShape(16.dp),
     ) {
         Row(
@@ -307,14 +336,8 @@ fun StatusBanner(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Icon(
-                if (isCloud) Icons.Outlined.CheckCircle else Icons.Outlined.Schedule,
-                contentDescription = null,
-            )
-            Text(
-                text,
-                style = MaterialTheme.typography.bodyMedium,
-            )
+            Icon(icon, contentDescription = null)
+            Text(text, style = MaterialTheme.typography.bodyMedium)
         }
     }
 }

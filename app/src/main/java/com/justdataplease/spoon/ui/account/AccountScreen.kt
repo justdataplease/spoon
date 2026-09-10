@@ -172,13 +172,10 @@ private fun PersonalSyncStatusCard(state: PersonalSyncState) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(18.dp),
             horizontalArrangement = Arrangement.spacedBy(14.dp),
-            verticalAlignment = Alignment.Top,
+            verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(26.dp))
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(status.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                Text(status.detail, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
+            Text(status.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
         }
     }
 }

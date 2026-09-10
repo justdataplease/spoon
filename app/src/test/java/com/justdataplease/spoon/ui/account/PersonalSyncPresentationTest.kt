@@ -3,12 +3,13 @@ package com.justdataplease.spoon.ui.account
 import com.justdataplease.spoon.domain.repository.PersonalSyncState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertTrue
+import org.junit.Assert.assertNotEquals
 import org.junit.Test
 
 class PersonalSyncPresentationTest {
     @Test
     fun `zero pending changes alone never claim server acknowledgement`() {
+        val synced = personalSyncPresentation(PersonalSyncState.Synced)
         val unacknowledgedStates = listOf(
             PersonalSyncState.LocalOnly,
             PersonalSyncState.Syncing(0),
@@ -19,22 +20,18 @@ class PersonalSyncPresentationTest {
         unacknowledgedStates.forEach { state ->
             val status = personalSyncPresentation(state)
             assertFalse("Unexpected sync acknowledgement for $state", status.indicator == PersonalSyncIndicator.SYNCED)
-            assertFalse(status.title == "Συγχρονισμένα")
+            assertNotEquals(synced.title, status.title)
         }
-        assertEquals(
-            PersonalSyncIndicator.SYNCED,
-            personalSyncPresentation(PersonalSyncState.Synced).indicator,
-        )
+        assertEquals(PersonalSyncIndicator.SYNCED, synced.indicator)
     }
 
     @Test
-    fun `upload count remains visible without implying the app is blocked`() {
+    fun `upload counts share a concise in progress status`() {
         val one = personalSyncPresentation(PersonalSyncState.Syncing(1))
         val several = personalSyncPresentation(PersonalSyncState.Syncing(14))
 
-        assertTrue(one.detail.startsWith("Αποστέλλεται 1 αλλαγή."))
-        assertTrue(several.detail.startsWith("Αποστέλλονται 14 αλλαγές."))
-        assertTrue(several.detail.contains("Μπορείς να συνεχίσεις"))
+        assertEquals("Γίνεται συγχρονισμός", one.title)
+        assertEquals(one, several)
         assertEquals(PersonalSyncIndicator.UPLOADING, several.indicator)
     }
 
@@ -43,35 +40,32 @@ class PersonalSyncPresentationTest {
         val signIn = personalSyncPresentation(PersonalSyncState.Waiting(3, needsSignIn = true))
         val connection = personalSyncPresentation(PersonalSyncState.Waiting(3))
 
-        assertTrue(signIn.detail.contains("3 αλλαγές"))
-        assertTrue(signIn.detail.contains("Συνδέσου"))
-        assertTrue(signIn.detail.contains("χωρίς σύνδεση"))
-        assertFalse(connection.detail.contains("Συνδέσου"))
-        assertTrue(connection.detail.contains("υπηρεσία είναι διαθέσιμη"))
-        assertTrue(connection.title.contains("Αποθηκευμένα στη συσκευή"))
+        assertEquals("Απαιτείται σύνδεση λογαριασμού", signIn.title)
+        assertEquals("Αναμονή συγχρονισμού", connection.title)
+        assertEquals(PersonalSyncIndicator.WAITING, signIn.indicator)
+        assertEquals(PersonalSyncIndicator.WAITING, connection.indicator)
     }
 
     @Test
-    fun `local only describes device storage and unrestricted local use`() {
+    fun `local only describes device storage`() {
         val local = personalSyncPresentation(PersonalSyncState.LocalOnly)
 
         assertEquals(PersonalSyncIndicator.DEVICE, local.indicator)
         assertEquals("Αποθηκευμένα στη συσκευή", local.title)
-        assertTrue(local.detail.contains("Όλες οι λειτουργίες"))
-        assertTrue(local.detail.contains("χωρίς σύνδεση σε λογαριασμό"))
     }
 
     @Test
-    fun `local transfer recovery never promises a connection alone will finish syncing`() {
+    fun `local transfer recovery takes precedence over signing in`() {
         for (pending in listOf(0, 4)) {
             val state = PersonalSyncState.Waiting(pending, needsSignIn = true, needsLocalRecovery = true)
             val presentation = personalSyncPresentation(state)
+
             assertEquals(PersonalSyncIndicator.WAITING, presentation.indicator)
-            assertTrue(presentation.detail.contains("μεταφορά των προηγούμενων δεδομένων χρειάζεται έλεγχο"))
-            assertTrue(presentation.detail.contains("νέες αλλαγές αποθηκεύονται στη συσκευή"))
-            assertTrue(presentation.detail.contains("μπορείς να συνεχίσεις κανονικά"))
-            assertFalse(presentation.detail.contains("Συνδέσου"))
-            assertFalse(presentation.detail.contains("θα συνεχιστεί αυτόματα"))
+            assertEquals("Απαιτείται έλεγχος δεδομένων", presentation.title)
+            assertNotEquals(
+                personalSyncPresentation(PersonalSyncState.Waiting(pending, needsSignIn = true)).title,
+                presentation.title,
+            )
         }
     }
 
@@ -80,8 +74,8 @@ class PersonalSyncPresentationTest {
         val syncing = personalSyncPresentation(PersonalSyncState.Syncing(-1))
         val waiting = personalSyncPresentation(PersonalSyncState.Waiting(-1))
 
-        assertFalse(syncing.detail.contains("-1"))
-        assertFalse(waiting.detail.contains("-1"))
+        assertFalse(syncing.title.contains("-1"))
+        assertFalse(waiting.title.contains("-1"))
         assertEquals(PersonalSyncIndicator.UPLOADING, syncing.indicator)
         assertEquals(PersonalSyncIndicator.WAITING, waiting.indicator)
     }
