@@ -21,6 +21,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import javax.inject.Singleton
 import kotlinx.serialization.json.Json
+import kotlinx.coroutines.flow.first
 
 @Module
 @InstallIn(SingletonComponent::class)
@@ -36,26 +37,36 @@ object RepositoryModule {
             encodeDefaults = true
         }
         val recipeCatalog = BundledRecipeCatalog(context, json)
-        if (!BuildConfig.HAS_FIREBASE_CONFIG) {
-            return localRepository(context, json, recipeCatalog, preferenceStore)
-        }
-
-        val firebaseApp = runCatching { firebaseAppOrNull(context) }.getOrNull()
-            ?: return localRepository(context, json, recipeCatalog, preferenceStore)
-
-        return runCatching {
-            val firestore = configurePersistentPersonalCache(
-                FirebaseFirestore.getInstance(firebaseApp),
-            )
-            FirestoreSpoonRepository(
-                auth = FirebaseAuth.getInstance(firebaseApp),
-                firestore = firestore,
-                recipeCatalog = recipeCatalog,
-                mealPlanOutbox = NoBackupMealPlanOutbox(context, json),
-                ownerBootstrapStore = NoBackupOwnerBootstrapStore(context),
-                preferenceStore = preferenceStore,
-            )
-        }.getOrElse { localRepository(context, json, recipeCatalog, preferenceStore) }
+        val personalStore = com.justdataplease.spoon.data.local.SqlitePersonalDataStore(context)
+        val firebaseApp = if (BuildConfig.HAS_FIREBASE_CONFIG)
+            runCatching { firebaseAppOrNull(context) }.getOrNull() else null
+        val firebaseAuth = firebaseApp?.let { runCatching { FirebaseAuth.getInstance(it) }.getOrNull() }
+        val firestore = firebaseApp?.let { runCatching {
+            configurePersistentPersonalCache(FirebaseFirestore.getInstance(it))
+        }.getOrNull() }
+        val legacy = localRepository(context, json, recipeCatalog, preferenceStore)
+        return FirestoreSpoonRepository(
+            auth = firebaseAuth,
+            firestore = firestore,
+            recipeCatalog = recipeCatalog,
+            mealPlanOutbox = NoBackupMealPlanOutbox(context, json),
+            ownerBootstrapStore = NoBackupOwnerBootstrapStore(context),
+            preferenceStore = preferenceStore,
+            personalDataStore = personalStore,
+            accountTransferStore = com.justdataplease.spoon.data.local.NoBackupAccountTransferStore(context),
+            legacyLocalSnapshot = {
+                com.justdataplease.spoon.data.local.PersonalDataSnapshot(
+                    mealPlans = legacy.mealPlans.first(),
+                    favorites = legacy.favoriteRecipeIds.first().map { id ->
+                        com.justdataplease.spoon.data.model.FavoriteRecipe(id, id, 1L)
+                    },
+                    shoppingItems = legacy.shoppingItems.first(),
+                    recipeNotes = legacy.recipeNotes.first(),
+                    customRecipes = legacy.customRecipes.first(),
+                    cookedHistory = legacy.cookedHistory.first(),
+                )
+            },
+        )
     }
 
     private fun localRepository(

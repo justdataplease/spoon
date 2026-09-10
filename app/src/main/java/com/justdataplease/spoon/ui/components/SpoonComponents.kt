@@ -288,12 +288,12 @@ fun StatusBanner(
 ) {
     val isCloud = backendState is BackendState.Cloud
     val text = when (backendState) {
-        BackendState.Local -> "Λειτουργία επίδειξης · τα δεδομένα μένουν στη συσκευή"
-        BackendState.Connecting -> "Σύνδεση με το Firestore…"
+        BackendState.Local -> "Έτοιμο για χρήση · οι αλλαγές αποθηκεύονται στη συσκευή"
+        BackendState.Connecting -> "Ετοιμάζεται ο κατάλογος συνταγών…"
         BackendState.Cloud -> if (isSignedIn) {
-            "Συγχρονισμένο με το Firestore"
+            "Ο κατάλογος συνταγών είναι έτοιμος"
         } else {
-            "Ο κατάλογος είναι έτοιμος · σύνδεση για συγχρονισμό"
+            "Ο κατάλογος είναι έτοιμος · μπορείς να συνεχίσεις χωρίς λογαριασμό"
         }
         is BackendState.Error -> backendErrorText(backendState)
     }

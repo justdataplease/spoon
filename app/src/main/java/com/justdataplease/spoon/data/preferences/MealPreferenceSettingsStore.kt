@@ -30,6 +30,7 @@ import kotlinx.coroutines.flow.map
  * (for example, selecting Vegan keeps only recipes carrying that label), while category
  * and ingredient terms are exclusions.
  */
+@kotlinx.serialization.Serializable
 data class MealPreferenceSettings(
     val excludedCategories: Set<String> = DEFAULT_EXCLUDED_CATEGORIES,
     val veganOnly: Boolean = false,
@@ -134,6 +135,15 @@ class MealPreferenceSettingsStore internal constructor(
             preferences[PENDING_UPDATED_AT_EPOCH_MILLIS] = settings.updatedAtEpochMillis
                 .coerceIn(0L, MAX_MEAL_PREFERENCE_EPOCH_MILLIS)
         }
+    }
+
+    /** One-time migration reads a matching owner without replacing another owner's legacy mirror. */
+    internal suspend fun readLegacyForLocalStore(ownerUid: String?): MealPreferenceSettings? {
+        val stored = dataStore.data.first()
+        val savedOwner = stored[OWNER_UID]
+        return if (ownerUid == null) decodePending(stored)
+            ?: decode(stored).takeIf { savedOwner == null }
+        else decode(stored).takeIf { savedOwner == ownerUid }
     }
 
     /** Returns only an ownerless local edit, never the previous authenticated owner's cache. */

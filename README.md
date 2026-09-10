@@ -81,10 +81,11 @@ data.
   does not download every recipe or issue Firestore recipe reads.
 - Sign-in-only Firebase Authentication with email/password, sign-out, and password
   reset. The app does not register users or create anonymous Firebase accounts.
-  A project administrator provisions accounts, and the owner's plans, favorites,
-  history, notes, shopping list, and custom recipes then sync across phones.
-  Account metadata checks are throttled to once per 15 seconds. Live personal-data
-  listeners and queued saves remain immediate.
+  Every personal feature also works before sign-in. Once an administrator-provisioned
+  account signs in, existing device data is claimed automatically and uploads begin
+  without an export/import step. Interrupted uploads remain queued locally. Cloud
+  history import requires the pending rules deployment described below. Account
+  metadata checks are throttled to once per 15 seconds.
 
 Strict filters are never silently relaxed. If no recipe matches a valid request,
 the day is saved as unavailable, keeping its category and filters for the next
@@ -102,12 +103,30 @@ connection and produce zero reads from the Firestore recipe collections. Images
 and videos keep their publisher HTTPS URLs and are fetched and cached only when
 needed, so media that has not already been cached still requires connectivity.
 
-Personal state is offline-first: plans, favorite IDs, cooked history, shopping
-items, notes, and custom recipes are written to Firestore's persistent local
-cache immediately. Firebase synchronizes that queued state as a backup and makes
-it available on another signed-in phone when connectivity returns. A new phone
-needs one initial online sign-in/bootstrap before its personal cache can be used
-offline; the bundled public catalog does not.
+Personal state is saved first in a separate, durable SQLite database: plans,
+favorites, complete cooked history, shopping items, notes, custom recipes/photos,
+and preferences. Each edit and its pending cloud revision commit atomically before
+success is shown. No Firebase account, token, initial bootstrap, or network is
+required for personal actions. Guest data and each signed-in account have separate
+storage. Existing local preferences, old plan queues, and Firebase caches migrate
+on upgrade; source files are retained.
+
+Successful email sign-in automatically transfers guest data, or older anonymous
+account data, into the account. History collisions are preserved, newer destination
+records are reconciled, and guest deletions do not delete independent account data.
+A durable transfer intent recovers an interrupted anonymous-to-email sign-in.
+Firebase uploads start immediately when authenticated server reads are available;
+large histories upload in bounded batches. Only successful server acknowledgements
+clear matching queued revisions. The account screen distinguishes device storage,
+syncing, waiting, and acknowledged synchronization. Password/login errors remain
+possible for explicit sign-in; they do not gate local personal features.
+
+**Cloud deployment pending:** archived-history imports and safe history retries
+require approval and deployment of the exact owner-only change in
+[the history sync rules proposal](docs/local-history-sync-rules-proposal.md).
+Source-preference rules also need production verification. The APK retains rejected
+changes locally and retries; it does not label them synced. Pushing an APK does not
+deploy these rules. See [0.10.0 verification](docs/release-0.10.0.md).
 
 ```text
 app/src/main/java/com/justdataplease/spoon/
@@ -195,7 +214,9 @@ per-app “install unknown apps” prompt.
 The public catalog remains available offline regardless of Firebase state.
 Without `app/google-services.json`, account backup and cross-phone sync are
 unavailable. With a valid Firebase configuration and an administrator-provisioned
-account, queued personal changes sync automatically after connectivity returns.
+account and deployed compatible rules, queued personal changes sync automatically
+after connectivity returns. Local personal use requires neither an account nor
+Firebase configuration.
 
 ## Recipe sharing links
 
@@ -400,9 +421,10 @@ and hashes, build the optimized release, and distribute a new `dist/spoon.apk`.
 - The app contains no advertising profile and creates no anonymous Firebase
   accounts. Personal cloud data is available only after an administrator-provisioned
   user signs in.
-- Personal changes are accepted offline through Firestore's persistent local
-  cache and synchronize/backup on reconnect. Public recipe text and metadata are
-  always served from the bundled SQLite database.
+- Personal changes commit to an independent device SQLite journal before any
+  upload. They remain usable if authentication or cloud access fails. Account data
+  stays separated on sign-out; only guest/anonymous account upgrades transfer data.
+  Public recipe text and metadata always come from the bundled catalog.
 - Unknown ratings do not pass a positive rating filter. Unknown preparation time
   does not pass a positive time cap.
 - Recipe pages preserve source attribution and a link to the canonical publisher

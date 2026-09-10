@@ -1,10 +1,13 @@
 package com.justdataplease.spoon.ui.account
 
+import com.justdataplease.spoon.domain.repository.PersonalSyncState
+
 data class AccountUiState(
     val isSignedIn: Boolean = true,
     val isAnonymous: Boolean = true,
     val email: String = "",
     val isEmailVerified: Boolean? = null,
+    val syncState: PersonalSyncState = PersonalSyncState.LocalOnly,
     val isBusy: Boolean = false,
     val errorMessage: String? = null,
 )

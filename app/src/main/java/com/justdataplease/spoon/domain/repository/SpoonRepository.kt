@@ -49,6 +49,7 @@ data class CatalogFacetOptions(
 interface SpoonRepository {
     val backendState: StateFlow<BackendState>
     val accountState: StateFlow<AccountState> get() = DEFAULT_ACCOUNT_STATE
+    val syncState: StateFlow<PersonalSyncState> get() = DEFAULT_SYNC_STATE
     val recipes: Flow<List<Recipe>>
     val mealPlans: Flow<List<DayMealPlan>>
     val favoriteRecipeIds: Flow<Set<String>>
@@ -89,6 +90,7 @@ interface SpoonRepository {
         random = Random(randomSeed),
     )
     suspend fun upsertMealPlan(plan: DayMealPlan)
+    suspend fun upsertInitialMealPlan(plan: DayMealPlan) = upsertMealPlan(plan)
     suspend fun setMealCompleted(date: String, completed: Boolean)
     suspend fun setCourseCompleted(date: String, course: MealCourse, completed: Boolean) {
         if (course == MealCourse.MAIN) setMealCompleted(date, completed) else unsupported("course completion")
@@ -113,6 +115,7 @@ interface SpoonRepository {
 }
 
 private val DEFAULT_ACCOUNT_STATE = MutableStateFlow<AccountState>(AccountState.Unavailable)
+private val DEFAULT_SYNC_STATE = MutableStateFlow<PersonalSyncState>(PersonalSyncState.LocalOnly)
 
 private fun unsupported(feature: String): Nothing =
     throw UnsupportedOperationException("Repository does not support $feature")

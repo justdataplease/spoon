@@ -2,7 +2,6 @@ package com.justdataplease.spoon.ui.account
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -18,6 +17,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.Logout
 import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.CloudDone
+import androidx.compose.material.icons.outlined.PhoneAndroid
+import androidx.compose.material.icons.outlined.Schedule
+import androidx.compose.material.icons.outlined.Sync
 import androidx.compose.material.icons.outlined.Email
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Person
@@ -45,6 +48,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import com.justdataplease.spoon.domain.repository.PersonalSyncState
 
 @Composable
 fun AccountScreen(
@@ -88,9 +92,13 @@ fun AccountScreen(
                 }
                 Column {
                     Text("Λογαριασμός", style = MaterialTheme.typography.headlineMedium)
-                    Text("Τα προσωπικά σου δεδομένα στο Spoon", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("Τα δεδομένα σου και ο συγχρονισμός τους", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
+        }
+
+        item {
+            PersonalSyncStatusCard(state.syncState)
         }
 
         if (state.isSignedIn && !state.isAnonymous) {
@@ -99,7 +107,7 @@ fun AccountScreen(
             }
         } else {
             item {
-                AnonymousStatusCard(isAnonymous = state.isAnonymous)
+                GuestStatusCard()
             }
             item {
                 AccountFormCard(
@@ -122,16 +130,16 @@ fun AccountScreen(
                     onCancelReset = { switchMode(AccountFormMode.SIGN_IN) },
                 )
             }
-            val error = localError ?: state.errorMessage
-            if (!error.isNullOrBlank()) {
-                item {
-                    Surface(
-                        color = MaterialTheme.colorScheme.errorContainer,
-                        contentColor = MaterialTheme.colorScheme.onErrorContainer,
-                        shape = RoundedCornerShape(16.dp),
-                    ) {
-                        Text(error, modifier = Modifier.fillMaxWidth().padding(14.dp))
-                    }
+        }
+        val error = localError ?: state.errorMessage
+        if (!error.isNullOrBlank()) {
+            item {
+                Surface(
+                    color = MaterialTheme.colorScheme.errorContainer,
+                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                    shape = RoundedCornerShape(16.dp),
+                ) {
+                    Text(error, modifier = Modifier.fillMaxWidth().padding(14.dp))
                 }
             }
         }
@@ -139,7 +147,34 @@ fun AccountScreen(
 }
 
 @Composable
-private fun AnonymousStatusCard(isAnonymous: Boolean) {
+private fun PersonalSyncStatusCard(state: PersonalSyncState) {
+    val status = personalSyncPresentation(state)
+    val icon = when (status.indicator) {
+        PersonalSyncIndicator.DEVICE -> Icons.Outlined.PhoneAndroid
+        PersonalSyncIndicator.UPLOADING -> Icons.Outlined.Sync
+        PersonalSyncIndicator.SYNCED -> Icons.Outlined.CloudDone
+        PersonalSyncIndicator.WAITING -> Icons.Outlined.Schedule
+    }
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+        shape = RoundedCornerShape(24.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(18.dp),
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            verticalAlignment = Alignment.Top,
+        ) {
+            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(26.dp))
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(status.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Text(status.detail, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }
+}
+
+@Composable
+private fun GuestStatusCard() {
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer), shape = RoundedCornerShape(24.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(18.dp),
@@ -151,16 +186,12 @@ private fun AnonymousStatusCard(isAnonymous: Boolean) {
             }
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(
-                    if (isAnonymous) "Προσωρινός λογαριασμός" else "Δεν έχεις συνδεθεί",
+                    "Χρήση χωρίς λογαριασμό",
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold,
                 )
                 Text(
-                    if (isAnonymous) {
-                        "Συνδέσου με έναν λογαριασμό που σου έχει δοθεί για να συγχρονίσεις τη συλλογή, τις σημειώσεις και τις λίστες σου."
-                    } else {
-                        "Συνδέσου με έναν λογαριασμό που σου έχει δοθεί για συγχρονισμό."
-                    },
+                    "Χρησιμοποίησε κανονικά το πρόγραμμα, τις συνταγές, τα αγαπημένα, τις σημειώσεις και τις λίστες σου. Με έναν λογαριασμό που σου έχει δοθεί, συγχρονίζονται αυτόματα και όσα έχεις ήδη αποθηκεύσει εδώ, μαζί με όλο το ιστορικό σου.",
                     style = MaterialTheme.typography.bodyMedium,
                 )
             }
@@ -177,7 +208,11 @@ private fun SignedInAccountCard(state: AccountUiState, onSignOut: () -> Unit) {
             }
             Text(state.email, style = MaterialTheme.typography.titleLarge, modifier = Modifier.align(Alignment.CenterHorizontally))
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.align(Alignment.CenterHorizontally)) {
-                Icon(Icons.Outlined.CheckCircle, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                Icon(
+                    if (state.isEmailVerified == true) Icons.Outlined.CheckCircle else Icons.Outlined.Email,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                )
                 Text(
                     when (state.isEmailVerified) {
                         true -> "Επιβεβαιωμένη ηλεκτρονική διεύθυνση"

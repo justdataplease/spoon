@@ -327,9 +327,10 @@ class SpoonViewModel @Inject constructor(
 
     private val accountUiState = combine(
         mealPlanner.accountState,
+        mealPlanner.syncState,
         accountOperationStatus,
-    ) { account, operation ->
-        account.toUi(operation)
+    ) { account, sync, operation ->
+        account.toUi(operation).copy(syncState = sync)
     }
 
     private val workStatus = combine(

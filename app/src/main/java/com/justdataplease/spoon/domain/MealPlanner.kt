@@ -125,6 +125,7 @@ class MealPlanner @Inject constructor(
 
     val backendState = repository.backendState
     val accountState: Flow<AccountState> = repository.accountState
+    val syncState = repository.syncState
     val recipes: Flow<List<Recipe>> = repository.recipes
     val mealPlans: Flow<List<DayMealPlan>> = repository.mealPlans
     val favoriteRecipeIds: Flow<Set<String>> = repository.favoriteRecipeIds
@@ -209,7 +210,10 @@ class MealPlanner @Inject constructor(
                 val recipe = chooseCourseRecipe(plan, course, filters, preferences, favorites, random)
                 plan = plan.withCourse(course, newPlan(date, filters, recipe))
             }
-            if (plan != current) repository.upsertMealPlan(plan)
+            if (plan != current) {
+                if (current == null) repository.upsertInitialMealPlan(plan)
+                else repository.upsertMealPlan(plan)
+            }
             plan
         }
     }
