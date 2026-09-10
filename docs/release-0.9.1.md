@@ -32,8 +32,17 @@ selection.
 ## Verification
 
 All 377 Android unit tests passed, including seven blank-day planner/persistence
-regressions. Release lint reported zero errors. Final device verification is
-recorded below after the release smoke check.
+regressions. Release lint reported zero errors. Device coverage verified eight cases: Greek input/composition and cursor edits,
+all three real widget providers including the compact minimum size, month/day
+PendingIntents, and valid/invalid shared links. The missing-link case passed its
+focused rerun after its test began observing the transient snackbar state before
+intent delivery. Production lookup behavior did not change for that test fix.
+
+The signed release was also checked on the launcher (large photo, compact 4x1
+card, calendar, date tap) and through the week screen: selecting a blank day,
+restarting the process, regenerating the week, and adding a meal again. The blank
+selection survived until the explicit add restored the recipe card. Android key
+events verified typed text and middle-cursor insertion in the signed app.
 
 The two input-protocol regressions reproduce on the published 0.9.0 debug APK
 and pass on the fixed debug app: rapid Greek composition across result updates,
@@ -52,7 +61,9 @@ unit suite requires no keyboard configuration.
 
 Device logs are local build artifacts:
 `build/search-input-baseline-isolated-ime.log` and
-`build/search-input-fixed-isolated-ime.log`.
+`build/search-input-fixed-isolated-ime.log`,
+`build/release-0.9.1-device.log`, and
+`build/release-0.9.1-message-device.log`.
 
 ## APKs
 
