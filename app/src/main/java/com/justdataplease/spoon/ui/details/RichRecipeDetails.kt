@@ -77,6 +77,7 @@ fun RecipeDetailsScreen(
     onSaveNote: (String) -> Unit = {},
     onAddIngredients: (List<ShoppingIngredientDraftUi>) -> Unit = {},
     isLoadingDetails: Boolean = false,
+    dataOwnerKey: String = "guest",
 ) {
     val uriHandler = LocalUriHandler.current
     val openExternal: (String) -> Unit = remember(uriHandler) {
@@ -134,7 +135,7 @@ fun RecipeDetailsScreen(
                 IngredientsSection(recipe, onAddIngredients)
                 MethodSection(recipe)
                 AdviceSections(recipe)
-                PersonalRecipeNoteSection(recipe.recipeId, recipeNote, onSaveNote)
+                PersonalRecipeNoteSection(recipe.recipeId, recipeNote, onSaveNote, dataOwnerKey)
                 NutritionSection(recipe)
                 EquipmentSection(recipe)
                 TaxonomySection(recipe)

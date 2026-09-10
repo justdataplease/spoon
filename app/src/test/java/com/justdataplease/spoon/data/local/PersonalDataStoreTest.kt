@@ -6,6 +6,9 @@ import com.justdataplease.spoon.data.model.DayMealPlan
 import com.justdataplease.spoon.data.model.FavoriteRecipe
 import com.justdataplease.spoon.data.model.RecipeNote
 import com.justdataplease.spoon.data.model.ShoppingListItem
+import com.justdataplease.spoon.data.model.mergeCookedHistory
+import com.justdataplease.spoon.data.remote.projectMealCompletion
+import com.justdataplease.spoon.data.remote.projectHistoryDeletion
 import com.justdataplease.spoon.data.preferences.MealPreferenceSettings
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -255,8 +258,11 @@ class PersonalDataStoreTest {
         assertThrows(IllegalStateException::class.java) { store.importLegacy(null, legacy, "legacy-v1") }
         assertEquals(PersonalDataSnapshot(), store.read(null))
         assertTrue(disk.imports.isEmpty())
+        assertFalse(store.isLegacyImported(null, "legacy-v1"))
         disk.failAfterWrites = null
         assertEquals(2, store.importLegacy(null, legacy, "legacy-v1").favorites.size)
+        assertTrue(store(disk).isLegacyImported(null, "legacy-v1"))
+        assertFalse(store.isLegacyImported("another-owner", "legacy-v1"))
     }
 
     @Test
@@ -394,6 +400,67 @@ class PersonalDataStoreTest {
         )), "legacy-history")
         assertEquals(2, imported.cookedHistory.size)
         assertEquals(setOf(10L, 20L), imported.cookedHistory.map { it.completedAtEpochMillis }.toSet())
+    }
+
+    @Test
+    fun `undo before history snapshot arrives queues durable deletion and rejects late history`() {
+        val disk = MemoryRows()
+        val store = store(disk)
+        val completed = plan("recipe", 10).copy(completed = true, completedAtEpochMillis = 10, completionEventId = "event")
+        store.mergeRemote("alice", PersonalCollection.MEAL_PLANS, PersonalDataSnapshot(mealPlans = listOf(completed)), true)
+        assertTrue(store.read("alice").cookedHistory.isEmpty())
+        store.mutateWithDeletions("alice") { current ->
+            val projection = projectMealCompletion(current.mealPlans,
+                mergeCookedHistory(current.mealPlans, current.cookedHistory), completed.date, false, 20, "unused")
+            PersonalDataChange(current.copy(mealPlans = projection.plans, cookedHistory = projection.storedHistory),
+                projection.historyIdsToDelete.mapTo(mutableSetOf()) { PersonalRowKey(PersonalCollection.COOKED_HISTORY, it) })
+        }
+        val restarted = store(disk)
+        assertFalse(restarted.read("alice").mealPlans.single().completed)
+        val deletion = restarted.pending("alice").single { it.collection == PersonalCollection.COOKED_HISTORY }
+        assertEquals("event", deletion.documentId)
+        assertNull(deletion.payload)
+        val late = PersonalDataSnapshot(cookedHistory = listOf(history("event", 10)))
+        restarted.mergeRemote("alice", PersonalCollection.COOKED_HISTORY, late, true)
+        assertTrue(restarted.read("alice").cookedHistory.isEmpty())
+        restarted.acknowledge("alice", deletion)
+        restarted.mergeRemote("alice", PersonalCollection.COOKED_HISTORY, late, false)
+        assertTrue(store(disk).read("alice").cookedHistory.isEmpty())
+    }
+
+    @Test
+    fun `removing a synthesized history row durably deletes its not yet received server document`() {
+        val store = store()
+        val completed = plan("recipe", 10).copy(completed = true, completedAtEpochMillis = 10, completionEventId = "event")
+        store.mergeRemote("alice", PersonalCollection.MEAL_PLANS, PersonalDataSnapshot(mealPlans = listOf(completed)), true)
+        store.mutateWithDeletions("alice") { current ->
+            val projection = projectHistoryDeletion(current.mealPlans,
+                mergeCookedHistory(current.mealPlans, current.cookedHistory), "event", 20)
+            PersonalDataChange(current.copy(mealPlans = projection.plans, cookedHistory = projection.storedHistory),
+                listOfNotNull(projection.historyIdToDelete).mapTo(mutableSetOf()) { PersonalRowKey(PersonalCollection.COOKED_HISTORY, it) })
+        }
+        assertNull(store.pending("alice").single { it.collection == PersonalCollection.COOKED_HISTORY }.payload)
+        store.mergeRemote("alice", PersonalCollection.COOKED_HISTORY,
+            PersonalDataSnapshot(cookedHistory = listOf(history("event", 10))), true)
+        assertTrue(store.read("alice").cookedHistory.isEmpty())
+        assertFalse(store.read("alice").mealPlans.single().completed)
+    }
+
+    @Test
+    fun `failed missing history deletion transaction rolls back the completion and outbox together`() {
+        val disk = MemoryRows()
+        val store = store(disk)
+        val completed = plan("recipe", 10).copy(completed = true, completedAtEpochMillis = 10, completionEventId = "event")
+        store.mergeRemote("alice", PersonalCollection.MEAL_PLANS, PersonalDataSnapshot(mealPlans = listOf(completed)), true)
+        disk.failAfterWrites = 1
+        assertThrows(IllegalStateException::class.java) {
+            store.mutateWithDeletions("alice") { current -> PersonalDataChange(
+                current.copy(mealPlans = listOf(completed.copy(completed = false, completionEventId = "", completedAtEpochMillis = 0))),
+                setOf(PersonalRowKey(PersonalCollection.COOKED_HISTORY, "event")),
+            ) }
+        }
+        assertEquals(completed, store(disk).read("alice").mealPlans.single())
+        assertTrue(store.pending("alice").isEmpty())
     }
 
     private fun store(disk: MemoryRows = MemoryRows()) = TransactionalPersonalDataStore(disk, now = { 1_000L })

@@ -36,6 +36,15 @@ class AccountFailureMappingTest {
     }
 
     @Test
+    fun registration_errors_distinguish_existing_accounts_from_disabled_creation() {
+        assertEquals(AccountFailureKind.EMAIL_IN_USE,
+            accountFailureForFirebaseCode("ERROR_EMAIL_ALREADY_IN_USE").kind)
+        for (code in listOf("ERROR_OPERATION_NOT_ALLOWED", "ERROR_ADMIN_RESTRICTED_OPERATION")) {
+            assertEquals(AccountFailureKind.UNAVAILABLE, accountFailureForFirebaseCode(code).kind)
+        }
+    }
+
+    @Test
     fun mapped_messages_are_Greek_safe_and_never_echo_credentials() {
         val messages = listOf(
             "ERROR_INVALID_EMAIL",
@@ -46,6 +55,8 @@ class AccountFailureMappingTest {
             "ERROR_NETWORK_REQUEST_FAILED",
             "ERROR_TOO_MANY_REQUESTS",
             "ERROR_REQUIRES_RECENT_LOGIN",
+            "ERROR_OPERATION_NOT_ALLOWED",
+            "ERROR_ADMIN_RESTRICTED_OPERATION",
             null,
         ).map { accountFailureForFirebaseCode(it).greekMessage }
 

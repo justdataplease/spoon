@@ -96,6 +96,8 @@ import com.justdataplease.spoon.data.local.AccountTransferStore
 import com.justdataplease.spoon.data.local.InMemoryAccountTransferStore
 import com.justdataplease.spoon.data.local.PersonalDataStore
 import com.justdataplease.spoon.data.local.PersonalDataSnapshot
+import com.justdataplease.spoon.data.local.PersonalDataChange
+import com.justdataplease.spoon.data.local.PersonalRowKey
 import com.justdataplease.spoon.data.local.PersonalCollection
 import com.justdataplease.spoon.data.local.PendingPersonalWrite
 import com.justdataplease.spoon.data.local.PersonalDataJson
@@ -144,6 +146,8 @@ class FirestoreSpoonRepository internal constructor(
     private val _referencedCatalogRecipes = MutableStateFlow<List<Recipe>>(emptyList())
     private val acknowledgementEpoch = java.util.concurrent.atomic.AtomicLongArray(PersonalCollection.entries.size)
     private val serverReady = mutableSetOf<PersonalCollection>()
+    private var initialServerWaitExpired = false
+    private val localRecoveryFailures = mutableSetOf<String>()
     private val syncFailures = mutableMapOf<PersonalCollection, BackendFailure>()
     private val retryAfter = mutableMapOf<PersonalCollection, Long>()
     private val syncWake = Channel<Unit>(Channel.CONFLATED)
@@ -167,12 +171,7 @@ class FirestoreSpoonRepository internal constructor(
     private val ready = scope.async {
         recipeCatalog.ensureReady()
         mutationMutex.withLock {
-            val legacy = legacyLocalSnapshot()
-            val guestPreferences = preferenceStore?.readLegacyForLocalStore(null)
-            personalDataStore.importLegacy(null, normalizeLegacyHistory(legacy.copy(
-                preferences = guestPreferences ?: legacy.preferences)), "local_preferences_v1")
-            personalDataStore.importLegacy(null, normalizeLegacyHistory(PersonalDataSnapshot(
-                mealPlans = mealPlanOutbox.ownerlessPlans())), "meal_outbox_guest_v1")
+            importLegacyGuest()
             val owner = uid.value
             if (owner != null) {
                 importLegacyOwner(owner)
@@ -206,6 +205,17 @@ class FirestoreSpoonRepository internal constructor(
                 if (owner != null && firestore != null) coroutineScope {
                     PersonalCollection.entries.forEach { collection -> launch { observe(owner, collection) } }
                     launch { synchronize(owner) }
+                    launch {
+                        // One deadline per owner subscription, independent of local actions.
+                        // collectLatest cancels it when account ownership changes.
+                        delay(INITIAL_PERSONAL_SYNC_WAIT_MILLIS)
+                        mutationMutex.withLock {
+                            if (uid.value == owner && serverReady.size != PersonalCollection.entries.size) {
+                                initialServerWaitExpired = true
+                                updateSyncState()
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -241,7 +251,10 @@ class FirestoreSpoonRepository internal constructor(
     }
 
     /** Persistence succeeds before any flow publishes success; no network/auth task is awaited. */
-    private suspend fun change(transform: (PersonalDataSnapshot) -> PersonalDataSnapshot): PersonalDataSnapshot {
+    private suspend fun change(transform: (PersonalDataSnapshot) -> PersonalDataSnapshot): PersonalDataSnapshot =
+        changeWithDeletions { PersonalDataChange(transform(it)) }
+
+    private suspend fun changeWithDeletions(transform: (PersonalDataSnapshot) -> PersonalDataChange): PersonalDataSnapshot {
         ready.await()
         val expectedOwner = uid.value
         return withContext(Dispatchers.IO) {
@@ -249,7 +262,7 @@ class FirestoreSpoonRepository internal constructor(
                 check(uid.value == expectedOwner && auth?.currentUser?.uid == expectedOwner) {
                     "The account changed before this local action was saved"
                 }
-                personalDataStore.mutate(expectedOwner, transform).also {
+                personalDataStore.mutateWithDeletions(expectedOwner, transform).also {
                     publish(it)
                     updateSyncState()
                     syncWake.trySend(Unit)
@@ -285,18 +298,24 @@ class FirestoreSpoonRepository internal constructor(
     override suspend fun setMealCompleted(date: String, completed: Boolean) = setCourseCompleted(date, MealCourse.MAIN, completed)
     override suspend fun setCourseCompleted(date: String, course: MealCourse, completed: Boolean) {
         require(date.isNotBlank())
-        change { current ->
+        changeWithDeletions { current ->
             val result = projectMealCompletion(current.mealPlans, mergeCookedHistory(current.mealPlans, current.cookedHistory),
                 date, completed, System.currentTimeMillis(), newCookedMealEventId(), course)
-            current.copy(mealPlans = result.plans, cookedHistory = result.storedHistory)
+            PersonalDataChange(
+                current.copy(mealPlans = result.plans, cookedHistory = result.storedHistory),
+                result.historyIdsToDelete.mapTo(mutableSetOf()) { PersonalRowKey(PersonalCollection.COOKED_HISTORY, it) },
+            )
         }
     }
     override suspend fun deleteCookedHistoryEntry(historyId: String) {
         requireSafeRecipeDocumentId(historyId)
-        change { current ->
+        changeWithDeletions { current ->
             val result = projectHistoryDeletion(current.mealPlans, mergeCookedHistory(current.mealPlans, current.cookedHistory),
                 historyId, System.currentTimeMillis())
-            current.copy(mealPlans = result.plans, cookedHistory = result.storedHistory)
+            PersonalDataChange(
+                current.copy(mealPlans = result.plans, cookedHistory = result.storedHistory),
+                listOfNotNull(result.historyIdToDelete).mapTo(mutableSetOf()) { PersonalRowKey(PersonalCollection.COOKED_HISTORY, it) },
+            )
         }
     }
     override suspend fun toggleFavorite(recipeId: String): Boolean {
@@ -364,14 +383,60 @@ class FirestoreSpoonRepository internal constructor(
         _mealPreferenceSettings.value = value.preferences
     }
 
-    private suspend fun importLegacyOwner(owner: String) {
-        val preferences = preferenceStore?.readLegacyForLocalStore(owner) ?: MealPreferenceSettings()
-        personalDataStore.importLegacy(owner, normalizeLegacyHistory(PersonalDataSnapshot(
-            mealPlans = mealPlanOutbox.pendingPlans(owner), preferences = preferences)), "meal_outbox_owner_v1")
+    private suspend fun importLegacyGuest() {
+        val snapshotToken = "local_preferences_v1"
+        if (!personalDataStore.isLegacyImported(null, snapshotToken)) {
+            val value = optionalLegacyRead("legacy_guest") {
+                val legacy = legacyLocalSnapshot()
+                val settings = preferenceStore?.readLegacyForLocalStore(null)
+                normalizeLegacyHistory(legacy.copy(preferences = settings ?: legacy.preferences))
+            }
+            if (value != null) {
+                // Database failures remain fatal: only optional legacy reads are isolated.
+                personalDataStore.importLegacy(null, value, snapshotToken)
+                localRecoveryFailures.remove("legacy_guest")
+            }
+        } else localRecoveryFailures.remove("legacy_guest")
+        val outboxToken = "meal_outbox_guest_v1"
+        if (!personalDataStore.isLegacyImported(null, outboxToken)) {
+            val value = optionalLegacyRead("legacy_guest_outbox") {
+                normalizeLegacyHistory(PersonalDataSnapshot(mealPlans = mealPlanOutbox.ownerlessPlans()))
+            }
+            if (value != null) {
+                personalDataStore.importLegacy(null, value, outboxToken)
+                localRecoveryFailures.remove("legacy_guest_outbox")
+            }
+        } else localRecoveryFailures.remove("legacy_guest_outbox")
+    }
+
+    private suspend fun importLegacyOwner(owner: String): Boolean {
+        val token = "meal_outbox_owner_v1"
+        if (personalDataStore.isLegacyImported(owner, token)) {
+            localRecoveryFailures.remove("legacy_owner")
+            return false
+        }
+        val value = optionalLegacyRead("legacy_owner") {
+            val preferences = preferenceStore?.readLegacyForLocalStore(owner) ?: MealPreferenceSettings()
+            normalizeLegacyHistory(PersonalDataSnapshot(
+                mealPlans = mealPlanOutbox.pendingPlans(owner), preferences = preferences))
+        } ?: return false
+        personalDataStore.importLegacy(owner, value, token)
+        localRecoveryFailures.remove("legacy_owner")
+        return true
+    }
+
+    private suspend fun <T : Any> optionalLegacyRead(key: String, read: suspend () -> T): T? = try {
+        read()
+    } catch (error: CancellationException) {
+        throw error
+    } catch (error: Exception) {
+        localRecoveryFailures += key
+        Log.w(FIRESTORE_TAG, "Legacy data remains available for recovery; local storage is usable", error)
+        null
     }
 
     /** Called under the mutation mutex, after Firebase has actually accepted this identity. */
-    private suspend fun activateOwner(user: FirebaseUser?, previousAnonymousUid: String? = null) {
+    private suspend fun activateOwner(user: FirebaseUser?) {
         val owner = user?.uid
         if (auth?.currentUser?.uid != owner) return
         if (uid.value != owner) {
@@ -379,25 +444,47 @@ class FirestoreSpoonRepository internal constructor(
             _syncState.value = if (owner == null) PersonalSyncState.LocalOnly else PersonalSyncState.Syncing(0)
             publish(PersonalDataSnapshot())
             serverReady.clear()
+            initialServerWaitExpired = false
             syncFailures.clear()
             retryAfter.clear()
+            localRecoveryFailures.remove("legacy_owner")
+            localRecoveryFailures.remove("account_transfer")
             if (owner != null) {
                 importLegacyOwner(owner)
                 if (previous == null) personalDataStore.claimGuest(owner)
-                if (previousAnonymousUid != null && previousAnonymousUid != owner)
-                    personalDataStore.claimAnonymous(previousAnonymousUid, owner)
                 recoverAccountTransfer(checkNotNull(user))
                 hydrateCachedOwner(owner)
             }
             uid.value = owner
             publish(personalDataStore.read(owner))
+        } else if (user != null) {
+            // An account refresh can repair optional migration without changing ownership.
+            // Healthy local data remains usable between retries.
+            val imported = importLegacyOwner(user.uid)
+            val recovered = recoverAccountTransfer(user)
+            if (imported || recovered) publish(personalDataStore.read(user.uid))
         }
         _accountState.value = if (auth == null) AccountState.Unavailable else user.toAccountState()
         updateSyncState()
         syncWake.trySend(Unit)
     }
 
-    override suspend fun signInWithEmail(email: String, password: String) {
+    override suspend fun createAccountWithEmail(email: String, password: String) =
+        authenticateWithEmail(email, password) { firebaseAuth, normalizedEmail, suppliedPassword ->
+            checkNotNull(firebaseAuth.createUserWithEmailAndPassword(normalizedEmail, suppliedPassword).await().user)
+        }
+
+    override suspend fun signInWithEmail(email: String, password: String) =
+        authenticateWithEmail(email, password) { firebaseAuth, normalizedEmail, suppliedPassword ->
+            checkNotNull(firebaseAuth.signInWithEmailAndPassword(normalizedEmail, suppliedPassword).await().user)
+        }
+
+    /** Registration and sign-in both attach the existing local profile after Firebase accepts it. */
+    private suspend fun authenticateWithEmail(
+        email: String,
+        password: String,
+        authenticate: suspend (FirebaseAuth, String, String) -> FirebaseUser,
+    ) {
         val normalizedEmail = requireAccountEmail(email)
         requireAccountPassword(password)
         ready.await()
@@ -411,8 +498,8 @@ class FirestoreSpoonRepository internal constructor(
             accountOperationInProgress = true
             try {
                 runAccountOperation {
-                    val user = checkNotNull(firebaseAuth.signInWithEmailAndPassword(normalizedEmail, password).await().user)
-                    withContext(Dispatchers.IO) { mutationMutex.withLock { activateOwner(user, previousAnonymous) } }
+                    val user = authenticate(firebaseAuth, normalizedEmail, password)
+                    withContext(Dispatchers.IO) { mutationMutex.withLock { activateOwner(user) } }
                 }
             } finally {
                 accountOperationInProgress = false
@@ -444,12 +531,17 @@ class FirestoreSpoonRepository internal constructor(
             }
         }
     }
-    private fun recoverAccountTransfer(user: FirebaseUser) {
-        val pending = accountTransferStore.read() ?: return
-        if (pending.matchesAuthenticatedAccount(user.email, user.isAnonymous)) {
-            personalDataStore.claimAnonymous(pending.anonymousUid, user.uid)
-            accountTransferStore.clear()
-        }
+    private fun recoverAccountTransfer(user: FirebaseUser): Boolean {
+        val result = recoverPendingAccountTransfer(
+            store = accountTransferStore, ownerUid = user.uid, email = user.email,
+            isAnonymous = user.isAnonymous,
+        ) { source, destination -> personalDataStore.claimAnonymous(source, destination) }
+        if (result is AccountTransferRecoveryOutcome.Failed) {
+            localRecoveryFailures += "account_transfer"
+            Log.w(FIRESTORE_TAG, "Account transfer is retained for recovery; local storage is usable", result.error)
+        } else localRecoveryFailures.remove("account_transfer")
+        return result == AccountTransferRecoveryOutcome.Recovered ||
+            (result is AccountTransferRecoveryOutcome.Failed && result.claimCompleted)
     }
 
     /** Cache reads never need a token or network, including an upgrade from the former repository. */
@@ -586,7 +678,10 @@ class FirestoreSpoonRepository internal constructor(
             while (!task.isComplete) {
                 if (withTimeoutOrNull(10_000) { task.await(); true } == true) break
                 mutationMutex.withLock {
-                    if (uid.value == owner) _syncState.value = PersonalSyncState.Waiting(personalDataStore.pending(owner).size)
+                    if (uid.value == owner) _syncState.value = PersonalSyncState.Waiting(
+                        personalDataStore.pending(owner).size,
+                        needsLocalRecovery = localRecoveryFailures.isNotEmpty(),
+                    )
                 }
             }
             task.await()
@@ -596,18 +691,14 @@ class FirestoreSpoonRepository internal constructor(
 
     private fun updateSyncState() {
         val owner = uid.value
-        _syncState.value = when {
-            owner == null || auth == null || firestore == null -> PersonalSyncState.LocalOnly
-            else -> {
-                val pending = personalDataStore.pending(owner).size
-                when {
-                    syncFailures.isNotEmpty() -> PersonalSyncState.Waiting(pending,
-                        syncFailures.values.any { it.kind == BackendFailureKind.AUTHENTICATION })
-                    pending == 0 && serverReady.size == PersonalCollection.entries.size -> PersonalSyncState.Synced
-                    else -> PersonalSyncState.Syncing(pending)
-                }
-            }
-        }
+        _syncState.value = personalSyncStatus(
+            canSynchronize = owner != null && auth != null && firestore != null,
+            pendingWrites = owner?.let { personalDataStore.pending(it).size } ?: 0,
+            allServerSnapshotsReady = serverReady.size == PersonalCollection.entries.size,
+            initialWaitExpired = initialServerWaitExpired,
+            needsLocalRecovery = localRecoveryFailures.isNotEmpty(),
+            failures = syncFailures.values,
+        )
     }
 
     private fun ownerCollection(owner: String, collection: PersonalCollection) = checkNotNull(firestore)

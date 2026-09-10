@@ -10,6 +10,9 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
 @Serializable
+enum class RecipePhotoPreparation { READY, PROCESSING, FAILED }
+
+@Serializable
 enum class CustomRecipeEditorMode {
     CLOSED,
     CREATE,
@@ -27,6 +30,7 @@ enum class CustomRecipeEditorMode {
 data class CustomRecipeEditorState(
     val mode: CustomRecipeEditorMode = CustomRecipeEditorMode.CLOSED,
     val recipeId: String = "",
+    val dataOwnerKey: String = "guest",
     val title: String = "",
     val description: String = "",
     val categoryKey: String = AvailableCategories.first().key,
@@ -36,6 +40,7 @@ data class CustomRecipeEditorState(
     val ingredients: List<CustomIngredientDraftUi> = emptyList(),
     val steps: List<String> = emptyList(),
     val selectedPhotoPath: String = "",
+    val photoPreparation: RecipePhotoPreparation = RecipePhotoPreparation.READY,
     val retainExistingPhoto: Boolean = false,
     val ingredientTitle: String = "",
     val ingredientQuantity: String = "",
@@ -45,6 +50,12 @@ data class CustomRecipeEditorState(
 ) {
     val isOpen: Boolean get() = mode != CustomRecipeEditorMode.CLOSED
     val isEditing: Boolean get() = mode == CustomRecipeEditorMode.EDIT
+
+    fun saveValidationMessage(): String? = when (photoPreparation) {
+        RecipePhotoPreparation.PROCESSING -> "Περίμενε να ολοκληρωθεί η προετοιμασία της φωτογραφίας."
+        RecipePhotoPreparation.FAILED -> "Διάλεξε ξανά τη φωτογραφία ή επίλεξε να συνεχίσεις χωρίς τη νέα φωτογραφία."
+        RecipePhotoPreparation.READY -> completedDraft(photoDataUri = "").validationMessage()
+    }
 
     fun completedDraft(photoDataUri: String): CustomRecipeDraftUi = CustomRecipeDraftUi(
         recipeId = recipeId,

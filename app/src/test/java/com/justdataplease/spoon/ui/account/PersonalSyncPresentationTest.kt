@@ -62,6 +62,20 @@ class PersonalSyncPresentationTest {
     }
 
     @Test
+    fun `local transfer recovery never promises a connection alone will finish syncing`() {
+        for (pending in listOf(0, 4)) {
+            val state = PersonalSyncState.Waiting(pending, needsSignIn = true, needsLocalRecovery = true)
+            val presentation = personalSyncPresentation(state)
+            assertEquals(PersonalSyncIndicator.WAITING, presentation.indicator)
+            assertTrue(presentation.detail.contains("μεταφορά των προηγούμενων δεδομένων χρειάζεται έλεγχο"))
+            assertTrue(presentation.detail.contains("νέες αλλαγές αποθηκεύονται στη συσκευή"))
+            assertTrue(presentation.detail.contains("μπορείς να συνεχίσεις κανονικά"))
+            assertFalse(presentation.detail.contains("Συνδέσου"))
+            assertFalse(presentation.detail.contains("θα συνεχιστεί αυτόματα"))
+        }
+    }
+
+    @Test
     fun `invalid negative pending counts do not appear as work or acknowledgement`() {
         val syncing = personalSyncPresentation(PersonalSyncState.Syncing(-1))
         val waiting = personalSyncPresentation(PersonalSyncState.Waiting(-1))

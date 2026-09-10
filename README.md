@@ -79,13 +79,13 @@ data.
   instead of a blank player, and an external fallback remains available.
 - The bundled Greek recipe catalog works offline from indexed local SQLite. Explore loads 24 rows at a time, so opening and filtering the catalog
   does not download every recipe or issue Firestore recipe reads.
-- Sign-in-only Firebase Authentication with email/password, sign-out, and password
-  reset. The app does not register users or create anonymous Firebase accounts.
-  Every personal feature also works before sign-in. Once an administrator-provisioned
-  account signs in, existing device data is claimed automatically and uploads begin
-  without an export/import step. Interrupted uploads remain queued locally. Cloud
-  history import requires the pending rules deployment described below. Account
-  metadata checks are throttled to once per 15 seconds.
+- Optional Firebase email/password registration and sign-in, sign-out, and password
+  reset. The app does not create anonymous Firebase accounts. Every personal feature
+  works before sign-in. Creating an account or signing in automatically attaches
+  existing device data without an export/import step. Interrupted uploads remain
+  queued locally. Production signup activation and cloud history rules require
+  the pending approvals described below. Account metadata checks are throttled to
+  once per 15 seconds.
 
 Strict filters are never silently relaxed. If no recipe matches a valid request,
 the day is saved as unavailable, keeping its category and filters for the next
@@ -111,22 +111,24 @@ required for personal actions. Guest data and each signed-in account have separa
 storage. Existing local preferences, old plan queues, and Firebase caches migrate
 on upgrade; source files are retained.
 
-Successful email sign-in automatically transfers guest data, or older anonymous
+Successful email registration or sign-in automatically transfers guest data, or older anonymous
 account data, into the account. History collisions are preserved, newer destination
 records are reconciled, and guest deletions do not delete independent account data.
 A durable transfer intent recovers an interrupted anonymous-to-email sign-in.
 Firebase uploads start immediately when authenticated server reads are available;
 large histories upload in bounded batches. Only successful server acknowledgements
 clear matching queued revisions. The account screen distinguishes device storage,
-syncing, waiting, and acknowledged synchronization. Password/login errors remain
-possible for explicit sign-in; they do not gate local personal features.
+syncing, waiting, and acknowledged synchronization. Password/account errors remain
+possible for explicit account actions; they do not gate local personal features.
 
-**Cloud deployment pending:** archived-history imports and safe history retries
+**Cloud activation pending:** Firebase currently disables new-user signup project-wide.
+The explicit production setting approval is pending. Archived-history imports and safe history retries
 require approval and deployment of the exact owner-only change in
 [the history sync rules proposal](docs/local-history-sync-rules-proposal.md).
-Source-preference rules also need production verification. The APK retains rejected
-changes locally and retries; it does not label them synced. Pushing an APK does not
-deploy these rules. See [0.10.0 verification](docs/release-0.10.0.md).
+Production also rejects the current preference fields and drinks category;
+[the exact validator update](docs/current-app-sync-rules-proposal.md) awaits approval.
+The APK retains rejected changes locally and retries; it does not label them synced. Pushing an APK does not
+deploy these rules. See [0.11.0 verification](docs/release-0.11.0.md).
 
 ```text
 app/src/main/java/com/justdataplease/spoon/
@@ -213,8 +215,8 @@ per-app “install unknown apps” prompt.
 
 The public catalog remains available offline regardless of Firebase state.
 Without `app/google-services.json`, account backup and cross-phone sync are
-unavailable. With a valid Firebase configuration and an administrator-provisioned
-account and deployed compatible rules, queued personal changes sync automatically
+unavailable. With valid Firebase configuration, an email account, and deployed compatible
+rules, queued personal changes sync automatically
 after connectivity returns. Local personal use requires neither an account nor
 Firebase configuration.
 
@@ -251,9 +253,10 @@ quota, billing, rules, and data ownership remain under their control.
 
 Firebase setup requires:
 
-1. Enable Email/Password sign-in and leave Anonymous sign-in disabled in Firebase
-   Authentication. In Authentication Settings, disable end-user sign-up. Provision
-   each allowed user from the Firebase console or a trusted Admin SDK environment.
+1. For a new independent project, enable Email/Password sign-in and end-user signup
+   in Firebase Authentication so users can register in the app. Anonymous sign-in
+   is unnecessary. This setup guidance does not change the upstream production
+   project; its signup activation remains pending the approval described above.
 2. A Firestore database in the selected European location.
 3. The checked-in rules and indexes deployed:
 
@@ -419,8 +422,8 @@ and hashes, build the optimized release, and distribute a new `dist/spoon.apk`.
 ## Privacy and operating notes
 
 - The app contains no advertising profile and creates no anonymous Firebase
-  accounts. Personal cloud data is available only after an administrator-provisioned
-  user signs in.
+  accounts. Personal cloud data is available after optional email registration or
+  sign-in, subject to the production activation and rules described above.
 - Personal changes commit to an independent device SQLite journal before any
   upload. They remain usable if authentication or cloud access fails. Account data
   stays separated on sign-out; only guest/anonymous account upgrades transfer data.

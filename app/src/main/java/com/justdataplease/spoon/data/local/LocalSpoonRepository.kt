@@ -321,6 +321,9 @@ class LocalSpoonRepository(
         }
     }
 
+    override suspend fun createAccountWithEmail(email: String, password: String): Nothing =
+        accountUnavailable()
+
     override suspend fun signInWithEmail(email: String, password: String): Nothing =
         accountUnavailable()
 

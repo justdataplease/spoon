@@ -14,5 +14,6 @@ sealed interface PersonalSyncState {
     data class Waiting(
         val pendingWrites: Int,
         val needsSignIn: Boolean = false,
+        val needsLocalRecovery: Boolean = false,
     ) : PersonalSyncState
 }

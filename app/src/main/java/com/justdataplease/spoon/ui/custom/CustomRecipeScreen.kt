@@ -147,16 +147,25 @@ fun CustomRecipeScreen(
                     RecipePhotoInput(
                         selectedPhotoPath = editorState.selectedPhotoPath,
                         retainedImageUrl = retainedImageUrl,
+                        preparation = editorState.photoPreparation,
+                        enabled = !isSaving,
+                        onProcessingStarted = {
+                            onStateChange(editorState.copy(photoPreparation = RecipePhotoPreparation.PROCESSING, formMessage = null))
+                        },
+                        onCancelPendingPhoto = {
+                            onStateChange(editorState.copy(photoPreparation = RecipePhotoPreparation.READY, formMessage = null))
+                        },
                         onImageChanged = { path ->
                             onStateChange(
                                 editorState.copy(
                                     selectedPhotoPath = path,
+                                    photoPreparation = RecipePhotoPreparation.READY,
                                     retainExistingPhoto = false,
                                     formMessage = null,
                                 ),
                             )
                         },
-                        onError = { onStateChange(editorState.copy(formMessage = it)) },
+                        onError = { onStateChange(editorState.copy(photoPreparation = RecipePhotoPreparation.FAILED, formMessage = it)) },
                     )
                 }
             }
@@ -293,12 +302,11 @@ fun CustomRecipeScreen(
         item {
             Button(
                 onClick = {
-                    val value = editorState.completedDraft(photoDataUri = "")
-                    value.validationMessage()?.let { validationMessage ->
+                    editorState.saveValidationMessage()?.let { validationMessage ->
                         onStateChange(editorState.copy(formMessage = validationMessage))
                     } ?: onSave()
                 },
-                enabled = !isSaving,
+                enabled = !isSaving && editorState.photoPreparation == RecipePhotoPreparation.READY,
                 modifier = Modifier.fillMaxWidth().height(58.dp),
                 shape = RoundedCornerShape(18.dp),
             ) {

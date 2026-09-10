@@ -108,6 +108,8 @@ interface SpoonRepository {
     suspend fun deleteCustomRecipe(recipeId: String): Unit = unsupported("custom recipes")
     suspend fun updateMealPreferenceSettings(settings: MealPreferenceSettings): Unit =
         unsupported("meal preferences")
+    suspend fun createAccountWithEmail(email: String, password: String): Unit =
+        throw AccountOperationException(unavailableAccountFailure())
     suspend fun signInWithEmail(email: String, password: String): Unit =
         unsupported("email accounts")
     suspend fun sendPasswordReset(email: String): Unit = unsupported("email accounts")

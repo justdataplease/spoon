@@ -14,13 +14,14 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.justdataplease.spoon.ui.components.OwnedTextDraft
 
 private const val MaxRecipeNoteLength = 10_000
 
@@ -29,8 +30,13 @@ internal fun PersonalRecipeNoteSection(
     recipeId: String,
     savedNote: String,
     onSaveNote: (String) -> Unit,
+    dataOwnerKey: String = "guest",
 ) {
-    var draft by rememberSaveable(recipeId, savedNote) { mutableStateOf(savedNote) }
+    val draftState = rememberSaveable(dataOwnerKey, recipeId, saver = OwnedTextDraft.saver(dataOwnerKey, recipeId)) {
+        OwnedTextDraft(dataOwnerKey, recipeId, savedNote)
+    }
+    var draft by draftState.text
+    LaunchedEffect(savedNote) { draftState.receiveSavedText(savedNote) }
     val normalizedDraft = draft.trim()
     val hasChanges = normalizedDraft != savedNote.trim()
 

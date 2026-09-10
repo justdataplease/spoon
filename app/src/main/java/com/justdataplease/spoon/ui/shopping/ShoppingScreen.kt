@@ -32,10 +32,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -51,9 +48,10 @@ fun ShoppingScreen(
     onRemove: (String) -> Unit,
     onClearChecked: () -> Unit,
     onAddManual: (String) -> Unit,
+    manualItem: String,
+    onManualItemChange: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var manualItem by remember { mutableStateOf("") }
     val pending = items.count { !it.isChecked }
     val checked = items.size - pending
     val grouped = remember(items) {
@@ -80,7 +78,7 @@ fun ShoppingScreen(
                 ) {
                     OutlinedTextField(
                         value = manualItem,
-                        onValueChange = { manualItem = it },
+                        onValueChange = onManualItemChange,
                         modifier = Modifier.weight(1f),
                         singleLine = true,
                         label = { Text("Νέο προϊόν") },
@@ -92,7 +90,7 @@ fun ShoppingScreen(
                             val value = manualItem.trim()
                             if (value.isNotBlank()) {
                                 onAddManual(value)
-                                manualItem = ""
+                                onManualItemChange("")
                             }
                         },
                         enabled = manualItem.isNotBlank(),

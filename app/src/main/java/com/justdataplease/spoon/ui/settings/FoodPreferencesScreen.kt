@@ -43,6 +43,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -58,6 +59,7 @@ import com.justdataplease.spoon.data.preferences.MealPreferenceSettings
 import com.justdataplease.spoon.data.preferences.RecipePublisherOptions
 import com.justdataplease.spoon.data.preferences.AllowedRecipePublisherKeys
 import com.justdataplease.spoon.ui.components.PublisherBadge
+import com.justdataplease.spoon.ui.components.OwnedTextDraft
 import com.justdataplease.spoon.data.model.MealCourse
 import com.justdataplease.spoon.data.model.MealCategory
 import com.justdataplease.spoon.domain.WeeklyPlanDefaults
@@ -81,12 +83,20 @@ fun FoodPreferencesScreen(
     onBack: () -> Unit,
     onSave: (MealPreferenceSettings) -> Unit,
     modifier: Modifier = Modifier,
+    dataOwnerKey: String = "guest",
 ) {
     BackHandler(onBack = onBack)
-    var draft by remember(settings) { mutableStateOf(settings) }
-    var defaultCourse by rememberSaveable { mutableStateOf(MealCourse.MAIN) }
-    var ingredientInput by rememberSaveable { mutableStateOf("") }
-    var ingredientMenuExpanded by rememberSaveable { mutableStateOf(false) }
+    val draftState = rememberSaveable(dataOwnerKey, saver = FoodPreferencesDraftState.saver(dataOwnerKey)) {
+        FoodPreferencesDraftState(dataOwnerKey, settings)
+    }
+    var draft by draftState.draft
+    LaunchedEffect(settings) { draftState.receiveSettings(settings) }
+    var defaultCourse by rememberSaveable(dataOwnerKey) { mutableStateOf(MealCourse.MAIN) }
+    val ingredientDraft = rememberSaveable(dataOwnerKey, saver = OwnedTextDraft.saver(dataOwnerKey, "excluded-ingredient-query")) {
+        OwnedTextDraft(dataOwnerKey, "excluded-ingredient-query")
+    }
+    var ingredientInput by ingredientDraft.text
+    var ingredientMenuExpanded by rememberSaveable(dataOwnerKey) { mutableStateOf(false) }
     val keyboardController = LocalSoftwareKeyboardController.current
     val availableCategoryKeys = remember {
         AvailableCategories.map { category -> category.key.toDomainCategoryKey() }

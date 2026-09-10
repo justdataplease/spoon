@@ -4,6 +4,7 @@ import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import androidx.test.platform.app.InstrumentationRegistry
 import com.justdataplease.spoon.data.local.InMemoryRecipeCatalog
+import com.justdataplease.spoon.data.local.PersonalDataSnapshot
 import com.justdataplease.spoon.data.local.SqlitePersonalDataStore
 import com.justdataplease.spoon.data.model.CustomRecipe
 import com.justdataplease.spoon.data.model.DayMealPlan
@@ -19,8 +20,11 @@ import com.justdataplease.spoon.data.model.ShoppingListItem
 import com.justdataplease.spoon.data.model.newCustomRecipeId
 import com.justdataplease.spoon.data.preferences.MealPreferenceSettings
 import com.justdataplease.spoon.domain.repository.BackendState
+import com.justdataplease.spoon.domain.repository.AccountFailureKind
+import com.justdataplease.spoon.domain.repository.AccountOperationException
 import com.justdataplease.spoon.domain.repository.PersonalSyncState
 import java.io.File
+import java.io.IOException
 import java.util.UUID
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -150,7 +154,102 @@ class OfflinePersonalRepositoryDeviceTest {
         }
     }
 
-    private suspend fun withRepository(context: Context, file: File, action: suspend (FirestoreSpoonRepository) -> Unit) {
+    @Test
+    fun rejectedRegistrationNeverClearsTheExistingLocalProfile() = runBlocking {
+        withTimeout(45_000) {
+            val context = InstrumentationRegistry.getInstrumentation().targetContext
+            val file = File(context.cacheDir, "offline-registration-test-${UUID.randomUUID()}.db")
+            try {
+                withRepository(context, file) { repository ->
+                    repository.upsertShoppingItems(listOf(shopping("existing-milk")))
+                    assertTrue(repository.toggleFavorite("argiro_1"))
+                    val rejected = listOf(
+                        Triple("invalid", "test-password", AccountFailureKind.INVALID_EMAIL),
+                        Triple("member@example.com", "short", AccountFailureKind.WEAK_PASSWORD),
+                        Triple("member@example.com", "test-password", AccountFailureKind.UNAVAILABLE),
+                    )
+                    for ((email, password, expected) in rejected) {
+                        val failure = try {
+                            repository.createAccountWithEmail(email, password)
+                            null
+                        } catch (error: AccountOperationException) {
+                            error.failure
+                        }
+                        assertEquals(expected, failure?.kind)
+                        assertEquals(BackendState.Local, repository.backendState.value)
+                        assertEquals(setOf("argiro_1"), repository.favoriteRecipeIds.value)
+                        assertEquals("existing-milk", repository.shoppingItems.value.single().id)
+                        assertNotNull(repository.getRecipeDetails("argiro_1"))
+                    }
+                }
+                withRepository(context, file) { repository ->
+                    assertEquals("existing-milk", repository.shoppingItems.value.single().id)
+                    assertEquals(setOf("argiro_1"), repository.favoriteRecipeIds.value)
+                    assertEquals(PersonalSyncState.LocalOnly, repository.syncState.value)
+                }
+            } finally {
+                SQLiteDatabase.deleteDatabase(file)
+            }
+        }
+    }
+
+    @Test
+    fun failingOptionalLegacyReaderKeepsLocalRecipesAndShoppingUsableAndRetriesAfterRestart() = runBlocking {
+        withTimeout(45_000) {
+            val context = InstrumentationRegistry.getInstrumentation().targetContext
+            val file = File(context.cacheDir, "optional-legacy-repository-test-${UUID.randomUUID()}.db")
+            val legacyFile = File(context.cacheDir, "optional-legacy-source-test-${UUID.randomUUID()}.json")
+            legacyFile.writeText("{unreadable legacy data")
+            try {
+                withRepository(context, file, legacyLocalSnapshot = {
+                    throw IOException("simulated optional legacy reader failure")
+                }) { repository ->
+                    assertEquals(BackendState.Local, repository.backendState.value)
+                    val sync = repository.syncState.value as PersonalSyncState.Waiting
+                    assertTrue(sync.needsLocalRecovery)
+                    assertNotNull(repository.getRecipeDetails("argiro_1"))
+                    repository.upsertShoppingItems(listOf(shopping("local-milk")))
+                    assertTrue(repository.toggleFavorite("argiro_1"))
+                    assertEquals("local-milk", repository.shoppingItems.value.single().id)
+                    assertEquals("{unreadable legacy data", legacyFile.readText())
+                }
+                SqlitePersonalDataStore(context, file).use { store ->
+                    assertFalse(store.isLegacyImported(null, "local_preferences_v1"))
+                    assertTrue(store.isLegacyImported(null, "meal_outbox_guest_v1"))
+                    assertEquals("local-milk", store.read(null).shoppingItems.single().id)
+                }
+                withRepository(context, file, legacyLocalSnapshot = {
+                    PersonalDataSnapshot(recipeNotes = listOf(note("argiro_2", "Recovered legacy note")))
+                }) { repository ->
+                    assertEquals(BackendState.Local, repository.backendState.value)
+                    assertEquals(PersonalSyncState.LocalOnly, repository.syncState.value)
+                    assertEquals("local-milk", repository.shoppingItems.value.single().id)
+                    assertTrue("argiro_1" in repository.favoriteRecipeIds.value)
+                    assertEquals("Recovered legacy note", repository.recipeNotes.value.single().text)
+                }
+                // Once migrated, obsolete readers are never consulted during future startup.
+                withRepository(context, file, legacyLocalSnapshot = {
+                    error("A completed legacy import must not be reread")
+                }) { repository ->
+                    assertEquals(PersonalSyncState.LocalOnly, repository.syncState.value)
+                    assertEquals("local-milk", repository.shoppingItems.value.single().id)
+                    assertEquals("Recovered legacy note", repository.recipeNotes.value.single().text)
+                    assertNotNull(repository.getRecipeDetails("argiro_2"))
+                }
+                assertEquals("{unreadable legacy data", legacyFile.readText())
+            } finally {
+                SQLiteDatabase.deleteDatabase(file)
+                legacyFile.delete()
+            }
+        }
+    }
+
+    private suspend fun withRepository(
+        context: Context,
+        file: File,
+        legacyLocalSnapshot: suspend () -> PersonalDataSnapshot = { PersonalDataSnapshot() },
+        action: suspend (FirestoreSpoonRepository) -> Unit,
+    ) {
         SqlitePersonalDataStore(context, file).use { store ->
             val repository = FirestoreSpoonRepository(
                 auth = null, firestore = null,
@@ -164,6 +263,7 @@ class OfflinePersonalRepositoryDeviceTest {
                     override fun markComplete(ownerUid: String): Boolean = error("Guest actions must not bootstrap a Firebase owner")
                 },
                 personalDataStore = store, preferenceStore = null,
+                legacyLocalSnapshot = legacyLocalSnapshot,
             )
             try {
                 repository.ensureReady()

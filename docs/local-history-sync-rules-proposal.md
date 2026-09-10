@@ -1,7 +1,7 @@
 # Proposed rules for local history synchronization
 
-Status: review proposal only. No Firestore rules or production configuration have
-been changed. Automatic approval review rejected the attempted local policy edit
+Status: review proposal only. This document has not changed Firestore rules or
+production configuration. Automatic approval review rejected the attempted local policy edit
 because the exact change to owner history creation and favorite updates had not
 been explicitly authorized.
 
@@ -101,19 +101,45 @@ imports and certain repeated acknowledgements may still be rejected by the serve
 locally, communicate pending sync separately from local usability, and retry
 after server policy allows the writes. It must not mark rejected writes as synced.
 
-The prior source-exclusion preference rule change also requires checking the
-currently deployed rules before claiming full preference backup. No production
-rule equivalence has been established by this review proposal.
+The current production read confirmed that source exclusions and side/dessert
+weekday preference maps are unsupported. Their additional category/preference
+changes are documented separately in
+[the current-app sync proposal](current-app-sync-rules-proposal.md). Full
+preference backup cannot be claimed until its applicable policy is approved,
+verified and deployed.
 
 ## Read-only production check
 
-On 2026-09-10 the existing local Google identity could not read the active rules
-release. A GET request with the API-required `x-goog-user-project` header returned
-403: the caller lacks `serviceusage.services.use` on `spoontheplanner`. No role,
-credential, cloud configuration or production data was changed.
+An initial read attempt on 2026-09-10 used the existing local Google identity
+with an `x-goog-user-project` header and returned 403 because that caller lacked
+`serviceusage.services.use` on `spoontheplanner`. No role, credential, cloud
+configuration or production data was changed by that attempt.
 
-The last historical deployment record available locally is dated
-2026-09-07T20:19:01.430670Z and references ruleset
-`8bb3a79e-8af2-4516-830f-72528073cc21`. That old record does not establish which
-rules are currently deployed. A permitted read of the active release and its
-source is required before the deployment diff can be certified.
+A later read-only verification on the same date used the existing project
+service account `firebase-adminsdk-fbsvc@spoontheplanner.iam.gserviceaccount.com`
+without the quota header. Both the active release and its complete ruleset
+source returned HTTP 200. The active release is
+`projects/spoontheplanner/releases/cloud.firestore`, referencing
+`projects/spoontheplanner/rulesets/8bb3a79e-8af2-4516-830f-72528073cc21`,
+with update time `2026-09-07T20:19:01.430670Z`.
+
+The historical deployment record available locally was dated
+`2026-09-07T20:19:01.430670Z` and referenced ruleset
+`8bb3a79e-8af2-4516-830f-72528073cc21`. The successful current GET now confirms
+that this recorded ruleset remains active; the conclusion no longer relies only
+on the historical record.
+
+The live history match block is identical to the current workspace block:
+creation requires a matching completed current plan, every update is denied,
+and deletion requires an existing valid event with no protected active course
+reference. The three proposed history changes above therefore apply directly
+to the verified live baseline. No rules were edited, loaded or deployed by the
+verification.
+
+The readback also confirmed that live rules do not yet accept `drinks`, side and
+dessert weekday preference maps, or source exclusions. Those additional accepted
+values and fields require separate approval and are described, with the exact
+four live-to-workspace diff hunks, in
+[the current-app categories and preferences proposal](current-app-sync-rules-proposal.md).
+The ignored local evidence is
+[`build/firestore-production-readback-2026-09-10.json`](../build/firestore-production-readback-2026-09-10.json).

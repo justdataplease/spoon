@@ -55,6 +55,7 @@ import com.justdataplease.spoon.ui.model.RecipeDetailUi
 import com.justdataplease.spoon.ui.sharing.RecipeShareLink
 import com.justdataplease.spoon.ui.more.MoreScreen
 import com.justdataplease.spoon.ui.shopping.ShoppingScreen
+import com.justdataplease.spoon.ui.components.OwnedTextDraft
 import com.justdataplease.spoon.ui.settings.FoodPreferencesScreen
 import com.justdataplease.spoon.ui.week.WeekScreen
 import com.justdataplease.spoon.ui.week.MealMenuScreen
@@ -92,6 +93,10 @@ fun SpoonApp(
     var morePage by rememberSaveable { mutableStateOf(MorePage.HUB) }
     val snackbarHostState = remember { SnackbarHostState() }
     val selectedRecipe = state.selectedRecipe
+    // Kept above the conditional destinations, so switching tabs does not dispose this draft.
+    val shoppingDraft = rememberSaveable(state.account.dataOwnerKey, saver = OwnedTextDraft.saver(state.account.dataOwnerKey, "shopping-manual")) {
+        OwnedTextDraft(state.account.dataOwnerKey, "shopping-manual")
+    }
     val customRecipeEditor by viewModel.customRecipeEditor.collectAsStateWithLifecycle()
     val retainedCustomRecipePhoto by viewModel.customRecipeEditorRetainedPhoto.collectAsStateWithLifecycle()
     val mealMenu by viewModel.mealMenu.collectAsStateWithLifecycle()
@@ -190,6 +195,7 @@ fun SpoonApp(
                     null
                 },
                 recipeNote = state.selectedRecipeNote,
+                dataOwnerKey = state.account.dataOwnerKey,
                 onSaveNote = viewModel::saveRecipeNote,
                 onAddIngredients = viewModel::addIngredientsToShopping,
                 onEdit = if (selectedRecipe.recipeId.isCustomRecipeId()) {
@@ -284,6 +290,8 @@ fun SpoonApp(
                     onRemove = viewModel::removeShoppingItem,
                     onClearChecked = viewModel::clearCheckedShoppingItems,
                     onAddManual = viewModel::addManualShoppingItem,
+                    manualItem = shoppingDraft.text.value,
+                    onManualItemChange = { shoppingDraft.text.value = it },
                     modifier = Modifier.padding(padding),
                 )
 
@@ -317,6 +325,7 @@ fun SpoonApp(
                     )
                     MorePage.PREFERENCES -> FoodPreferencesScreen(
                         settings = mealPreferenceSettings,
+                        dataOwnerKey = state.account.dataOwnerKey,
                         ingredientOptions = state.exploreOptions.ingredients,
                         onBack = { morePage = MorePage.HUB },
                         onSave = { settings ->
@@ -331,6 +340,7 @@ fun SpoonApp(
                             morePage = MorePage.HUB
                         },
                         onSignIn = viewModel::signInWithEmail,
+                        onCreateAccount = viewModel::createAccountWithEmail,
                         onResetPassword = viewModel::resetPassword,
                         onSignOut = viewModel::signOut,
                         onClearError = viewModel::clearAccountError,

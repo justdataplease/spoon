@@ -36,7 +36,9 @@ internal fun personalSyncPresentation(state: PersonalSyncState): PersonalSyncPre
 
     is PersonalSyncState.Waiting -> PersonalSyncPresentation(
         title = "Αποθηκευμένα στη συσκευή · αναμονή συγχρονισμού",
-        detail = buildString {
+        detail = if (state.needsLocalRecovery) {
+            "Η μεταφορά των προηγούμενων δεδομένων χρειάζεται έλεγχο. Οι νέες αλλαγές αποθηκεύονται στη συσκευή και μπορείς να συνεχίσεις κανονικά."
+        } else buildString {
             when (val count = state.pendingWrites.coerceAtLeast(0)) {
                 0 -> append("Τα δεδομένα σου παραμένουν αποθηκευμένα εδώ. ")
                 1 -> append("1 αλλαγή περιμένει για συγχρονισμό. ")
@@ -44,7 +46,7 @@ internal fun personalSyncPresentation(state: PersonalSyncState): PersonalSyncPre
             }
             append(
                 if (state.needsSignIn) {
-                    "Συνδέσου με τον λογαριασμό που σου έχει δοθεί. Μπορείς να συνεχίσεις κανονικά χωρίς σύνδεση."
+                    "Συνδέσου στον λογαριασμό σου ή δημιούργησε έναν για αντίγραφο ασφαλείας. Μπορείς να συνεχίσεις κανονικά χωρίς σύνδεση."
                 } else {
                     "Ο συγχρονισμός θα συνεχιστεί αυτόματα όταν η υπηρεσία είναι διαθέσιμη και υπάρχει σύνδεση στο διαδίκτυο."
                 },

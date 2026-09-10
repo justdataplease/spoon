@@ -175,6 +175,7 @@ class SpoonViewModel @Inject constructor(
     val favoritesQueryValue: TextFieldValue get() = favoritesSearchState.editorValue
     private val favoritesFilters = MutableStateFlow(ExploreFiltersUi())
     private val customRecipeEditorStore = CustomRecipeEditorStore(savedStateHandle)
+    private var activeDraftOwnerKey = "guest"
     private val recipeLinkState = savedStateHandle
     val customRecipeEditor = customRecipeEditorStore.state
     val mealPreferenceSettings = mealPlanner.mealPreferenceSettings.stateIn(
@@ -330,7 +331,10 @@ class SpoonViewModel @Inject constructor(
         mealPlanner.syncState,
         accountOperationStatus,
     ) { account, sync, operation ->
-        account.toUi(operation).copy(syncState = sync)
+        account.toUi(operation).copy(
+            syncState = sync,
+            dataOwnerKey = account.ownerUidOrNull()?.let { "account:$it" } ?: "guest",
+        )
     }
 
     private val workStatus = combine(
@@ -922,7 +926,9 @@ class SpoonViewModel @Inject constructor(
             savingCustomRecipe.value ||
             !current.isOpen ||
             next.mode != current.mode ||
-            next.recipeId != current.recipeId
+            next.recipeId != current.recipeId ||
+            next.dataOwnerKey != current.dataOwnerKey ||
+            next.dataOwnerKey != activeDraftOwnerKey
         ) {
             if (current.selectedPhotoPath != next.selectedPhotoPath) {
                 applicationContext.deleteDraftPhoto(next.selectedPhotoPath)
@@ -948,7 +954,7 @@ class SpoonViewModel @Inject constructor(
     fun saveCustomRecipeEditor() {
         if (savingCustomRecipe.value) return
         val editor = customRecipeEditor.value.takeIf(CustomRecipeEditorState::isOpen) ?: return
-        val validationMessage = editor.completedDraft(photoDataUri = "").validationMessage()
+        val validationMessage = editor.saveValidationMessage()
         if (validationMessage != null) {
             customRecipeEditorStore.set(editor.copy(formMessage = validationMessage))
             return
@@ -991,7 +997,7 @@ class SpoonViewModel @Inject constructor(
     private fun replaceCustomRecipeEditor(next: CustomRecipeEditorState) {
         if (savingCustomRecipe.value) return
         applicationContext.deleteDraftPhoto(customRecipeEditor.value.selectedPhotoPath)
-        customRecipeEditorStore.set(next)
+        customRecipeEditorStore.set(next.copy(dataOwnerKey = activeDraftOwnerKey))
     }
 
     fun toggleCompleted(date: LocalDate) {
@@ -1021,6 +1027,12 @@ class SpoonViewModel @Inject constructor(
         }
     }
 
+    fun createAccountWithEmail(email: String, password: String) {
+        launchAccountOperation("Ο λογαριασμός σου δημιουργήθηκε.") {
+            mealPlanner.createAccountWithEmail(email, password)
+        }
+    }
+
     fun resetPassword(email: String) {
         launchAccountOperation("Σου στείλαμε μήνυμα επαναφοράς κωδικού στην ηλεκτρονική σου διεύθυνση.") {
             mealPlanner.sendPasswordReset(email)
@@ -1045,6 +1057,11 @@ class SpoonViewModel @Inject constructor(
     private fun observeAccountOwner() {
         viewModelScope.launch {
             mealPlanner.accountState.collect { account ->
+                activeDraftOwnerKey = account.ownerUidOrNull()?.let { "account:$it" } ?: "guest"
+                // Saved-state restoration must also reject a draft from a different owner.
+                if (customRecipeEditor.value.isOpen && customRecipeEditor.value.dataOwnerKey != activeDraftOwnerKey) {
+                    clearCustomRecipeEditor()
+                }
                 if (accountOwnerTracker.onAccountState(account)) {
                     // Catalog links must survive authentication settling on launch.
                     val sharedRecipeId = recipeLinkState.get<String>("shared_recipe_id")

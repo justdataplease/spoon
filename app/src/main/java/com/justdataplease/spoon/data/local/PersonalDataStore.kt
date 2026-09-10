@@ -22,6 +22,7 @@ import kotlinx.serialization.json.JsonObject
 internal interface PersonalDataStore {
     fun read(ownerUid: String?): PersonalDataSnapshot
     fun mutate(ownerUid: String?, transform: (PersonalDataSnapshot) -> PersonalDataSnapshot): PersonalDataSnapshot
+    fun mutateWithDeletions(ownerUid: String?, transform: (PersonalDataSnapshot) -> PersonalDataChange): PersonalDataSnapshot
     fun mergeRemote(
         ownerUid: String,
         collection: PersonalCollection,
@@ -33,6 +34,7 @@ internal interface PersonalDataStore {
     fun pending(ownerUid: String): List<PendingPersonalWrite>
     fun acknowledge(ownerUid: String, write: PendingPersonalWrite)
     fun importLegacy(ownerUid: String?, snapshot: PersonalDataSnapshot, token: String): PersonalDataSnapshot
+    fun isLegacyImported(ownerUid: String?, token: String): Boolean
 }
 
 internal enum class PersonalCollection {
@@ -48,6 +50,12 @@ internal data class PersonalDataSnapshot(
     val customRecipes: List<CustomRecipe> = emptyList(),
     val cookedHistory: List<CookedMeal> = emptyList(),
     val preferences: MealPreferenceSettings = MealPreferenceSettings(),
+)
+
+/** Explicit removals also cover documents referenced by a plan but not received from the server yet. */
+internal data class PersonalDataChange(
+    val snapshot: PersonalDataSnapshot,
+    val deletedDocuments: Set<PersonalRowKey> = emptySet(),
 )
 
 internal data class PendingPersonalWrite(
@@ -78,17 +86,28 @@ internal class TransactionalPersonalDataStore(
     override fun mutate(
         ownerUid: String?,
         transform: (PersonalDataSnapshot) -> PersonalDataSnapshot,
+    ): PersonalDataSnapshot = mutateWithDeletions(ownerUid) { PersonalDataChange(transform(it)) }
+
+    override fun mutateWithDeletions(
+        ownerUid: String?,
+        transform: (PersonalDataSnapshot) -> PersonalDataChange,
     ): PersonalDataSnapshot = storage.transaction {
         val owner = personalOwnerKey(ownerUid)
         val before = rows(owner).associateBy(PersonalRow::key)
-        val after = documents(transform(decodeSnapshot(before.values))).associateBy(PersonalRow::key)
-        for (key in before.keys + after.keys) {
+        val change = transform(decodeSnapshot(before.values))
+        val after = documents(change.snapshot).associateBy(PersonalRow::key)
+        require(change.deletedDocuments.all { it.documentId.isNotBlank() && it !in after }) {
+            "An explicitly deleted document must have an ID and be absent from the resulting snapshot"
+        }
+        for (key in before.keys + after.keys + change.deletedDocuments) {
             val previous = before[key]
             val changed = after[key]
-            if (previous?.payload == changed?.payload) continue
-            val row = changed ?: checkNotNull(previous).copy(
+            if (key !in change.deletedDocuments && previous?.payload == changed?.payload) continue
+            val row = changed ?: PersonalRow(
+                collection = key.collection,
+                documentId = key.documentId,
                 payload = null,
-                timestamp = maxOf(now(), previous.timestamp + 1L),
+                timestamp = maxOf(now(), (previous?.timestamp ?: 0L) + 1L),
             )
             put(owner, row.queued())
         }
@@ -185,6 +204,10 @@ internal class TransactionalPersonalDataStore(
             // tombstones), and clear only the exact revision whose write was acknowledged.
             put(owner, row.copy(revision = null, acknowledged = false, observed = false, imported = false))
         }
+    }
+
+    override fun isLegacyImported(ownerUid: String?, token: String): Boolean = storage.transaction {
+        wasImported(personalOwnerKey(ownerUid), token)
     }
 
     override fun importLegacy(

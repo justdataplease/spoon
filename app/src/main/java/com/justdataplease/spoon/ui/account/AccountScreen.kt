@@ -24,12 +24,14 @@ import androidx.compose.material.icons.outlined.Sync
 import androidx.compose.material.icons.outlined.Email
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Person
+import androidx.compose.material.icons.outlined.PersonAdd
 import androidx.compose.material.icons.outlined.RestartAlt
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -55,21 +57,25 @@ fun AccountScreen(
     state: AccountUiState,
     onBack: () -> Unit,
     onSignIn: (email: String, password: String) -> Unit,
+    onCreateAccount: (email: String, password: String) -> Unit,
     onResetPassword: (email: String) -> Unit,
     onSignOut: () -> Unit,
     onClearError: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     BackHandler(onBack = onBack)
-    var mode by rememberSaveable { mutableStateOf(AccountFormMode.SIGN_IN) }
+    var mode by rememberSaveable(state.dataOwnerKey) { mutableStateOf(AccountFormMode.SIGN_IN) }
     var email by rememberSaveable(state.email) { mutableStateOf(state.email) }
     // Passwords deliberately stay out of Android's persisted saved-state Bundle.
-    var password by remember { mutableStateOf("") }
-    var localError by remember { mutableStateOf<String?>(null) }
+    var password by remember(state.dataOwnerKey) { mutableStateOf("") }
+    var passwordConfirmation by remember(state.dataOwnerKey) { mutableStateOf("") }
+    var localError by remember(state.dataOwnerKey) { mutableStateOf<String?>(null) }
 
     fun switchMode(value: AccountFormMode) {
+        if (value == mode) return
         mode = value
         password = ""
+        passwordConfirmation = ""
         localError = null
         onClearError()
     }
@@ -114,15 +120,19 @@ fun AccountScreen(
                     mode = mode,
                     email = email,
                     password = password,
+                    passwordConfirmation = passwordConfirmation,
                     isBusy = state.isBusy,
                     onEmailChange = { value -> edit { email = value } },
                     onPasswordChange = { value -> edit { password = value } },
+                    onPasswordConfirmationChange = { value -> edit { passwordConfirmation = value } },
+                    onModeChange = ::switchMode,
                     onSubmit = {
-                        val error = validateAccountInput(mode, email, password)
+                        val error = validateAccountInput(mode, email, password, passwordConfirmation)
                         if (error != null) {
                             localError = error
                         } else when (mode) {
                             AccountFormMode.SIGN_IN -> onSignIn(email.trim(), password)
+                            AccountFormMode.SIGN_UP -> onCreateAccount(email.trim(), password)
                             AccountFormMode.RESET -> onResetPassword(email.trim())
                         }
                     },
@@ -191,7 +201,7 @@ private fun GuestStatusCard() {
                     fontWeight = FontWeight.Bold,
                 )
                 Text(
-                    "Χρησιμοποίησε κανονικά το πρόγραμμα, τις συνταγές, τα αγαπημένα, τις σημειώσεις και τις λίστες σου. Με έναν λογαριασμό που σου έχει δοθεί, συγχρονίζονται αυτόματα και όσα έχεις ήδη αποθηκεύσει εδώ, μαζί με όλο το ιστορικό σου.",
+                    "Όλες οι λειτουργίες δουλεύουν στη συσκευή σου χωρίς λογαριασμό. Αν θέλεις αντίγραφο ασφαλείας, δημιούργησε λογαριασμό ή συνδέσου. Τα υπάρχοντα δεδομένα και όλο το ιστορικό σου προστίθενται αυτόματα στον λογαριασμό και συγχρονίζονται όταν υπάρχει σύνδεση.",
                     style = MaterialTheme.typography.bodyMedium,
                 )
             }
@@ -236,25 +246,55 @@ private fun AccountFormCard(
     mode: AccountFormMode,
     email: String,
     password: String,
+    passwordConfirmation: String,
     isBusy: Boolean,
     onEmailChange: (String) -> Unit,
     onPasswordChange: (String) -> Unit,
+    onPasswordConfirmationChange: (String) -> Unit,
+    onModeChange: (AccountFormMode) -> Unit,
     onSubmit: () -> Unit,
     onForgotPassword: () -> Unit,
     onCancelReset: () -> Unit,
 ) {
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), shape = RoundedCornerShape(24.dp)) {
         Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            if (mode != AccountFormMode.RESET) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    FilterChip(
+                        selected = mode == AccountFormMode.SIGN_IN,
+                        onClick = { onModeChange(AccountFormMode.SIGN_IN) },
+                        enabled = !isBusy,
+                        label = { Text("Σύνδεση") },
+                        modifier = Modifier.weight(1f),
+                    )
+                    FilterChip(
+                        selected = mode == AccountFormMode.SIGN_UP,
+                        onClick = { onModeChange(AccountFormMode.SIGN_UP) },
+                        enabled = !isBusy,
+                        label = { Text("Εγγραφή") },
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
             Text(
                 when (mode) {
                     AccountFormMode.SIGN_IN -> "Σύνδεση σε υπάρχοντα λογαριασμό"
+                    AccountFormMode.SIGN_UP -> "Νέος λογαριασμός"
                     AccountFormMode.RESET -> "Επαναφορά κωδικού"
                 },
                 style = MaterialTheme.typography.titleLarge,
             )
+            if (mode == AccountFormMode.SIGN_UP) {
+                Text(
+                    "Η εγγραφή χρειάζεται σύνδεση στο διαδίκτυο. Τα δεδομένα σου παραμένουν διαθέσιμα στη συσκευή.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             OutlinedTextField(
                 value = email,
                 onValueChange = onEmailChange,
+                enabled = !isBusy,
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
                 label = { Text("Ηλεκτρονική διεύθυνση") },
@@ -265,6 +305,7 @@ private fun AccountFormCard(
                 OutlinedTextField(
                     value = password,
                     onValueChange = onPasswordChange,
+                    enabled = !isBusy,
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
                     label = { Text("Κωδικός") },
@@ -273,26 +314,44 @@ private fun AccountFormCard(
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                 )
             }
+            if (mode == AccountFormMode.SIGN_UP) {
+                OutlinedTextField(
+                    value = passwordConfirmation,
+                    onValueChange = onPasswordConfirmationChange,
+                    enabled = !isBusy,
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    label = { Text("Επιβεβαίωση κωδικού") },
+                    leadingIcon = { Icon(Icons.Outlined.Lock, contentDescription = null) },
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                )
+            }
             Button(onClick = onSubmit, enabled = !isBusy, modifier = Modifier.fillMaxWidth()) {
                 Icon(
-                    if (mode == AccountFormMode.RESET) Icons.Outlined.RestartAlt else Icons.Outlined.Person,
+                    when (mode) {
+                        AccountFormMode.RESET -> Icons.Outlined.RestartAlt
+                        AccountFormMode.SIGN_UP -> Icons.Outlined.PersonAdd
+                        AccountFormMode.SIGN_IN -> Icons.Outlined.Person
+                    },
                     contentDescription = null,
                 )
                 Text(
                     when {
                         isBusy -> "Παρακαλώ περίμενε…"
                         mode == AccountFormMode.SIGN_IN -> "Σύνδεση"
+                        mode == AccountFormMode.SIGN_UP -> "Δημιουργία λογαριασμού"
                         else -> "Αποστολή μηνύματος επαναφοράς"
                     },
                     modifier = Modifier.padding(start = 8.dp),
                 )
             }
             if (mode == AccountFormMode.SIGN_IN) {
-                TextButton(onClick = onForgotPassword, modifier = Modifier.align(Alignment.End)) {
+                TextButton(onClick = onForgotPassword, enabled = !isBusy, modifier = Modifier.align(Alignment.End)) {
                     Text("Ξέχασα τον κωδικό")
                 }
             } else if (mode == AccountFormMode.RESET) {
-                TextButton(onClick = onCancelReset, modifier = Modifier.align(Alignment.End)) {
+                TextButton(onClick = onCancelReset, enabled = !isBusy, modifier = Modifier.align(Alignment.End)) {
                     Text("Πίσω στη σύνδεση")
                 }
             }

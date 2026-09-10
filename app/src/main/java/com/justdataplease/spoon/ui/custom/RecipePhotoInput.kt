@@ -30,6 +30,8 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -47,10 +49,12 @@ import androidx.core.content.FileProvider
 import androidx.exifinterface.media.ExifInterface
 import androidx.core.graphics.scale
 import coil.compose.AsyncImage
+import com.justdataplease.spoon.ui.components.recipeImageModel
 import java.io.ByteArrayOutputStream
 import java.io.File
 import kotlin.math.max
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -63,34 +67,53 @@ internal fun RecipePhotoInput(
     retainedImageUrl: String,
     onImageChanged: (String) -> Unit,
     onError: (String) -> Unit,
+    preparation: RecipePhotoPreparation,
+    onProcessingStarted: () -> Unit,
+    onCancelPendingPhoto: () -> Unit,
+    enabled: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val latestOnImageChanged by rememberUpdatedState(onImageChanged)
     val latestOnError by rememberUpdatedState(onError)
-    var processing by remember { mutableStateOf(false) }
+    val latestOnProcessingStarted by rememberUpdatedState(onProcessingStarted)
+    var activeRead by remember { mutableStateOf(false) }
+    val processing = preparation == RecipePhotoPreparation.PROCESSING
     var pendingCameraUri by rememberSaveable { mutableStateOf<String?>(null) }
     var pendingCameraFile by rememberSaveable { mutableStateOf<String?>(null) }
 
     fun readPhoto(uri: Uri, cleanup: () -> Unit = {}) {
+        latestOnProcessingStarted()
+        activeRead = true
         scope.launch {
-            processing = true
-            val result = try {
-                withContext(Dispatchers.IO) {
-                    runCatching { context.compactImageToDraftPath(uri) }
+            try {
+                val path = withContext(Dispatchers.IO) { context.compactImageToDraftPath(uri) }
+                if (path == null) {
+                    latestOnError("Δεν μπορέσαμε να διαβάσουμε αυτή τη φωτογραφία. Διάλεξέ την ξανά.")
+                } else {
+                    latestOnImageChanged(path)
                 }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                latestOnError("Η φωτογραφία δεν μπόρεσε να προστεθεί. Δοκίμασε ξανά.")
             } finally {
                 cleanup()
+                activeRead = false
             }
-            processing = false
-            result.fold(
-                onSuccess = { path ->
-                    if (path == null) latestOnError("Δεν μπορέσαμε να διαβάσουμε αυτή τη φωτογραφία.")
-                    else latestOnImageChanged(path)
-                },
-                onFailure = { latestOnError("Η φωτογραφία δεν μπόρεσε να προστεθεί. Δοκίμασε ξανά.") },
-            )
+        }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            if (activeRead) latestOnError("Η προετοιμασία της φωτογραφίας διακόπηκε. Διάλεξέ την ξανά.")
+        }
+    }
+    LaunchedEffect(Unit) {
+        // A restored editor cannot resume a coroutine belonging to a destroyed composition.
+        if (preparation == RecipePhotoPreparation.PROCESSING && !activeRead) {
+            latestOnError("Η προετοιμασία της φωτογραφίας διακόπηκε. Διάλεξέ την ξανά.")
         }
     }
 
@@ -110,9 +133,10 @@ internal fun RecipePhotoInput(
     }
 
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        val previewModel: Any? = selectedPhotoPath.takeIf(String::isNotBlank)
-            ?.let(::File)
-            ?: retainedImageUrl.takeIf(String::isNotBlank)
+        val previewModel: Any? = remember(selectedPhotoPath, retainedImageUrl) {
+            selectedPhotoPath.takeIf(String::isNotBlank)?.let(::File)
+                ?: recipeImageModel(retainedImageUrl)
+        }
         if (previewModel != null) {
             AsyncImage(
                 model = previewModel,
@@ -135,6 +159,16 @@ internal fun RecipePhotoInput(
             }
         }
 
+        if (preparation == RecipePhotoPreparation.FAILED) {
+            Text(
+                "Διάλεξε ξανά τη φωτογραφία ή συνέχισε με την προηγούμενη φωτογραφία, αν υπάρχει.",
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            OutlinedButton(onClick = onCancelPendingPhoto, enabled = enabled, modifier = Modifier.fillMaxWidth()) {
+                Text("Συνέχεια χωρίς τη νέα φωτογραφία")
+            }
+        }
         if (processing) {
             Row(
                 modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
@@ -152,6 +186,7 @@ internal fun RecipePhotoInput(
                             PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
                         )
                     },
+                    enabled = enabled,
                     modifier = Modifier.weight(1f),
                 ) {
                     Icon(Icons.Outlined.PhotoLibrary, contentDescription = null)
@@ -177,6 +212,7 @@ internal fun RecipePhotoInput(
                             onFailure = { latestOnError("Δεν ήταν δυνατό να ανοίξει η κάμερα.") },
                         )
                     },
+                    enabled = enabled,
                     modifier = Modifier.weight(1f),
                 ) {
                     Icon(Icons.Outlined.CameraAlt, contentDescription = null)
@@ -184,7 +220,7 @@ internal fun RecipePhotoInput(
                 }
             }
             if (previewModel != null) {
-                OutlinedButton(onClick = { latestOnImageChanged("") }, modifier = Modifier.fillMaxWidth()) {
+                OutlinedButton(onClick = { latestOnImageChanged("") }, enabled = enabled, modifier = Modifier.fillMaxWidth()) {
                     Icon(Icons.Outlined.DeleteOutline, contentDescription = null)
                     Text("Αφαίρεση φωτογραφίας", modifier = Modifier.padding(start = 7.dp))
                 }

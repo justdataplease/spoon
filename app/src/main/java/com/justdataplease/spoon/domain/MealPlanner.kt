@@ -478,6 +478,11 @@ class MealPlanner @Inject constructor(
         return stored
     }
 
+    suspend fun createAccountWithEmail(email: String, password: String) {
+        repository.ensureReady()
+        repository.createAccountWithEmail(email, password)
+    }
+
     suspend fun signInWithEmail(email: String, password: String) {
         repository.ensureReady()
         repository.signInWithEmail(email, password)

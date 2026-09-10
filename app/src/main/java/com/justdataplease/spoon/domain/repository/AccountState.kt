@@ -79,6 +79,13 @@ internal fun accountFailureForFirebaseCode(code: String?): AccountFailure = when
             "Έγιναν πολλές προσπάθειες. Περίμενε λίγο και δοκίμασε ξανά.",
         )
 
+    "ERROR_OPERATION_NOT_ALLOWED",
+    "ERROR_ADMIN_RESTRICTED_OPERATION",
+    -> AccountFailure(
+        AccountFailureKind.UNAVAILABLE,
+        "Οι λογαριασμοί δεν είναι διαθέσιμοι αυτή τη στιγμή. Δοκίμασε αργότερα.",
+    )
+
     "ERROR_REQUIRES_RECENT_LOGIN" ->
         AccountFailure(
             AccountFailureKind.REQUIRES_RECENT_LOGIN,
