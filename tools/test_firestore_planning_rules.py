@@ -93,6 +93,99 @@ class PlanningRulesTest(unittest.TestCase):
         except HTTPError as error:
             return error.code
 
+    def raw_request(self, suffix, method="GET", data=None, authenticated_owner=None, admin=False):
+        """Exercise rules without auth, or seed fixtures with the emulator-only admin token."""
+        self.assertIn(HOST.split(":")[0], ("localhost", "127.0.0.1"))
+        self.assertEqual(PROJECT, "demo-spoon-planning")
+        headers = {"Content-Type": "application/json"}
+        if admin:
+            headers["Authorization"] = "Bearer owner"
+        elif authenticated_owner is not None:
+            headers["Authorization"] = "Bearer " + token(authenticated_owner)
+        url = f"http://{HOST}/v1/projects/{PROJECT}/databases/(default)/documents{suffix}"
+        request = Request(url, None if data is None else json.dumps(data).encode(),
+                          headers=headers, method=method)
+        try:
+            with urlopen(request, timeout=15) as response:
+                return response.status
+        except HTTPError as error:
+            return error.code
+
+    def test_unauthenticated_clients_cannot_read_or_write_existing_documents(self):
+        recipe_id = self.owner
+        paths = {
+            f"/spoon_recipes/{recipe_id}": {"active": True, "language": "el"},
+            f"/spoon_recipe_details/{recipe_id}": {"active": True, "language": "el"},
+            "/spoon_catalog/status": {"version": "test"},
+            f"/spoon/{self.owner}/preferences/meal": self.preferences,
+            f"/spoon/{self.owner}/mealPlans/2026-09-07": self.plan,
+            f"/spoon/{self.owner}/favorites/{recipe_id}": {
+                "recipeId": recipe_id, "addedAtEpochMillis": 100,
+            },
+        }
+        for path, data in paths.items():
+            with self.subTest(path=path):
+                payload = {"fields": {key: value(item) for key, item in data.items()}}
+                self.assertEqual(200, self.raw_request(path, "PATCH", payload, admin=True))
+                self.assertEqual(200, self.raw_request(path, authenticated_owner=self.owner))
+                self.assertEqual(403, self.raw_request(path))
+                self.assertEqual(403, self.raw_request(path, "PATCH", payload))
+                self.assertEqual(403, self.raw_request(path, "DELETE"))
+
+    def test_catalog_queries_are_authenticated_filtered_and_read_only(self):
+        recipe_id = self.owner
+        payload = {"fields": {"active": value(True), "language": value("el")}}
+        catalog_path = f"/spoon_recipes/{recipe_id}"
+        details_path = f"/spoon_recipe_details/{recipe_id}"
+        for path in (catalog_path, details_path):
+            self.assertEqual(200, self.raw_request(path, "PATCH", payload, admin=True))
+            self.assertEqual(200, self.raw_request(path, authenticated_owner=self.owner))
+            self.assertEqual(403, self.raw_request(path, "PATCH", payload, self.owner))
+            self.assertEqual(403, self.raw_request(path + "_new", "PATCH", payload, self.owner))
+            self.assertEqual(403, self.raw_request(path, "DELETE", authenticated_owner=self.owner))
+
+        query = {"structuredQuery": {
+            "from": [{"collectionId": "spoon_recipes"}],
+            "where": {"compositeFilter": {"op": "AND", "filters": [
+                {"fieldFilter": {"field": {"fieldPath": "active"},
+                                 "op": "EQUAL", "value": value(True)}},
+                {"fieldFilter": {"field": {"fieldPath": "language"},
+                                 "op": "EQUAL", "value": value("el")}},
+            ]}},
+        }}
+        self.assertEqual(200, self.raw_request(":runQuery", "POST", query, self.owner))
+        self.assertEqual(403, self.raw_request(":runQuery", "POST", query))
+        for collection in ("spoon_recipes", "spoon_recipe_details", "spoon_catalog"):
+            with self.subTest(collection=collection):
+                unfiltered = {"structuredQuery": {"from": [{"collectionId": collection}]}}
+                self.assertEqual(403, self.raw_request(":runQuery", "POST", unfiltered, self.owner))
+                self.assertEqual(403, self.raw_request(":runQuery", "POST", unfiltered))
+        filtered_details = {"structuredQuery": query["structuredQuery"] | {
+            "from": [{"collectionId": "spoon_recipe_details"}],
+        }}
+        self.assertEqual(403, self.raw_request(":runQuery", "POST", filtered_details, self.owner))
+
+        for active, language in ((False, "el"), (True, "en")):
+            for path in (catalog_path, details_path):
+                with self.subTest(active=active, language=language, path=path):
+                    restricted = {"fields": {"active": value(active), "language": value(language)}}
+                    self.assertEqual(200, self.raw_request(path, "PATCH", restricted, admin=True))
+                    self.assertEqual(403, self.raw_request(path, authenticated_owner=self.owner))
+
+    def test_source_payloads_and_unknown_collections_deny_all_client_access(self):
+        payload = {"fields": {"active": value(True), "language": value("el")}}
+        for collection in ("spoon_recipe_payloads", "unrecognized_collection"):
+            path = f"/{collection}/{self.owner}"
+            self.assertEqual(200, self.raw_request(path, "PATCH", payload, admin=True))
+            for owner in (None, self.owner):
+                with self.subTest(collection=collection, authenticated=owner is not None):
+                    self.assertEqual(403, self.raw_request(path, authenticated_owner=owner))
+                    self.assertEqual(403, self.raw_request(path, "PATCH", payload, owner))
+                    self.assertEqual(403, self.raw_request(path + "_new", "PATCH", payload, owner))
+                    self.assertEqual(403, self.raw_request(path, "DELETE", authenticated_owner=owner))
+                    query = {"structuredQuery": {"from": [{"collectionId": collection}]}}
+                    self.assertEqual(403, self.raw_request(":runQuery", "POST", query, owner))
+
     def test_all_courses_complete_atomically_and_keep_independent_history(self):
         plan = self.plan | {"recipeId": "main", "recipeTitle": "Main", "completedAtEpochMillis": 0}
         extra = {key: val for key, val in plan.items() if key != "date"}

@@ -8,13 +8,20 @@ captures/
 .shots/
 .externalNativeBuild/
 .cxx/
-app/google-services.json
+**/google-services.json
 firebase-admin*.json
 *firebase-adminsdk*.json
 *service-account*.json
+*service_account*.json
+application_default_credentials.json
+credentials.json
 gha-creds-*.json
 *.jks
 *.keystore
+*.p12
+*.pfx
+*.pem
+*.key
 keystore.properties
 .env
 .env.*
@@ -26,3 +33,7 @@ tools/recipe_importer/.venv/
 tools/recipe_importer/output/
 __pycache__/
 .pytest_cache/
+
+# Publish installable builds as GitHub Release assets.
+/dist/*.apk
+/dist/*.aab
