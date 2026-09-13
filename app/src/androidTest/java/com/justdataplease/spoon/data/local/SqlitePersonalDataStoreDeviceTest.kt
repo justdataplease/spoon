@@ -1,6 +1,10 @@
 package com.justdataplease.spoon.data.local
 
 import androidx.test.platform.app.InstrumentationRegistry
+import android.content.Context
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.flow.first
+import kotlinx.serialization.json.Json
 import com.justdataplease.spoon.data.model.CookedMeal
 import com.justdataplease.spoon.data.model.CustomRecipe
 import com.justdataplease.spoon.data.model.FavoriteRecipe
@@ -13,6 +17,25 @@ import org.junit.Test
 
 /** A private disposable database exercises SQLite transactions without touching any user data. */
 class SqlitePersonalDataStoreDeviceTest {
+    @Test
+    fun weeklyCollectionToggleSurvivesAccountFreeRepositoryReopen() = runBlocking {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val name = "weekly-collection-test-${UUID.randomUUID()}"
+        val preferences = context.getSharedPreferences(name, Context.MODE_PRIVATE)
+        try {
+            val repository = LocalSpoonRepository(preferences, Json)
+            repository.toggleFavorite("recipe")
+            repository.setFavoriteIncludedInWeeklyPlan("recipe", false)
+            val restarted = LocalSpoonRepository(preferences, Json)
+            assertEquals(setOf("recipe"), restarted.excludedWeeklyRecipeIds.first())
+            assertEquals(setOf("recipe"), restarted.favoriteRecipeIds.first())
+            restarted.setFavoriteIncludedInWeeklyPlan("recipe", true)
+            assertTrue(LocalSpoonRepository(preferences, Json).excludedWeeklyRecipeIds.first().isEmpty())
+        } finally {
+            context.deleteSharedPreferences(name)
+        }
+    }
+
     @Test
     fun guestHistoryPhotosAndPendingDeletesSurviveDatabaseReopenAndOwnerClaim() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext

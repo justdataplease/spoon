@@ -316,16 +316,15 @@ class PersonalDataStoreTest {
     }
 
     @Test
-    fun `existing immutable favorite confirms membership despite a different added timestamp`() {
+    fun `existing favorite confirms a default add despite a different added timestamp`() {
         val store = store()
         store.mutate("alice") { PersonalDataSnapshot(favorites = listOf(favorite("recipe", 20))) }
         val write = store.pending("alice").single()
         store.mergeRemote("alice", PersonalCollection.FAVORITES,
             PersonalDataSnapshot(favorites = listOf(favorite("recipe", 10))), true)
-        assertTrue(store.pending("alice").single().observed)
-        store.acknowledge("alice", write)
         assertTrue(store.pending("alice").isEmpty())
-        assertEquals("recipe", store.read("alice").favorites.single().recipeId)
+        store.acknowledge("alice", write)
+        assertEquals(10L, store.read("alice").favorites.single().addedAtEpochMillis)
     }
 
     @Test
@@ -461,6 +460,77 @@ class PersonalDataStoreTest {
         }
         assertEquals(completed, store(disk).read("alice").mealPlans.single())
         assertTrue(store.pending("alice").isEmpty())
+    }
+
+    @Test
+    fun `legacy favorites stay enabled and weekly choices survive restart owner claim and newer cache values`() {
+        val legacy = PersonalDataJson.decodeFromString<FavoriteRecipe>(
+            """{"id":"recipe","recipeId":"recipe","addedAtEpochMillis":10}""")
+        assertTrue(legacy.includedInWeeklyPlan)
+        assertEquals(0L, legacy.weeklyPlanUpdatedAtEpochMillis)
+        val disk = MemoryRows()
+        val store = store(disk)
+        val excluded = legacy.copy(includedInWeeklyPlan = false, weeklyPlanUpdatedAtEpochMillis = 20)
+        store.mutate(null) { PersonalDataSnapshot(favorites = listOf(excluded)) }
+        assertEquals(excluded, store(disk).read(null).favorites.single())
+        store.claimGuest("alice")
+        assertEquals(excluded, store(disk).read("alice").favorites.single())
+        assertTrue(store.read("bob").favorites.isEmpty())
+        store.mergeRemote("alice", PersonalCollection.FAVORITES,
+            PersonalDataSnapshot(favorites = listOf(legacy)), true)
+        assertEquals(excluded, store.read("alice").favorites.single())
+        store.acknowledge("alice", store.pending("alice").single())
+        val included = excluded.copy(includedInWeeklyPlan = true, weeklyPlanUpdatedAtEpochMillis = 30)
+        store.mergeRemote("alice", PersonalCollection.FAVORITES,
+            PersonalDataSnapshot(favorites = listOf(included)), false)
+        assertEquals(included, store.read("alice").favorites.single())
+        store.mergeRemote("alice", PersonalCollection.FAVORITES,
+            PersonalDataSnapshot(favorites = listOf(excluded)), false)
+        assertEquals(included, store.read("alice").favorites.single())
+    }
+
+    @Test
+    fun `matching favorite identity cannot confirm or discard a pending weekly choice`() {
+        val store = store()
+        val remote = favorite("recipe", 10)
+        store.mergeRemote("alice", PersonalCollection.FAVORITES,
+            PersonalDataSnapshot(favorites = listOf(remote)), true)
+        val excluded = remote.copy(includedInWeeklyPlan = false, weeklyPlanUpdatedAtEpochMillis = 20)
+        store.mutate("alice") { it.copy(favorites = listOf(excluded)) }
+        val oldWrite = store.pending("alice").single()
+        store.mergeRemote("alice", PersonalCollection.FAVORITES,
+            PersonalDataSnapshot(favorites = listOf(remote)), true)
+        assertEquals(excluded, store.read("alice").favorites.single())
+        assertFalse(store.pending("alice").single().observed)
+        val included = excluded.copy(includedInWeeklyPlan = true, weeklyPlanUpdatedAtEpochMillis = 30)
+        store.mutate("alice") { it.copy(favorites = listOf(included)) }
+        store.acknowledge("alice", oldWrite)
+        assertEquals(included, store.read("alice").favorites.single())
+        assertEquals(1, store.pending("alice").size)
+        store.mergeRemote("alice", PersonalCollection.FAVORITES,
+            PersonalDataSnapshot(favorites = listOf(included.copy(addedAtEpochMillis = 5))), true)
+        assertTrue(store.pending("alice").single().observed)
+    }
+
+    @Test
+    fun `duplicate default add keeps an explicit cloud exclusion and upload acknowledges canonical membership`() {
+        val store = store()
+        val remote = favorite("recipe", 10).copy(includedInWeeklyPlan = false, weeklyPlanUpdatedAtEpochMillis = 20)
+        store.mutate("alice") { PersonalDataSnapshot(favorites = listOf(favorite("recipe", 100))) }
+        store.mergeRemote("alice", PersonalCollection.FAVORITES,
+            PersonalDataSnapshot(favorites = listOf(remote)), true)
+        assertEquals(remote, store.read("alice").favorites.single())
+        assertTrue(store.pending("alice").isEmpty())
+        val enabled = favorite("recipe", 100).copy(weeklyPlanUpdatedAtEpochMillis = 101)
+        store.mutate("alice") { it.copy(favorites = listOf(enabled)) }
+        val canonical = enabled.copy(addedAtEpochMillis = remote.addedAtEpochMillis)
+        val write = store.pending("alice").single()
+        store.acknowledge("alice", write.copy(payload = PersonalDataJson.encodeToString(FavoriteRecipe.serializer(), canonical)))
+        assertEquals(canonical, store.read("alice").favorites.single())
+        store.mutate("alice") { it }
+        assertTrue(store.pending("alice").isEmpty())
+        store.mutate("alice") { it.copy(recipeNotes = listOf(note("recipe", "unrelated", 102))) }
+        assertEquals(listOf(PersonalCollection.NOTES), store.pending("alice").map { it.collection })
     }
 
     private fun store(disk: MemoryRows = MemoryRows()) = TransactionalPersonalDataStore(disk, now = { 1_000L })

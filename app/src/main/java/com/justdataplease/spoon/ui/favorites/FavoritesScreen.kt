@@ -38,6 +38,7 @@ fun FavoritesScreen(
     favorites: List<FavoriteUi>,
     onOpenRecipe: (String) -> Unit,
     onRemoveFavorite: (String) -> Unit,
+    onSetIncludedInWeeklyPlan: (String, Boolean) -> Unit,
     modifier: Modifier = Modifier,
     query: TextFieldValue = TextFieldValue(),
     filters: ExploreFiltersUi = ExploreFiltersUi(),
@@ -123,6 +124,8 @@ fun FavoritesScreen(
                 imageUrl = favorite.imageUrl,
                 onOpen = { onOpenRecipe(favorite.recipeId) },
                 onRemove = { onRemoveFavorite(favorite.recipeId) },
+                includedInWeeklyPlan = favorite.includedInWeeklyPlan,
+                onSetIncludedInWeeklyPlan = { onSetIncludedInWeeklyPlan(favorite.recipeId, it) },
                 modifier = Modifier.fillMaxWidth(),
             )
         }

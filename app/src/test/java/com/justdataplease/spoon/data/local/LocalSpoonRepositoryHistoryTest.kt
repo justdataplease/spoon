@@ -199,6 +199,27 @@ class LocalSpoonRepositoryHistoryTest {
         assertTrue(restarted.mealPlans.first().single().completed)
     }
 
+    @Test
+    fun weekly_collection_choice_survives_restart_and_removal_resets_it() = runBlocking {
+        val memory = MemoryPreferences()
+        val repository = LocalSpoonRepository(memory.preferences, Json)
+        repository.toggleFavorite("recipe")
+        assertTrue(repository.excludedWeeklyRecipeIds.first().isEmpty())
+        repository.setFavoriteIncludedInWeeklyPlan("recipe", false)
+        assertEquals(setOf("recipe"), repository.favoriteRecipeIds.first())
+        val restarted = LocalSpoonRepository(memory.preferences, Json)
+        assertEquals(setOf("recipe"), restarted.excludedWeeklyRecipeIds.first())
+        restarted.setFavoriteIncludedInWeeklyPlan("recipe", true)
+        assertTrue(LocalSpoonRepository(memory.preferences, Json).excludedWeeklyRecipeIds.first().isEmpty())
+        restarted.setFavoriteIncludedInWeeklyPlan("recipe", false)
+        restarted.toggleFavorite("recipe")
+        restarted.toggleFavorite("recipe")
+        assertTrue(restarted.excludedWeeklyRecipeIds.first().isEmpty())
+        restarted.setFavoriteIncludedInWeeklyPlan("missing", false)
+        assertEquals(setOf("recipe"), restarted.favoriteRecipeIds.first())
+        assertTrue(restarted.excludedWeeklyRecipeIds.first().isEmpty())
+    }
+
     private class MemoryPreferences(
         private val values: MutableMap<String, Any?> = mutableMapOf(),
     ) {

@@ -277,12 +277,13 @@ class SpoonViewModel @Inject constructor(
         plannerSnapshot,
         exploreFilterInputs(favoritesSearchState.filterQuery, favoritesFilters),
         mealPreferenceSettings,
-    ) { snapshot, input, preferences ->
+        mealPlanner.excludedWeeklyRecipeIds,
+    ) { snapshot, input, preferences, excludedWeeklyRecipeIds ->
         val favorites = snapshot.favoriteIds.mapNotNull(snapshot.catalog.recipesById::get)
         FavoritesSearchUiState(
             filters = input.filters,
             favorites = ExploreRecipeFilter.filter(favorites, input.filters.toDomain(input.query), preferences)
-                .map(Recipe::toFavoriteUi),
+                .map { it.toFavoriteUi().copy(includedInWeeklyPlan = it.id !in excludedWeeklyRecipeIds) },
             totalCount = snapshot.favoriteIds.size,
         )
     }.stateIn(computationScope, SharingStarted.WhileSubscribed(5_000), FavoritesSearchUiState())
@@ -854,6 +855,11 @@ class SpoonViewModel @Inject constructor(
     fun toggleFavorite(recipeId: String) {
         if (recipeId.isBlank()) return
         launchReporting { mealPlanner.toggleFavorite(recipeId) }
+    }
+
+    fun setFavoriteIncludedInWeeklyPlan(recipeId: String, included: Boolean) {
+        if (recipeId.isBlank()) return
+        launchReporting { mealPlanner.setFavoriteIncludedInWeeklyPlan(recipeId, included) }
     }
 
     fun addIngredientsToShopping(drafts: List<ShoppingIngredientDraftUi>) {

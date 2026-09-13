@@ -20,8 +20,21 @@ class UserContentFirestoreSerializationTest {
             addedAtEpochMillis = 2_000,
         ).toFirestoreDocument()
 
-        assertEquals(setOf("recipeId", "addedAtEpochMillis"), document.keys)
+        assertEquals(setOf("recipeId", "addedAtEpochMillis", "includedInWeeklyPlan", "weeklyPlanUpdatedAtEpochMillis"), document.keys)
+        assertEquals(true, document["includedInWeeklyPlan"])
+        assertEquals(0L, document["weeklyPlanUpdatedAtEpochMillis"])
         assertFalse(document.containsKey("id"))
+    }
+
+    @Test
+    fun `duplicate add preserves cloud exclusion while explicit choice preserves server membership`() {
+        val server = FavoriteRecipe("recipe", "recipe", 10, false, 20)
+        val added = FavoriteRecipe("recipe", "recipe", 30)
+        assertEquals(server, added.withServerMembership(server))
+        val changed = added.copy(includedInWeeklyPlan = true, weeklyPlanUpdatedAtEpochMillis = 40)
+        assertEquals(changed.copy(addedAtEpochMillis = 10), changed.withServerMembership(server))
+        assertEquals(mapOf("includedInWeeklyPlan" to true, "weeklyPlanUpdatedAtEpochMillis" to 40L),
+            changed.weeklyPlanFirestoreFields())
     }
 
     @Test

@@ -121,6 +121,7 @@ data class FavoriteUi(
     val sourceName: String = "",
     val tags: List<String> = emptyList(),
     val language: String = "el",
+    val includedInWeeklyPlan: Boolean = true,
 ) {
     val category: CategoryUi
         get() = categoryForKey(categoryKey)

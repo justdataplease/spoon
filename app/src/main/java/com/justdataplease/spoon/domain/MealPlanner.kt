@@ -129,6 +129,7 @@ class MealPlanner @Inject constructor(
     val recipes: Flow<List<Recipe>> = repository.recipes
     val mealPlans: Flow<List<DayMealPlan>> = repository.mealPlans
     val favoriteRecipeIds: Flow<Set<String>> = repository.favoriteRecipeIds
+    val excludedWeeklyRecipeIds: Flow<Set<String>> = repository.excludedWeeklyRecipeIds
     val shoppingItems: Flow<List<ShoppingListItem>> = repository.shoppingItems
     val recipeNotes: Flow<List<RecipeNote>> = repository.recipeNotes
     val customRecipes: Flow<List<CustomRecipe>> = repository.customRecipes
@@ -171,6 +172,7 @@ class MealPlanner @Inject constructor(
         // arriving halfway through the loop must not produce a week with mixed policies.
         val preferences = mealPreferenceSettings.first()
         val favorites = favoritePool(preferences)
+        val weeklyExclusions = excludedWeeklyRecipeIds.first()
         // Changing publisher choices affects future picks, while saved selections stay visible.
         val existingPreferences = preferences.copy(excludedSourceKeys = emptySet())
         val existingFavorites = if (preferences.excludedSourceKeys.isEmpty()) favorites else favoritePool(existingPreferences)
@@ -196,6 +198,7 @@ class MealPlanner @Inject constructor(
                     ) else current,
                     preferences = preferences,
                     favorites = favorites,
+                    weeklyExclusions = weeklyExclusions,
                 )
                 if (current?.recipeId == "" && replacement.recipeId.isBlank() && current.filters == replacement.filters && !current.completed) {
                     current
@@ -207,7 +210,7 @@ class MealPlanner @Inject constructor(
                 val saved = plan.coursePlan(course) ?: continue
                 if (date.dayOfWeek !in resetCourseWeekdays[course].orEmpty() || saved.locked || saved.completed) continue
                 val filters = saved.filters.copy(category = WeeklyPlanDefaults.categoryFor(date.dayOfWeek, preferences, course).key)
-                val recipe = chooseCourseRecipe(plan, course, filters, preferences, favorites, random)
+                val recipe = chooseCourseRecipe(plan, course, filters, preferences, favorites, weeklyExclusions, random)
                 plan = plan.withCourse(course, newPlan(date, filters, recipe))
             }
             if (plan != current) {
@@ -224,7 +227,7 @@ class MealPlanner @Inject constructor(
         random: Random = Random.Default,
     ): MealPlanSelection {
         val preferences = mealPreferenceSettings.first()
-        return rerollDay(date, filters, random, preferences, favoritePool(preferences))
+        return rerollDay(date, filters, random, preferences, favoritePool(preferences), excludedWeeklyRecipeIds.first())
     }
 
     /** One source and preference snapshot for every day; repeats remain eligible. */
@@ -234,6 +237,7 @@ class MealPlanner @Inject constructor(
     ): List<MealPlanSelection> {
         val preferences = mealPreferenceSettings.first()
         val favorites = favoritePool(preferences)
+        val weeklyExclusions = excludedWeeklyRecipeIds.first()
         val plansByDate = repository.mealPlans.first().associateBy(DayMealPlan::date)
         return WeeklyPlanDefaults.dates(containingDate).flatMap { date ->
             val current = plansByDate[date.toString()]
@@ -250,9 +254,9 @@ class MealPlanner @Inject constructor(
                     continue
                 }
                 val recipe = if (course == MealCourse.MAIN) {
-                    selectEligibleRecipe(filters, null, random.nextLong(), preferences, favorites)
+                    selectEligibleRecipe(filters, null, random.nextLong(), preferences, favorites, weeklyExclusions)
                 } else {
-                    chooseCourseRecipe(plan, course, filters, preferences, favorites, random)
+                    chooseCourseRecipe(plan, course, filters, preferences, favorites, weeklyExclusions, random)
                 }
                 plan = plan.withCourse(course, newPlan(date, filters, recipe))
                 selections += filters to recipe
@@ -271,6 +275,7 @@ class MealPlanner @Inject constructor(
         random: Random,
         preferences: MealPreferenceSettings,
         favorites: List<Recipe>?,
+        weeklyExclusions: Set<String>,
     ): MealPlanSelection {
         // Explicit selection uses local recipes; the repository queues the personal write.
         val existing = repository.mealPlans.first().firstOrNull { it.date == date.toString() }
@@ -282,6 +287,7 @@ class MealPlanner @Inject constructor(
             randomSeed = random.nextLong(),
             preferences = preferences,
             favorites = favorites,
+            weeklyExclusions = weeklyExclusions,
         )
         // A failed explicit add must not silently re-enable automatic generation later.
         if (selected == null && existing?.isIntentionallyBlank == true) {
@@ -303,10 +309,11 @@ class MealPlanner @Inject constructor(
         if (plan.side == null || plan.dessert == null) {
             val preferences = mealPreferenceSettings.first()
             val favorites = favoritePool(preferences)
+            val weeklyExclusions = excludedWeeklyRecipeIds.first()
             for (course in listOf(MealCourse.SIDE, MealCourse.DESSERT)) {
                 if (plan.coursePlan(course) != null) continue
                 val filters = courseFilters(date, plan, course, preferences)
-                val recipe = chooseCourseRecipe(plan, course, filters, preferences, favorites, random)
+                val recipe = chooseCourseRecipe(plan, course, filters, preferences, favorites, weeklyExclusions, random)
                 plan = plan.withCourse(course, newPlan(date, filters, recipe))
             }
             repository.upsertMealPlan(plan)
@@ -331,7 +338,8 @@ class MealPlanner @Inject constructor(
         val preferences = mealPreferenceSettings.first()
         val requested = filters ?: current?.filters ?: courseFilters(date, parent, course, preferences)
         if (!requested.isValid()) return MealPlanSelection.NoMatch(date, requested)
-        val selected = chooseCourseRecipe(parent, course, requested, preferences, favoritePool(preferences), random)
+        val selected = chooseCourseRecipe(parent, course, requested, preferences, favoritePool(preferences),
+            excludedWeeklyRecipeIds.first(), random)
         val changed = parent.withCourse(course, newPlan(date, requested, selected))
         repository.upsertMealPlan(changed)
         return if (selected == null) MealPlanSelection.NoMatch(date, requested)
@@ -353,6 +361,7 @@ class MealPlanner @Inject constructor(
         filters: RecipeFilters,
         preferences: MealPreferenceSettings,
         favorites: List<Recipe>?,
+        weeklyExclusions: Set<String>,
         random: Random,
     ): Recipe? = selectMenuRecipe(
         criteria = ExploreCriteria(
@@ -365,7 +374,7 @@ class MealPlanner @Inject constructor(
         preferences = if (course == MealCourse.SIDE && filters.category == "any") {
             preferences.copy(excludedCategories = preferences.excludedCategories + "dessert")
         } else preferences,
-        favorites = favorites,
+        favorites = favorites?.filterNot { it.id in weeklyExclusions },
         excludedIds = MealCourse.entries.filterNot { it == course }.mapNotNullTo(mutableSetOf()) {
             parent.coursePlan(it)?.recipeId?.takeIf(String::isNotBlank)
         },
@@ -426,6 +435,11 @@ class MealPlanner @Inject constructor(
     suspend fun toggleFavorite(recipeId: String): Boolean {
         repository.ensureReady()
         return repository.toggleFavorite(recipeId)
+    }
+
+    suspend fun setFavoriteIncludedInWeeklyPlan(recipeId: String, included: Boolean) {
+        repository.ensureReady()
+        repository.setFavoriteIncludedInWeeklyPlan(recipeId, included)
     }
 
     suspend fun upsertShoppingItems(items: List<ShoppingListItem>) {
@@ -531,6 +545,7 @@ class MealPlanner @Inject constructor(
         previous: DayMealPlan? = null,
         preferences: MealPreferenceSettings,
         favorites: List<Recipe>?,
+        weeklyExclusions: Set<String>,
     ): DayMealPlan {
         val filters = previous?.filters
             ?.takeIf(RecipeFilters::isValid)
@@ -541,6 +556,7 @@ class MealPlanner @Inject constructor(
             randomSeed = random.nextLong(),
             preferences = preferences,
             favorites = favorites,
+            weeklyExclusions = weeklyExclusions,
         )
         val selection = newPlan(date, filters, recipe)
         return previous?.withCourse(MealCourse.MAIN, selection) ?: selection
@@ -561,9 +577,10 @@ class MealPlanner @Inject constructor(
         randomSeed: Long,
         preferences: MealPreferenceSettings,
         favorites: List<Recipe>?,
+        weeklyExclusions: Set<String>,
     ): Recipe? {
         val selected = if (favorites != null) {
-            selector.select(favorites, filters, excludingRecipeId, Random(randomSeed))
+            selector.select(favorites.filterNot { it.id in weeklyExclusions }, filters, excludingRecipeId, Random(randomSeed))
         } else {
             repository.selectRandomRecipe(filters, excludingRecipeId, randomSeed, preferences)
         }

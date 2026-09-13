@@ -61,6 +61,9 @@ class LocalSpoonRepository(
 
     private val _mealPlans = MutableStateFlow(readPlans())
     private val _favoriteRecipeIds = MutableStateFlow(readFavoriteIds())
+    private val _excludedWeeklyRecipeIds = MutableStateFlow(
+        preferences.getStringSet(KEY_EXCLUDED_WEEKLY, emptySet()).orEmpty().intersect(_favoriteRecipeIds.value),
+    )
     private val _shoppingItems = MutableStateFlow(readList<ShoppingListItem>(KEY_SHOPPING_ITEMS))
     private val _recipeNotes = MutableStateFlow(readList<RecipeNote>(KEY_RECIPE_NOTES))
     private val _customRecipes = MutableStateFlow(readList<CustomRecipe>(KEY_CUSTOM_RECIPES))
@@ -82,6 +85,7 @@ class LocalSpoonRepository(
     )
     override val mealPlans: Flow<List<DayMealPlan>> = _mealPlans.asStateFlow()
     override val favoriteRecipeIds: Flow<Set<String>> = _favoriteRecipeIds.asStateFlow()
+    override val excludedWeeklyRecipeIds: Flow<Set<String>> = _excludedWeeklyRecipeIds.asStateFlow()
     override val shoppingItems: Flow<List<ShoppingListItem>> = _shoppingItems.asStateFlow()
     override val recipeNotes: Flow<List<RecipeNote>> = _recipeNotes.asStateFlow()
     override val customRecipes: Flow<List<CustomRecipe>> = _customRecipes.asStateFlow()
@@ -203,13 +207,32 @@ class LocalSpoonRepository(
                     updated.add(recipeId)
                     true
                 }
+                val excluded = _excludedWeeklyRecipeIds.value - recipeId
                 check(
                     preferences.edit()
                         .putStringSet(KEY_FAVORITES, updated.toSet())
+                        .putStringSet(KEY_EXCLUDED_WEEKLY, excluded)
                         .commit(),
                 ) { "Could not persist favorites" }
                 _favoriteRecipeIds.value = updated.toSet()
+                _excludedWeeklyRecipeIds.value = excluded
                 isFavorite
+            }
+        }
+    }
+
+    override suspend fun setFavoriteIncludedInWeeklyPlan(recipeId: String, included: Boolean) {
+        requireSafeRecipeDocumentId(recipeId)
+        withContext(Dispatchers.IO) {
+            mutationMutex.withLock {
+                if (recipeId !in _favoriteRecipeIds.value) return@withLock
+                val excluded = if (included) _excludedWeeklyRecipeIds.value - recipeId
+                    else _excludedWeeklyRecipeIds.value + recipeId
+                if (excluded == _excludedWeeklyRecipeIds.value) return@withLock
+                check(preferences.edit().putStringSet(KEY_EXCLUDED_WEEKLY, excluded).commit()) {
+                    "Could not persist weekly collection choices"
+                }
+                _excludedWeeklyRecipeIds.value = excluded
             }
         }
     }
@@ -307,16 +330,19 @@ class LocalSpoonRepository(
                 val recipes = _customRecipes.value.filterNot { it.id == recipeId }
                 val notes = _recipeNotes.value.filterNot { it.recipeId == recipeId }
                 val favorites = _favoriteRecipeIds.value - recipeId
+                val excluded = _excludedWeeklyRecipeIds.value - recipeId
                 check(
                     preferences.edit()
                         .putString(KEY_CUSTOM_RECIPES, json.encodeToString(recipes))
                         .putString(KEY_RECIPE_NOTES, json.encodeToString(notes))
                         .putStringSet(KEY_FAVORITES, favorites)
+                        .putStringSet(KEY_EXCLUDED_WEEKLY, excluded)
                         .commit(),
                 ) { "Could not delete custom recipe" }
                 _customRecipes.value = recipes
                 _recipeNotes.value = notes
                 _favoriteRecipeIds.value = favorites
+                _excludedWeeklyRecipeIds.value = excluded
             }
         }
     }
@@ -378,6 +404,7 @@ class LocalSpoonRepository(
         const val PREFERENCES_NAME = "spoon_local_repository"
         private const val KEY_MEAL_PLANS = "meal_plans_v1"
         private const val KEY_FAVORITES = "favorite_recipe_ids_v1"
+        private const val KEY_EXCLUDED_WEEKLY = "excluded_weekly_recipe_ids_v1"
         private const val KEY_SHOPPING_ITEMS = "shopping_items_v1"
         private const val KEY_RECIPE_NOTES = "recipe_notes_v1"
         private const val KEY_CUSTOM_RECIPES = "custom_recipes_v1"

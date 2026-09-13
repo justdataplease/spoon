@@ -147,6 +147,7 @@ internal class TransactionalPersonalDataStore(
                     // Metadata/cache echoes cannot prove that a server accepted this exact revision.
                     when {
                         !authoritative -> current
+                        current.isDefaultFavoriteConfirmedBy(received) -> received
                         current.imported && received != null && received.timestamp > current.timestamp -> received
                         current.matchesServer(received) -> current.copy(observed = true, imported = false).finishIfConfirmed()
                         else -> current.copy(imported = false)
@@ -202,7 +203,14 @@ internal class TransactionalPersonalDataStore(
             // that exact value with a later edit from another device, so waiting for its echo
             // would leave an accepted row pending forever. Preserve the row (including deletion
             // tombstones), and clear only the exact revision whose write was acknowledged.
-            put(owner, row.copy(revision = null, acknowledged = false, observed = false, imported = false))
+            // Favorite uploads preserve the server's immutable membership timestamp and may
+            // confirm an existing default add without overwriting its explicit weekly choice.
+            val confirmed = if (row.collection == PersonalCollection.FAVORITES && write.payload != null) {
+                val favorite = PersonalDataJson.decodeFromString<FavoriteRecipe>(write.payload)
+                row.copy(payload = PersonalDataJson.parseToJsonElement(write.payload).canonical().toString(),
+                    timestamp = maxOf(favorite.addedAtEpochMillis, favorite.weeklyPlanUpdatedAtEpochMillis))
+            } else row
+            put(owner, confirmed.copy(revision = null, acknowledged = false, observed = false, imported = false))
         }
     }
 
@@ -236,11 +244,19 @@ internal class TransactionalPersonalDataStore(
 
     private fun PersonalRow.matchesServer(received: PersonalRow?): Boolean {
         if (payload == received?.payload) return true
-        // Existing favorite documents are immutable in the deployed rules. Membership already
-        // present on the server confirms an add even when the two devices added it at different times.
-        return collection == PersonalCollection.FAVORITES && payload != null && received?.payload != null &&
-            PersonalDataJson.decodeFromString<FavoriteRecipe>(payload).recipeId ==
-            PersonalDataJson.decodeFromString<FavoriteRecipe>(received.payload).recipeId
+        if (collection != PersonalCollection.FAVORITES || payload == null || received?.payload == null) return false
+        val local = PersonalDataJson.decodeFromString<FavoriteRecipe>(payload)
+        val remote = PersonalDataJson.decodeFromString<FavoriteRecipe>(received.payload)
+        // Different add timestamps are harmless, but membership alone cannot confirm a toggle.
+        return local.recipeId == remote.recipeId && local.includedInWeeklyPlan == remote.includedInWeeklyPlan &&
+            local.weeklyPlanUpdatedAtEpochMillis == remote.weeklyPlanUpdatedAtEpochMillis
+    }
+
+    private fun PersonalRow.isDefaultFavoriteConfirmedBy(received: PersonalRow?): Boolean {
+        if (collection != PersonalCollection.FAVORITES || payload == null || received?.payload == null) return false
+        val local = PersonalDataJson.decodeFromString<FavoriteRecipe>(payload)
+        val remote = PersonalDataJson.decodeFromString<FavoriteRecipe>(received.payload)
+        return local.recipeId == remote.recipeId && local.weeklyPlanUpdatedAtEpochMillis == 0L
     }
 
     private fun PersonalRow.finishIfConfirmed(): PersonalRow =
@@ -293,7 +309,8 @@ private fun documents(snapshot: PersonalDataSnapshot): List<PersonalRow> = build
     }
     snapshot.favorites.forEach { value ->
         val id = value.recipeId.ifBlank { value.id }
-        add(document(PersonalCollection.FAVORITES, id, value.copy(id = id), value.addedAtEpochMillis))
+        add(document(PersonalCollection.FAVORITES, id, value.copy(id = id),
+            maxOf(value.addedAtEpochMillis, value.weeklyPlanUpdatedAtEpochMillis)))
     }
     snapshot.shoppingItems.forEach { value ->
         add(document(PersonalCollection.SHOPPING, value.id, value, value.updatedAtEpochMillis))

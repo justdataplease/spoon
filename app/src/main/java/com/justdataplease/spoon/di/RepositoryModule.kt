@@ -55,10 +55,15 @@ object RepositoryModule {
             personalDataStore = personalStore,
             accountTransferStore = com.justdataplease.spoon.data.local.NoBackupAccountTransferStore(context),
             legacyLocalSnapshot = {
+                val excludedWeeklyIds = legacy.excludedWeeklyRecipeIds.first()
                 com.justdataplease.spoon.data.local.PersonalDataSnapshot(
                     mealPlans = legacy.mealPlans.first(),
                     favorites = legacy.favoriteRecipeIds.first().map { id ->
-                        com.justdataplease.spoon.data.model.FavoriteRecipe(id, id, 1L)
+                        com.justdataplease.spoon.data.model.FavoriteRecipe(
+                            id = id, recipeId = id, addedAtEpochMillis = 1L,
+                            includedInWeeklyPlan = id !in excludedWeeklyIds,
+                            weeklyPlanUpdatedAtEpochMillis = if (id in excludedWeeklyIds) 1L else 0L,
+                        )
                     },
                     shoppingItems = legacy.shoppingItems.first(),
                     recipeNotes = legacy.recipeNotes.first(),

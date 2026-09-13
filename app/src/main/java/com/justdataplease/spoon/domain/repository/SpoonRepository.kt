@@ -53,6 +53,7 @@ interface SpoonRepository {
     val recipes: Flow<List<Recipe>>
     val mealPlans: Flow<List<DayMealPlan>>
     val favoriteRecipeIds: Flow<Set<String>>
+    val excludedWeeklyRecipeIds: Flow<Set<String>> get() = flowOf(emptySet())
     val shoppingItems: Flow<List<ShoppingListItem>> get() = flowOf(emptyList())
     val recipeNotes: Flow<List<RecipeNote>> get() = flowOf(emptyList())
     val customRecipes: Flow<List<CustomRecipe>> get() = flowOf(emptyList())
@@ -98,6 +99,8 @@ interface SpoonRepository {
     suspend fun deleteCookedHistoryEntry(historyId: String): Unit =
         unsupported("cooked history")
     suspend fun toggleFavorite(recipeId: String): Boolean
+    suspend fun setFavoriteIncludedInWeeklyPlan(recipeId: String, included: Boolean): Unit =
+        unsupported("weekly collection choices")
     suspend fun upsertShoppingItems(items: List<ShoppingListItem>): Unit = unsupported("shopping list")
     suspend fun setShoppingItemChecked(itemId: String, checked: Boolean): Unit =
         unsupported("shopping list")

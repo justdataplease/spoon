@@ -324,15 +324,34 @@ class PlanningRulesTest(unittest.TestCase):
         self.assertEqual(403, self.write("mealPlans/2026-09-08", completed | {"date": "2026-09-08"}))
         self.assertEqual(200, self.write("mealPlans/2026-09-07", completed))
 
-    def test_existing_favorite_is_readable_but_all_updates_remain_forbidden(self):
+    def test_favorite_weekly_choice_migrates_legacy_rows_and_retries_without_changing_membership(self):
         suffix = "favorites/main"
         favorite = {"recipeId": "main", "addedAtEpochMillis": 200}
         self.assertEqual(200, self.write(suffix, favorite))
-        self.assertEqual(200, self.read(suffix)[0])
-        self.assertEqual(403, self.write(suffix, favorite))
-        self.assertEqual(403, self.write(suffix, favorite | {"addedAtEpochMillis": 201}))
+        self.assertEqual(200, self.write(suffix, favorite), "unchanged legacy retry")
+        excluded = favorite | {"includedInWeeklyPlan": False, "weeklyPlanUpdatedAtEpochMillis": 300}
+        self.assertEqual(200, self.write(suffix, excluded))
+        self.assertEqual(200, self.write(suffix, excluded), "unchanged exclusion retry")
+        included = excluded | {"includedInWeeklyPlan": True, "weeklyPlanUpdatedAtEpochMillis": 301}
+        self.assertEqual(200, self.write(suffix, included))
+        self.assertEqual(403, self.write(suffix, included | {"addedAtEpochMillis": 201}))
+        self.assertEqual(403, self.write(suffix, included | {"recipeId": "other"}))
         self.assertEqual(403, self.read(suffix, "other-owner")[0])
-        self.assertEqual({key: value(item) for key, item in favorite.items()}, self.read(suffix)[1]["fields"])
+        self.assertEqual(403, self.write(suffix, excluded, "other-owner"))
+        self.assertEqual(403, self.write(suffix, favorite), "cannot erase the explicit choice")
+        self.assertEqual({key: value(item) for key, item in included.items()}, self.read(suffix)[1]["fields"])
+
+    def test_favorite_weekly_choice_rejects_invalid_types_and_unrelated_fields(self):
+        favorite = {"recipeId": "main", "addedAtEpochMillis": 200,
+                    "includedInWeeklyPlan": True, "weeklyPlanUpdatedAtEpochMillis": 0}
+        self.assertEqual(200, self.write("favorites/main", favorite), "new favorites default on")
+        for changes in ({"includedInWeeklyPlan": "false"}, {"includedInWeeklyPlan": False},
+                        {"weeklyPlanUpdatedAtEpochMillis": -1}, {"weeklyPlanUpdatedAtEpochMillis": True},
+                        {"weeklyPlanUpdatedAtEpochMillis": 253402300800000}, {"unrelated": True}):
+            with self.subTest(changes=changes):
+                self.assertEqual(403, self.write("favorites/main", favorite | changes))
+        self.assertEqual(403, self.write("favorites/other", favorite))
+        self.assertEqual(403, self.write("favorites/main", favorite | {"includedInWeeklyPlan": False}, "other-owner"))
 
     def test_source_exclusions_are_optional_bounded_unique_and_owner_scoped(self):
         keys = ["akis", "argiro", "gastronomos", "tsoulis", "cookpad", "lucacos", "funkycook"]

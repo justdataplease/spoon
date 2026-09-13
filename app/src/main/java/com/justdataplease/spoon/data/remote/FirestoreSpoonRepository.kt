@@ -1,6 +1,7 @@
 package com.justdataplease.spoon.data.remote
 
 import android.util.Log
+import kotlinx.serialization.encodeToString
 import com.google.android.gms.tasks.Task
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseAuthException
@@ -138,6 +139,7 @@ class FirestoreSpoonRepository internal constructor(
     private val _syncState = MutableStateFlow<PersonalSyncState>(PersonalSyncState.LocalOnly)
     private val _mealPlans = MutableStateFlow<List<DayMealPlan>>(emptyList())
     private val _favoriteRecipeIds = MutableStateFlow<Set<String>>(emptySet())
+    private val _excludedWeeklyRecipeIds = MutableStateFlow<Set<String>>(emptySet())
     private val _shoppingItems = MutableStateFlow<List<ShoppingListItem>>(emptyList())
     private val _recipeNotes = MutableStateFlow<List<RecipeNote>>(emptyList())
     private val _customRecipes = MutableStateFlow<List<CustomRecipe>>(emptyList())
@@ -161,6 +163,7 @@ class FirestoreSpoonRepository internal constructor(
         ::mergeCatalogRecipes).stateIn(scope, SharingStarted.Eagerly, emptyList())
     override val mealPlans = _mealPlans.asStateFlow()
     override val favoriteRecipeIds = _favoriteRecipeIds.asStateFlow()
+    override val excludedWeeklyRecipeIds = _excludedWeeklyRecipeIds.asStateFlow()
     override val shoppingItems = _shoppingItems.asStateFlow()
     override val recipeNotes = _recipeNotes.asStateFlow()
     override val customRecipes = _customRecipes.asStateFlow()
@@ -327,6 +330,17 @@ class FirestoreSpoonRepository internal constructor(
         }
         return result.favorites.any { it.recipeId == recipeId }
     }
+    override suspend fun setFavoriteIncludedInWeeklyPlan(recipeId: String, included: Boolean) {
+        requireSafeRecipeDocumentId(recipeId)
+        change { current -> current.copy(favorites = current.favorites.map { favorite ->
+            if (favorite.recipeId != recipeId || favorite.includedInWeeklyPlan == included) favorite
+            else favorite.copy(
+                includedInWeeklyPlan = included,
+                weeklyPlanUpdatedAtEpochMillis = maxOf(System.currentTimeMillis(),
+                    favorite.addedAtEpochMillis + 1, favorite.weeklyPlanUpdatedAtEpochMillis + 1),
+            )
+        }) }
+    }
     override suspend fun upsertShoppingItems(items: List<ShoppingListItem>) {
         if (items.isEmpty()) return
         require(items.size <= MAX_SHOPPING_ITEMS_PER_WRITE)
@@ -376,6 +390,8 @@ class FirestoreSpoonRepository internal constructor(
     private fun publish(value: PersonalDataSnapshot) {
         _mealPlans.value = value.mealPlans
         _favoriteRecipeIds.value = value.favorites.mapTo(mutableSetOf()) { it.recipeId }
+        _excludedWeeklyRecipeIds.value = value.favorites.filterNot { it.includedInWeeklyPlan }
+            .mapTo(mutableSetOf()) { it.recipeId }
         _shoppingItems.value = value.shoppingItems
         _recipeNotes.value = value.recipeNotes
         _customRecipes.value = value.customRecipes
@@ -623,6 +639,7 @@ class FirestoreSpoonRepository internal constructor(
                             submitted.map { it.collection }.distinct().forEach { acknowledgementEpoch.incrementAndGet(it.ordinal) }
                             submitted.forEach { personalDataStore.acknowledge(owner, it) }
                             if (uid.value == owner && submitted.isNotEmpty()) {
+                                publish(personalDataStore.read(owner))
                                 syncFailures.remove(chunk.first().collection)
                                 retryAfter.remove(chunk.first().collection)
                                 updateSyncState()
@@ -648,11 +665,12 @@ class FirestoreSpoonRepository internal constructor(
 
     private suspend fun upload(owner: String, writes: List<PendingPersonalWrite>): List<PendingPersonalWrite> {
         val db = checkNotNull(firestore)
-        val existingFavorites = mutableSetOf<String>()
+        val existingFavorites = mutableMapOf<String, FavoriteRecipe>()
         for (write in writes) {
-            if (write.collection == PersonalCollection.FAVORITES && write.payload != null &&
-                ownerCollection(owner, write.collection).document(write.documentId).get(Source.SERVER).await().exists())
-                existingFavorites += write.documentId
+            if (write.collection != PersonalCollection.FAVORITES || write.payload == null) continue
+            val document = ownerCollection(owner, write.collection).document(write.documentId).get(Source.SERVER).await()
+            if (document.exists()) existingFavorites[write.documentId] =
+                checkNotNull(document.toObject(FavoriteRecipe::class.java))
         }
         // Recheck revisions after network reads and enqueue under the local mutation lock.
         // A concurrent undo, edit or import rekey must never submit an obsolete snapshot.
@@ -664,14 +682,27 @@ class FirestoreSpoonRepository internal constructor(
             } == true }
             val batch = db.batch()
             var count = 0
-            for (write in selected) {
-                if (write.collection == PersonalCollection.FAVORITES && write.payload != null &&
-                    write.documentId in existingFavorites) continue
+            val submitted = selected.map { write ->
                 val document = ownerCollection(owner, write.collection).document(write.documentId)
-                if (write.payload == null) batch.delete(document) else batch.set(document, write.firestoreFields())
-                count++
+                val serverFavorite = existingFavorites[write.documentId]
+                    .takeIf { write.collection == PersonalCollection.FAVORITES && write.payload != null }
+                if (serverFavorite != null) {
+                    val local = PersonalDataJson.decodeFromString<FavoriteRecipe>(checkNotNull(write.payload))
+                    val confirmed = local.withServerMembership(serverFavorite)
+                    // A plain add confirms membership without replacing another device's choice.
+                    // Explicit edits update only mutable fields; addedAt remains the server value.
+                    if (local.weeklyPlanUpdatedAtEpochMillis > 0L) {
+                        batch.update(document, confirmed.weeklyPlanFirestoreFields())
+                        count++
+                    }
+                    write.copy(payload = PersonalDataJson.encodeToString(confirmed))
+                } else {
+                    if (write.payload == null) batch.delete(document) else batch.set(document, write.firestoreFields())
+                    count++
+                    write
+                }
             }
-            selected to if (count > 0) batch.commit() else null
+            submitted to if (count > 0) batch.commit() else null
         }
         if (task != null) {
             // Await the same queued task through outages; never enqueue repeated copies.
@@ -851,7 +882,19 @@ internal fun DayMealPlan.toFirestoreDocument(): Map<String, Any> = mapOf(
 internal fun FavoriteRecipe.toFirestoreDocument(): Map<String, Any> = mapOf(
     "recipeId" to recipeId,
     "addedAtEpochMillis" to addedAtEpochMillis,
+    "includedInWeeklyPlan" to includedInWeeklyPlan,
+    "weeklyPlanUpdatedAtEpochMillis" to weeklyPlanUpdatedAtEpochMillis,
 )
+
+internal fun FavoriteRecipe.weeklyPlanFirestoreFields(): Map<String, Any> = mapOf(
+    "includedInWeeklyPlan" to includedInWeeklyPlan,
+    "weeklyPlanUpdatedAtEpochMillis" to weeklyPlanUpdatedAtEpochMillis,
+)
+
+/** Duplicate adds keep the cloud choice; explicit local changes keep their own choice. */
+internal fun FavoriteRecipe.withServerMembership(server: FavoriteRecipe): FavoriteRecipe =
+    if (weeklyPlanUpdatedAtEpochMillis == 0L) server
+    else copy(addedAtEpochMillis = server.addedAtEpochMillis)
 
 internal fun ShoppingListItem.toFirestoreDocument(): Map<String, Any> = mapOf(
     "name" to name,

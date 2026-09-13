@@ -367,11 +367,18 @@ service cloud.firestore {
 
     function validFavorite(data, favoriteId) {
       return data.keys().hasAll(['recipeId', 'addedAtEpochMillis']) &&
-        data.keys().hasOnly(['recipeId', 'addedAtEpochMillis']) &&
+        data.keys().hasOnly(['recipeId', 'addedAtEpochMillis',
+          'includedInWeeklyPlan', 'weeklyPlanUpdatedAtEpochMillis']) &&
         validRecipeId(favoriteId) &&
         data.recipeId is string &&
         data.recipeId == favoriteId &&
-        validEpochMillis(data.addedAtEpochMillis);
+        validEpochMillis(data.addedAtEpochMillis) &&
+        data.get('includedInWeeklyPlan', true) is bool &&
+        data.get('weeklyPlanUpdatedAtEpochMillis', 0) is int &&
+        (data.get('weeklyPlanUpdatedAtEpochMillis', 0) == 0 ||
+          validEpochMillis(data.weeklyPlanUpdatedAtEpochMillis)) &&
+        (data.get('includedInWeeklyPlan', true) ||
+          validEpochMillis(data.get('weeklyPlanUpdatedAtEpochMillis', 0)));
     }
 
     // Trusted Admin SDK importers bypass rules. Signed-in clients can only
@@ -421,12 +428,18 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // Favorites use create/delete toggles. Updates and extra fields are denied.
+    // Membership is immutable; only the owner can change weekly-plan participation.
     match /spoon/{uid}/favorites/{favoriteId} {
       allow get, list: if isOwner(uid);
       allow create: if isOwner(uid) &&
         validFavorite(request.resource.data, favoriteId);
-      allow update: if false;
+      allow update: if isOwner(uid) &&
+        validFavorite(request.resource.data, favoriteId) &&
+        request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['includedInWeeklyPlan', 'weeklyPlanUpdatedAtEpochMillis']) &&
+        (request.resource.data == resource.data ||
+          (request.resource.data.keys().hasAll(['includedInWeeklyPlan', 'weeklyPlanUpdatedAtEpochMillis']) &&
+            validEpochMillis(request.resource.data.weeklyPlanUpdatedAtEpochMillis)));
       allow delete: if isOwner(uid);
     }
 

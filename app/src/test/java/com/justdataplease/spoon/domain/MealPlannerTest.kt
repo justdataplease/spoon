@@ -22,6 +22,7 @@ import java.time.LocalDate
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -47,6 +48,135 @@ class MealPlannerTest {
             assertTrue(planner.ensureWeek(date.plusWeeks(1)).all { it.recipeId.isBlank() })
             assertTrue(planner.reroll(date.plusWeeks(1), RecipeFilters(category = "meat")) is MealPlanSelection.NoMatch)
         }
+    }
+
+    @Test
+    fun `weekly toggle preserves collection saved plans and manual selection while blocking new picks`() = runBlocking {
+        val date = LocalDate.of(2026, 9, 7)
+        val recipe = Recipe(id = "favorite", title = "Saved recipe", category = "meat")
+        val settings = MealPreferenceSettings(favoritesOnly = true,
+            weekdayCategories = java.time.DayOfWeek.entries.associate { it.name to "meat" })
+        val repository = FakeRepository(initialRecipes = listOf(recipe), initialFavorites = setOf(recipe.id),
+            initialPreferences = settings)
+        val planner = MealPlanner(repository, RecipeSelector())
+        val saved = planner.ensureWeek(date)
+
+        planner.setFavoriteIncludedInWeeklyPlan(recipe.id, false)
+
+        assertEquals(setOf(recipe.id), planner.favoriteRecipeIds.first())
+        assertEquals(setOf(recipe.id), planner.excludedWeeklyRecipeIds.first())
+        assertEquals(recipe, planner.getRecipeDetails(recipe.id))
+        assertEquals(listOf(recipe), planner.queryRecipes().recipes)
+        assertEquals(saved, planner.ensureWeek(date))
+        assertTrue(planner.ensureWeek(date.plusWeeks(1)).all { it.recipeId.isBlank() })
+        assertTrue(planner.reroll(date.plusWeeks(1), RecipeFilters(category = "meat")) is MealPlanSelection.NoMatch)
+        assertTrue(planner.replaceWithFavorite(date.plusWeeks(1), recipe.id) is FavoriteReplacementResult.Selected)
+        assertEquals(recipe.id, planner.ensureWeek(date.plusWeeks(1)).first().recipeId)
+
+        planner.setFavoriteIncludedInWeeklyPlan(recipe.id, true)
+        assertTrue(planner.excludedWeeklyRecipeIds.first().isEmpty())
+        assertTrue(planner.ensureWeek(date.plusWeeks(2)).all { it.recipeId == recipe.id })
+    }
+
+    @Test
+    fun `all disabled favorites leave every generated course empty without catalog fallback`() = runBlocking {
+        val date = LocalDate.of(2026, 9, 7)
+        val favorite = Recipe(id = "off", title = "Saved recipe", category = "meat")
+        val catalog = listOf(favorite, favorite.copy(id = "catalog-main"),
+            favorite.copy(id = "catalog-side", category = "vegetables"),
+            favorite.copy(id = "catalog-dessert", category = "dessert"))
+        val repository = FakeRepository(initialRecipes = catalog, initialFavorites = setOf(favorite.id),
+            initialWeeklyExclusions = setOf(favorite.id), initialPreferences = MealPreferenceSettings(favoritesOnly = true,
+                weekdayCategories = java.time.DayOfWeek.entries.associate { it.name to "meat" }))
+        val planner = MealPlanner(repository, RecipeSelector())
+
+        assertTrue(planner.ensureWeek(date).all { it.recipeId.isBlank() })
+        assertEquals(MealMenuProposal(null, null, null), planner.suggestMenu(date))
+        assertTrue(planner.rerollCourse(date, MealCourse.SIDE) is MealPlanSelection.NoMatch)
+        assertTrue(planner.rerollCourse(date, MealCourse.DESSERT) is MealPlanSelection.NoMatch)
+        assertTrue(planner.rerollWeek(date).all { it is MealPlanSelection.NoMatch })
+    }
+
+    @Test
+    fun `weekly exclusions apply to menu course rerolls and whole weeks while retaining protected meals`() = runBlocking {
+        val date = LocalDate.of(2026, 9, 7)
+        val allowed = listOf(Recipe(id = "main", title = "Main", category = "meat"),
+            Recipe(id = "side", title = "Side", category = "vegetables"),
+            Recipe(id = "dessert", title = "Dessert", category = "dessert"))
+        val excluded = allowed.map { it.copy(id = "off-${it.id}") }
+        val weekdays = java.time.DayOfWeek.entries
+        val repository = FakeRepository(initialRecipes = allowed + excluded,
+            initialFavorites = (allowed + excluded).mapTo(mutableSetOf()) { it.id },
+            initialWeeklyExclusions = excluded.mapTo(mutableSetOf()) { it.id },
+            initialPreferences = MealPreferenceSettings(favoritesOnly = true,
+                weekdayCategories = weekdays.associate { it.name to "meat" },
+                sideWeekdayCategories = weekdays.associate { it.name to "vegetables" },
+                dessertWeekdayCategories = weekdays.associate { it.name to "dessert" }))
+        val planner = MealPlanner(repository, RecipeSelector())
+        assertTrue(planner.ensureWeek(date).all { it.recipeId == "main" })
+        assertEquals(MealMenuProposal(allowed[0], allowed[1], allowed[2]), planner.suggestMenu(date))
+        for (course in MealCourse.entries) {
+            val selected = planner.rerollCourse(date, course) as MealPlanSelection.Selected
+            assertEquals(allowed[course.ordinal].id, selected.recipe.id)
+        }
+        planner.replaceWithFavorite(date, "off-main")
+        planner.setLocked(date, true)
+        planner.replaceWithFavorite(date, "off-side", MealCourse.SIDE)
+        val monday = repository.plans.value.single { it.date == date.toString() }
+        repository.plans.value = repository.plans.value.map {
+            if (it.date == monday.date) it.copy(side = it.side!!.copy(completed = true)) else it
+        }
+        planner.setDayBlank(date.plusDays(1))
+        val blank = repository.plans.value.single { it.date == date.plusDays(1).toString() }
+
+        planner.rerollWeek(date)
+
+        val refreshed = repository.plans.value.single { it.date == date.toString() }
+        assertEquals("off-main", refreshed.recipeId)
+        assertTrue(refreshed.locked)
+        assertEquals("off-side", refreshed.side!!.recipeId)
+        assertTrue(refreshed.side!!.completed)
+        assertEquals("dessert", refreshed.dessert!!.recipeId)
+        assertEquals(blank, repository.plans.value.single { it.date == blank.date })
+        for (day in repository.plans.value.filter { it.date != monday.date && it.date != blank.date }) {
+            assertEquals("main", day.recipeId)
+            assertEquals("side", day.side!!.recipeId)
+            assertEquals("dessert", day.dessert!!.recipeId)
+        }
+    }
+
+    @Test
+    fun `disabled favorites remain available to every course when favorites only setting is off`() = runBlocking {
+        val date = LocalDate.of(2026, 9, 7)
+        val recipes = listOf(Recipe(id = "main", title = "Main", category = "meat"),
+            Recipe(id = "side", title = "Side", category = "vegetables"),
+            Recipe(id = "dessert", title = "Dessert", category = "dessert"))
+        val ids = recipes.mapTo(mutableSetOf()) { it.id }
+        val weekdays = java.time.DayOfWeek.entries
+        val settings = MealPreferenceSettings(favoritesOnly = false,
+            weekdayCategories = weekdays.associate { it.name to "meat" },
+            sideWeekdayCategories = weekdays.associate { it.name to "vegetables" },
+            dessertWeekdayCategories = weekdays.associate { it.name to "dessert" })
+        val repository = FakeRepository(initialRecipes = recipes, initialFavorites = ids,
+            initialWeeklyExclusions = ids, initialPreferences = settings)
+        val planner = MealPlanner(repository, RecipeSelector())
+
+        assertTrue(planner.ensureWeek(date).all { it.recipeId == "main" })
+        assertEquals(MealMenuProposal(recipes[0], recipes[1], recipes[2]), planner.suggestMenu(date))
+        for (course in MealCourse.entries) {
+            val result = planner.rerollCourse(date, course) as MealPlanSelection.Selected
+            assertEquals(recipes[course.ordinal], result.recipe)
+        }
+        assertTrue(planner.rerollWeek(date).all { it is MealPlanSelection.Selected })
+        for (day in repository.plans.value) {
+            assertEquals("main", day.recipeId)
+            assertEquals("side", day.side!!.recipeId)
+            assertEquals("dessert", day.dessert!!.recipeId)
+        }
+
+        (repository.mealPreferenceSettings as MutableStateFlow).value = settings.copy(favoritesOnly = true)
+        assertEquals(ids, planner.excludedWeeklyRecipeIds.first())
+        assertTrue(planner.rerollWeek(date.plusWeeks(1)).all { it is MealPlanSelection.NoMatch })
     }
 
     @Test
@@ -1188,6 +1318,7 @@ class MealPlannerTest {
         initialHistory: List<CookedMeal> = emptyList(),
         initialPreferences: MealPreferenceSettings = MealPreferenceSettings(),
         preferenceFlow: Flow<MealPreferenceSettings>? = null,
+        initialWeeklyExclusions: Set<String> = emptySet(),
     ) : SpoonRepository {
         override val backendState = MutableStateFlow<BackendState>(BackendState.Local)
         override val recipes: Flow<List<Recipe>> = MutableStateFlow(initialRecipes)
@@ -1195,6 +1326,8 @@ class MealPlannerTest {
         override val mealPlans: Flow<List<DayMealPlan>> = plans
         private val favorites = MutableStateFlow(initialFavorites)
         override val favoriteRecipeIds: Flow<Set<String>> = favorites
+        private val weeklyExclusions = MutableStateFlow(initialWeeklyExclusions)
+        override val excludedWeeklyRecipeIds: Flow<Set<String>> = weeklyExclusions
         val custom = MutableStateFlow(initialCustomRecipes)
         override val customRecipes: Flow<List<CustomRecipe>> = custom
         val history = MutableStateFlow(initialHistory)
@@ -1236,6 +1369,10 @@ class MealPlannerTest {
             }
             favorites.value = changed
             return added
+        }
+
+        override suspend fun setFavoriteIncludedInWeeklyPlan(recipeId: String, included: Boolean) {
+            weeklyExclusions.value = if (included) weeklyExclusions.value - recipeId else weeklyExclusions.value + recipeId
         }
 
         override suspend fun upsertCustomRecipe(recipe: CustomRecipe) {

@@ -76,10 +76,13 @@ class FirebasePersonalSyncDeviceTest {
                         fixture.assertServerSnapshot(ownerUid, imported)
 
                         fixture.firestore.disableNetwork().await()
-                        // Existing favorites are immutable remotely. A rapid remove/add must
+                        // Existing favorite membership is immutable. A rapid remove/add must
                         // preserve membership without updating the server timestamp.
                         assertFalse(repository.toggleFavorite("argiro_1"))
                         assertTrue(repository.toggleFavorite("argiro_1"))
+                        repository.setFavoriteIncludedInWeeklyPlan("argiro_1", false)
+                        assertEquals(setOf("argiro_1"), repository.excludedWeeklyRecipeIds.value)
+                        assertEquals(setOf("argiro_1"), repository.favoriteRecipeIds.value)
                         repository.setShoppingItemChecked("milk", true)
                         repository.upsertRecipeNote(RecipeNote(recipeId = "argiro_1",
                             text = "Edited offline", updatedAtEpochMillis = 5_000))
@@ -94,6 +97,7 @@ class FirebasePersonalSyncDeviceTest {
                 SqlitePersonalDataStore(fixture.context, fixture.databaseFile).use { store ->
                     fixture.withRepository(store) { repository ->
                         assertEquals(offline, store.read(ownerUid))
+                        assertEquals(setOf("argiro_1"), repository.excludedWeeklyRecipeIds.value)
                         assertTrue(repository.shoppingItems.value.single().checked)
                         assertEquals("Edited offline", repository.recipeNotes.value.single().text)
                         assertTrue(store.pending(ownerUid).isNotEmpty())
@@ -101,7 +105,21 @@ class FirebasePersonalSyncDeviceTest {
                         fixture.firestore.enableNetwork().await()
                         awaitSynced(repository, store, ownerUid)
                         // A favorite that already exists keeps its original remote timestamp.
-                        fixture.assertServerSnapshot(ownerUid, offline.copy(favorites = imported.favorites))
+                        val confirmed = offline.copy(favorites = offline.favorites.map {
+                            it.copy(addedAtEpochMillis = imported.favorites.single().addedAtEpochMillis)
+                        })
+                        fixture.assertServerSnapshot(ownerUid, confirmed)
+                        assertEquals(confirmed, store.read(ownerUid))
+                        repository.setFavoriteIncludedInWeeklyPlan("argiro_1", true)
+                        awaitSynced(repository, store, ownerUid)
+                        assertTrue(repository.excludedWeeklyRecipeIds.value.isEmpty())
+                        val server = fixture.ownerQuery(ownerUid, "favorites").get(Source.SERVER).await()
+                        assertEquals(true, server.documents.single().getBoolean("includedInWeeklyPlan"))
+                        repository.signOut()
+                        assertTrue(repository.excludedWeeklyRecipeIds.value.isEmpty())
+                        repository.signInWithEmail(fixture.email, Password)
+                        awaitSynced(repository, store, ownerUid)
+                        assertTrue(repository.excludedWeeklyRecipeIds.value.isEmpty())
                     }
                 }
             }

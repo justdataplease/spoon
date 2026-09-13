@@ -15,8 +15,9 @@ from that source when Android asks.
 - **Find something that fits.** Search in Greek and filter by category, preparation
   time, effort, rating, diet, cuisine, ingredients, and more. Choose which publishers
   appear in new suggestions, or plan using only your favorites.
-- **Keep your own collection.** Save favorites, add private recipe notes, and create
-  personal recipes with ingredients, steps, and a photo.
+- **Keep your own collection.** Save favorites, choose which ones are used when
+  planning from your collection, add private recipe notes, and create personal
+  recipes with ingredients, steps, and a photo.
 - **Make shopping easier.** Add a recipe's ingredients to your shopping list in one
   tap, add your own items, and tick things off as you go.
 - **Remember what you cooked.** Mark meals as cooked, revisit your history, and

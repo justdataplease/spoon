@@ -281,6 +281,7 @@ fun SpoonApp(
                     onApplyFilters = viewModel::applyFavoritesFilters,
                     onOpenRecipe = viewModel::showRecipeDetails,
                     onRemoveFavorite = viewModel::toggleFavorite,
+                    onSetIncludedInWeeklyPlan = viewModel::setFavoriteIncludedInWeeklyPlan,
                     modifier = Modifier.padding(padding),
                 )
 
