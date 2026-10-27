@@ -278,7 +278,7 @@ fun CompactFavoriteCard(
                 androidx.compose.material3.IconButton(onClick = onRemove) {
                     Icon(
                         imageVector = androidx.compose.material.icons.Icons.Filled.Favorite,
-                        contentDescription = "Αφαίρεση από τη συλλογή",
+                        contentDescription = "Λίστες συνταγής ή αφαίρεση από τη συλλογή",
                         tint = MaterialTheme.colorScheme.primary,
                     )
                 }

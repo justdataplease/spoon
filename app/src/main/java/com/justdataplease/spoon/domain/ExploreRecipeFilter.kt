@@ -6,7 +6,9 @@ import com.justdataplease.spoon.data.model.EaseLevel
 import com.justdataplease.spoon.data.model.MealCategory
 import com.justdataplease.spoon.data.model.Recipe
 import com.justdataplease.spoon.data.preferences.MealPreferenceSettings
+import com.justdataplease.spoon.data.local.TitleQuery
 import com.justdataplease.spoon.data.local.normalizedCatalogToken
+import com.justdataplease.spoon.data.local.titleSearchKey
 import java.util.Locale
 
 /** All constraints used by the recipe explorer. Empty values leave that facet unconstrained. */
@@ -24,6 +26,8 @@ data class ExploreCriteria(
     val ingredientLabels: Set<String> = emptySet(),
     val sourceKeys: Set<String> = emptySet(),
     val quickOnly: Boolean = false,
+    /** Matches each query term only as a complete title word, like a regex `\bterm\b`. */
+    val wholeWords: Boolean = false,
 ) {
     fun isValid(): Boolean =
         minRating.isFinite() &&
@@ -48,9 +52,7 @@ object ExploreRecipeFilter {
             .takeIf(String::isNotBlank)
             ?.normalizedKey()
             ?.let(EaseLevel::fromKey)
-        val queryTerms = criteria.query.normalizedSearchText()
-            .split(Whitespace)
-            .filter(String::isNotBlank)
+        val titleQuery = TitleQuery(criteria.query, criteria.wholeWords)
         val selectedDiets = canonicalFacetTokens("diet", criteria.dietLabels)
         val selectedMealTypes = canonicalFacetTokens("meal", criteria.mealTypeLabels)
         val selectedOccasions = canonicalFacetTokens("occasion", criteria.occasionLabels)
@@ -88,14 +90,18 @@ object ExploreRecipeFilter {
                         .any { it in selectedSources }
             }
             .filter { !criteria.quickOnly || it.totalMinutes in 1..29 }
-            .filter { recipe ->
-                queryTerms.isEmpty() || recipe.searchableText().let { searchable ->
-                    queryTerms.all(searchable::contains)
-                }
+            // Search reads only the title, through the same transliterated key as the catalog.
+            .map { recipe ->
+                RankedRecipe(
+                    recipe = recipe,
+                    normalizedTitle = recipe.title.normalizedSearchText(),
+                    titleKey = if (titleQuery.isEmpty()) "" else recipe.title.titleSearchKey(),
+                )
             }
-            .map { recipe -> RankedRecipe(recipe, recipe.title.normalizedSearchText()) }
+            .filter { titleQuery.isEmpty() || titleQuery.matches(it.titleKey) }
             .sortedWith(
-                compareByDescending<RankedRecipe> { it.recipe.rating }
+                compareBy<RankedRecipe> { !titleQuery.isEmpty() && !titleQuery.startsWords(it.titleKey) }
+                    .thenByDescending { it.recipe.rating }
                     .thenBy(RankedRecipe::normalizedTitle)
                     .thenBy { it.recipe.id },
             )
@@ -125,23 +131,6 @@ private fun Set<String>.matchesIngredientFacet(actualValues: List<String>): Bool
         .any { token -> token in this }
 }
 
-private fun Recipe.searchableText(): String = buildList {
-    add(title)
-    add(description)
-    add(category)
-    add(categoryLabel)
-    add(effectiveSourceKey)
-    add(source)
-    add(sourceName)
-    addAll(tags)
-    addAll(dietLabels)
-    addAll(mealTypeLabels)
-    addAll(occasionLabels)
-    addAll(methodLabels)
-    addAll(cuisineLabels)
-    addAll(ingredientLabels)
-}.joinToString(separator = "\u0000").normalizedSearchText()
-
 internal fun Recipe.isActiveGreekRecipe(): Boolean {
     val normalizedLanguage = language.trim().lowercase(Locale.ROOT)
     return active &&
@@ -157,6 +146,5 @@ private fun String.normalizedSearchText(): String = normalizedCatalogToken()
 private data class RankedRecipe(
     val recipe: Recipe,
     val normalizedTitle: String,
+    val titleKey: String,
 )
-
-private val Whitespace = Regex("\\s+")

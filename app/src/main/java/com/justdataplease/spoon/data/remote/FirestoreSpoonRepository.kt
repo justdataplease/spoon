@@ -128,6 +128,7 @@ class FirestoreSpoonRepository internal constructor(
     private val personalDataStore: PersonalDataStore,
     private val accountTransferStore: AccountTransferStore = InMemoryAccountTransferStore(),
     private val legacyLocalSnapshot: suspend () -> PersonalDataSnapshot = { PersonalDataSnapshot() },
+    private val photoStorage: CustomRecipePhotoStorage? = null,
 ) : SpoonRepository {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val mutationMutex = Mutex()
@@ -672,6 +673,20 @@ class FirestoreSpoonRepository internal constructor(
             if (document.exists()) existingFavorites[write.documentId] =
                 checkNotNull(document.toObject(FavoriteRecipe::class.java))
         }
+        // Photos upload before the batch, so the synced document carries only their URL.
+        val uploadedRecipes = mutableMapOf<String, CustomRecipe>()
+        val replacedPhotoUrls = mutableMapOf<String, String>()
+        if (photoStorage != null) {
+            for (write in writes) {
+                if (write.collection != PersonalCollection.CUSTOM_RECIPES) continue
+                val serverPhotoUrl = ownerCollection(owner, write.collection).document(write.documentId)
+                    .get(Source.SERVER).await().getString("photoUrl").orEmpty()
+                val recipe = write.payload?.let { PersonalDataJson.decodeFromString<CustomRecipe>(it) }
+                    ?.withUploadedPhoto(owner, photoStorage)
+                if (recipe != null) uploadedRecipes[write.documentId] = recipe
+                if (serverPhotoUrl.isNotBlank()) replacedPhotoUrls[write.documentId] = serverPhotoUrl
+            }
+        }
         // Recheck revisions after network reads and enqueue under the local mutation lock.
         // A concurrent undo, edit or import rekey must never submit an obsolete snapshot.
         val (submitted, task) = mutationMutex.withLock {
@@ -697,7 +712,12 @@ class FirestoreSpoonRepository internal constructor(
                     }
                     write.copy(payload = PersonalDataJson.encodeToString(confirmed))
                 } else {
-                    if (write.payload == null) batch.delete(document) else batch.set(document, write.firestoreFields())
+                    val fields = uploadedRecipes[write.documentId]?.toFirestoreDocument()
+                    when {
+                        write.payload == null -> batch.delete(document)
+                        fields != null -> batch.set(document, fields)
+                        else -> batch.set(document, write.firestoreFields())
+                    }
                     count++
                     write
                 }
@@ -716,6 +736,10 @@ class FirestoreSpoonRepository internal constructor(
                 }
             }
             task.await()
+        }
+        submitted.filter { it.collection == PersonalCollection.CUSTOM_RECIPES }.forEach { write ->
+            val previousUrl = replacedPhotoUrls[write.documentId] ?: return@forEach
+            photoStorage?.deleteReplaced(previousUrl, uploadedRecipes[write.documentId]?.photoUrl.orEmpty())
         }
         return submitted
     }
@@ -945,7 +969,7 @@ internal fun CustomRecipe.toFirestoreDocument(): Map<String, Any> = mapOf(
     "active" to active,
     "createdAtEpochMillis" to createdAtEpochMillis,
     "updatedAtEpochMillis" to updatedAtEpochMillis,
-)
+) + listOfNotNull(("photoUrl" to photoUrl).takeIf { photoUrl.isNotBlank() })
 
 internal fun DayMealPlan.toCookedMealDocument(completedAtEpochMillis: Long): Map<String, Any> =
     cookedMealDocument(

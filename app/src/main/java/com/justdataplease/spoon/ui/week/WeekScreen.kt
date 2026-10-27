@@ -345,7 +345,7 @@ internal fun DayRecipeCard(
                     IconButton(onClick = onToggleFavorite) {
                         Icon(
                             if (plan.isFavorite) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
-                            contentDescription = if (plan.isFavorite) "Αφαίρεση από τη συλλογή" else "Στη συλλογή",
+                            contentDescription = if (plan.isFavorite) "Λίστες συνταγής" else "Αποθήκευση στη συλλογή",
                             tint = if (plan.isFavorite) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }

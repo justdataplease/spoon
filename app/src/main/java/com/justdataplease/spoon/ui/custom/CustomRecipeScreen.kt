@@ -42,6 +42,30 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.justdataplease.spoon.ui.model.AvailableCategories
 
+/**
+ * Photo changes go to the owner of the editor state directly. A photo can finish processing
+ * after other fields changed, so it must never ride on a copied, possibly stale, form snapshot.
+ */
+class CustomRecipePhotoEvents(
+    val onProcessingStarted: () -> Unit,
+    /** A compressed draft file path, or "" to remove the photo. */
+    val onPhotoChanged: (String) -> Unit,
+    val onFailed: (String) -> Unit,
+    val onCancelled: () -> Unit,
+) {
+    companion object {
+        /** For previews and tests that hold the whole state locally. */
+        fun from(state: CustomRecipeEditorState, onStateChange: (CustomRecipeEditorState) -> Unit) = CustomRecipePhotoEvents(
+            onProcessingStarted = {
+                onStateChange(state.copy(photoPreparation = RecipePhotoPreparation.PROCESSING, formMessage = null))
+            },
+            onPhotoChanged = { path -> onStateChange(state.withDraftPhoto(path)) },
+            onFailed = { onStateChange(state.copy(photoPreparation = RecipePhotoPreparation.FAILED, formMessage = it)) },
+            onCancelled = { onStateChange(state.copy(photoPreparation = RecipePhotoPreparation.READY, formMessage = null)) },
+        )
+    }
+}
+
 @Composable
 fun CustomRecipeScreen(
     editorState: CustomRecipeEditorState,
@@ -51,6 +75,7 @@ fun CustomRecipeScreen(
     onStateChange: (CustomRecipeEditorState) -> Unit,
     onSave: () -> Unit,
     modifier: Modifier = Modifier,
+    photoEvents: CustomRecipePhotoEvents = CustomRecipePhotoEvents.from(editorState, onStateChange),
 ) {
     BackHandler(onBack = onBack)
 
@@ -149,23 +174,10 @@ fun CustomRecipeScreen(
                         retainedImageUrl = retainedImageUrl,
                         preparation = editorState.photoPreparation,
                         enabled = !isSaving,
-                        onProcessingStarted = {
-                            onStateChange(editorState.copy(photoPreparation = RecipePhotoPreparation.PROCESSING, formMessage = null))
-                        },
-                        onCancelPendingPhoto = {
-                            onStateChange(editorState.copy(photoPreparation = RecipePhotoPreparation.READY, formMessage = null))
-                        },
-                        onImageChanged = { path ->
-                            onStateChange(
-                                editorState.copy(
-                                    selectedPhotoPath = path,
-                                    photoPreparation = RecipePhotoPreparation.READY,
-                                    retainExistingPhoto = false,
-                                    formMessage = null,
-                                ),
-                            )
-                        },
-                        onError = { onStateChange(editorState.copy(photoPreparation = RecipePhotoPreparation.FAILED, formMessage = it)) },
+                        onProcessingStarted = photoEvents.onProcessingStarted,
+                        onCancelPendingPhoto = photoEvents.onCancelled,
+                        onImageChanged = photoEvents.onPhotoChanged,
+                        onError = photoEvents.onFailed,
                     )
                 }
             }

@@ -119,13 +119,13 @@ class BundledRecipeCatalog(
         if (offset >= totalCount) {
             return@withContext RecipePage(emptyList(), totalCount, offset, limit)
         }
-        val arguments = selection.arguments + limit.toString() + offset.toString()
+        val arguments = selection.arguments + selection.rankArguments + limit.toString() + offset.toString()
         val recipes = database().rawQuery(
             """
                 SELECT r.id, r.recipe_json
                 FROM recipes r
                 ${selection.whereSql}
-                ORDER BY r.rating DESC, r.title_normalized ASC, r.id ASC
+                ORDER BY ${selection.rankSql}r.rating DESC, r.title_normalized ASC, r.id ASC
                 LIMIT ? OFFSET ?
             """.trimIndent(),
             arguments.toTypedArray(),
@@ -273,7 +273,11 @@ class BundledRecipeCatalog(
         val preferences = appContext.getSharedPreferences(INSTALL_PREFERENCES, Context.MODE_PRIVATE)
         val installStamp = packageInstallStamp()
         val canReuse = target.isFile && preferences.getString(INSTALL_STAMP_KEY, null) == installStamp
-        if (!canReuse || runCatching { validateDatabase(target) }.isFailure) {
+        val reusable = canReuse && runCatching {
+            validateDatabase(target)
+            validateTitleKeys(target)
+        }.isSuccess
+        if (!reusable) {
             // Keep staging beside the target so the validated replacement can be an atomic rename.
             val staging = File(installDirectory, "$INSTALLED_DATABASE_NAME.installing")
             runCatching { Files.deleteIfExists(staging.toPath()) }
@@ -282,6 +286,8 @@ class BundledRecipeCatalog(
                     staging.outputStream().buffered().use(input::copyTo)
                 }
                 validateDatabase(staging)
+                writeTitleKeys(staging)
+                validateTitleKeys(staging)
                 try {
                     Files.move(
                         staging.toPath(),
@@ -299,6 +305,7 @@ class BundledRecipeCatalog(
                 check(preferences.edit().putString(INSTALL_STAMP_KEY, installStamp).commit())
             } finally {
                 Files.deleteIfExists(staging.toPath())
+                deleteJournalFiles(staging)
             }
         }
         return SQLiteDatabase.openDatabase(
@@ -349,6 +356,63 @@ class BundledRecipeCatalog(
         }
     }
 
+    /**
+     * Adds the transliterated title keys that Explore searches. They are derived on the device
+     * from title_normalized, so the packaged asset stays unchanged when the key rules change.
+     */
+    private fun writeTitleKeys(file: File) {
+        SQLiteDatabase.openDatabase(
+            file.absolutePath,
+            null,
+            SQLiteDatabase.OPEN_READWRITE or SQLiteDatabase.NO_LOCALIZED_COLLATORS,
+        ).use { database ->
+            // A rollback journal leaves nothing behind once closed, unlike compatibility WAL.
+            database.disableWriteAheadLogging()
+            database.beginTransaction()
+            try {
+                database.execSQL("DROP TABLE IF EXISTS $TITLE_KEY_TABLE")
+                database.execSQL(
+                    "CREATE TABLE $TITLE_KEY_TABLE (id TEXT PRIMARY KEY NOT NULL, title_key TEXT NOT NULL) WITHOUT ROWID",
+                )
+                database.compileStatement("INSERT INTO $TITLE_KEY_TABLE(id, title_key) VALUES (?, ?)").use { insert ->
+                    database.rawQuery("SELECT id, title_normalized FROM recipes ORDER BY id", null).use { cursor ->
+                        while (cursor.moveToNext()) {
+                            insert.bindString(1, cursor.getString(0))
+                            insert.bindString(2, cursor.getString(1).titleSearchKey())
+                            insert.executeInsert()
+                        }
+                    }
+                }
+                database.execSQL(
+                    "INSERT OR REPLACE INTO catalog_meta(key, value) VALUES (?, ?)",
+                    arrayOf(META_TITLE_KEY_VERSION, TITLE_SEARCH_KEY_VERSION),
+                )
+                database.setTransactionSuccessful()
+            } finally {
+                database.endTransaction()
+            }
+        }
+    }
+
+    private fun validateTitleKeys(file: File) {
+        SQLiteDatabase.openDatabase(
+            file.absolutePath,
+            null,
+            SQLiteDatabase.OPEN_READONLY or SQLiteDatabase.NO_LOCALIZED_COLLATORS,
+        ).use { database ->
+            check(database.metaValue(META_TITLE_KEY_VERSION) == TITLE_SEARCH_KEY_VERSION) { "Stale title keys" }
+            val keyCount = database.rawQuery("SELECT COUNT(*) FROM $TITLE_KEY_TABLE", null).singleInt()
+            val recipeCount = database.rawQuery("SELECT COUNT(*) FROM recipes", null).singleInt()
+            check(keyCount == recipeCount) { "Incomplete title keys" }
+        }
+    }
+
+    private fun deleteJournalFiles(database: File) {
+        listOf("-journal", "-wal", "-shm").forEach { suffix ->
+            runCatching { Files.deleteIfExists(File(database.path + suffix).toPath()) }
+        }
+    }
+
     private fun packageInstallStamp(): String {
         val packageInfo = appContext.packageManager.getPackageInfo(appContext.packageName, 0)
         return "${PackageInfoCompat.getLongVersionCode(packageInfo)}:${packageInfo.lastUpdateTime}"
@@ -381,6 +445,7 @@ class BundledRecipeCatalog(
         private const val META_SOURCE_COUNTS = "source_counts"
         private const val META_FACET_OPTIONS = "facet_options_json"
         private const val META_INGREDIENT_TEXT_INDEX = "ingredient_text_index"
+        private const val META_TITLE_KEY_VERSION = "title_key_version"
         private const val JSON_COMPRESSION_ZLIB = "zlib"
         private const val INGREDIENT_TEXT_INDEX_VERSION =
             "recipe_ingredient_texts-title-info-instr-v1"
@@ -397,9 +462,15 @@ class BundledRecipeCatalog(
 internal fun installedCatalogFile(noBackupFilesDirectory: File): File =
     File(noBackupFilesDirectory, BundledRecipeCatalog.INSTALLED_DATABASE_NAME)
 
+/** Built on the device at install time from title_normalized; see [titleSearchKey]. */
+internal const val TITLE_KEY_TABLE = "recipe_title_keys"
+
 internal data class CatalogSql(
     val predicates: List<String>,
     val arguments: List<String>,
+    /** Leading ORDER BY terms (each ending in ", ") that put stronger title matches first. */
+    val rankSql: String = "",
+    val rankArguments: List<String> = emptyList(),
 ) {
     val whereSql: String
         get() = predicates.takeIf(List<String>::isNotEmpty)
@@ -437,13 +508,19 @@ internal object CatalogSqlBuilder {
         }
         if (criteria.quickOnly) predicates += "r.quick_recipe = 1"
         addInPredicate(predicates, arguments, "r.source_key", criteria.sourceKeys)
-        criteria.query.normalizedCatalogToken()
-            .split(' ')
-            .filter(String::isNotBlank)
-            .forEach { term ->
-                predicates += "instr(r.search_text, ?) > 0"
-                arguments += term
+        val titleQuery = TitleQuery(criteria.query, criteria.wholeWords)
+        var rankSql = ""
+        val rankArguments = mutableListOf<String>()
+        if (!titleQuery.isEmpty()) {
+            // Uncorrelated IN subqueries run once per statement over the short key table.
+            val searched = if (titleQuery.wholeWords) "' ' || title.title_key || ' '" else "title.title_key"
+            predicates += titleKeySubquery(titleQuery.terms.size, searched)
+            arguments += titleQuery.terms.map { if (titleQuery.wholeWords) " $it " else it }
+            if (!titleQuery.wholeWords) {
+                rankSql = "(${titleKeySubquery(titleQuery.terms.size, "' ' || title.title_key")}) DESC, "
+                rankArguments += titleQuery.terms.map { " $it" }
             }
+        }
         addFacetPredicate(predicates, arguments, FACET_DIET, criteria.dietLabels)
         addFacetPredicate(predicates, arguments, FACET_MEAL, criteria.mealTypeLabels)
         addFacetPredicate(predicates, arguments, FACET_OCCASION, criteria.occasionLabels)
@@ -457,8 +534,15 @@ internal object CatalogSqlBuilder {
             expandIngredientAliases = true,
         )
         addPreferencePredicates(predicates, arguments, preferences)
-        return CatalogSql(predicates, arguments)
+        return CatalogSql(predicates, arguments, rankSql, rankArguments)
     }
+
+    private fun titleKeySubquery(termCount: Int, searched: String): String = """
+        r.id IN (
+            SELECT title.id FROM $TITLE_KEY_TABLE title
+            WHERE ${List(termCount) { "instr($searched, ?) > 0" }.joinToString(" AND ")}
+        )
+    """.trimIndent()
 
     fun forPlanner(
         filters: RecipeFilters,

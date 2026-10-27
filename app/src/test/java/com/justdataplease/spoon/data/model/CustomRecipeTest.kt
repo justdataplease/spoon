@@ -46,6 +46,20 @@ class CustomRecipeTest {
     }
 
     @Test
+    fun synced_photo_url_shows_when_no_local_copy_exists_and_the_local_copy_wins() {
+        val url = "https://firebasestorage.googleapis.com/v0/b/spoon/o/spoon%2Fu%2FcustomRecipes%2Fr%2Fa.jpg?alt=media&token=t"
+        val synced = validCustomRecipe(photoDataUri = "").copy(photoUrl = url)
+
+        assertEquals(url, synced.toRecipe().imageUrl)
+        assertEquals(listOf(url), synced.toRecipe().imageUrls)
+        assertEquals("data:image/jpeg;base64,YWJj", synced.copy(photoDataUri = "data:image/jpeg;base64,YWJj").toRecipe().imageUrl)
+        synced.requireValid()
+        assertThrows(IllegalArgumentException::class.java) {
+            synced.copy(photoUrl = "https://example.com/photo.jpg").requireValid()
+        }
+    }
+
+    @Test
     fun custom_validation_rejects_non_JPEG_or_malformed_photo_data() {
         assertThrows(IllegalArgumentException::class.java) {
             validCustomRecipe(photoDataUri = "data:image/png;base64,YWJj").requireValid()

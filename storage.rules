@@ -1,0 +1,24 @@
+rules_version = '2';
+
+// Personal recipe photos only. The app uploads one compressed JPEG per photo version to
+// spoon/{uid}/customRecipes/{recipeId}/{32-hex content hash}.jpg and stores its download URL
+// in the matching Firestore recipe (see validCustomRecipePhotoUrl in firestore.rules).
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /spoon/{uid}/customRecipes/{recipeId}/{photo} {
+      allow read, delete: if request.auth != null && request.auth.uid == uid;
+      allow create, update: if request.auth != null &&
+        request.auth.uid == uid &&
+        recipeId.matches('custom_[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}') &&
+        photo.matches('[0-9a-f]{32}[.]jpg') &&
+        request.resource.contentType == 'image/jpeg' &&
+        // Legacy inline photos were capped at 700,000 base64 characters (525,000 bytes).
+        request.resource.size > 0 &&
+        request.resource.size <= 525000;
+    }
+
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

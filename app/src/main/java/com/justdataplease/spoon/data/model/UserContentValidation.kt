@@ -50,6 +50,9 @@ internal fun CustomRecipe.requireValid(): CustomRecipe {
                     photoDataUri.substring(JPEG_DATA_URI_PREFIX.length).isValidBase64Payload()
                 ),
     ) { "The custom photo must be a bounded JPEG data URI" }
+    require(photoUrl.isEmpty() || photoUrl.isCloudStoragePhotoUrl()) {
+        "A synced custom photo must be a Cloud Storage download URL"
+    }
     requireValidEpochMillis(createdAtEpochMillis)
     requireValidEpochMillis(updatedAtEpochMillis)
     require(updatedAtEpochMillis >= createdAtEpochMillis)
@@ -83,6 +86,14 @@ private fun String.isValidBase64Payload(): Boolean =
             character == '/' ||
             character == '='
     }
+
+internal const val MAX_CUSTOM_RECIPE_PHOTO_URL_LENGTH = 2_048
+private const val CLOUD_STORAGE_DOWNLOAD_PREFIX = "https://firebasestorage.googleapis.com/v0/b/"
+
+internal fun String.isCloudStoragePhotoUrl(): Boolean =
+    length <= MAX_CUSTOM_RECIPE_PHOTO_URL_LENGTH &&
+        startsWith(CLOUD_STORAGE_DOWNLOAD_PREFIX) &&
+        none(Char::isWhitespace)
 
 private fun requireValidEpochMillis(value: Long) {
     require(value in 1..253_402_300_799_999L)

@@ -390,10 +390,11 @@ def _finite_number(value: Any, *, field: str) -> float:
 
 
 def _search_chunks(record: Mapping[str, Any]) -> Iterable[str]:
-    # This is the canonical ExploreRecipeFilter search corpus.  Keep it aligned
-    # with the Android predicate so local SQL and in-memory custom recipes return
-    # the same results.  ingredientLabels provides the curated ingredient search
-    # surface; raw ingredient info and SEO copies are deliberately not repeated.
+    # Broad search corpus kept for catalog audits.  The Android Explore search now
+    # reads only titles, through transliterated keys the app derives on the device
+    # from title_normalized (recipe_title_keys, see TitleSearchKey.kt).
+    # ingredientLabels provides the curated ingredient surface; raw ingredient info
+    # and SEO copies are deliberately not repeated.
     for field in (
         "title",
         "description",

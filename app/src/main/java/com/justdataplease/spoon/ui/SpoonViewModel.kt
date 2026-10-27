@@ -20,6 +20,8 @@ import com.justdataplease.spoon.data.model.Recipe
 import com.justdataplease.spoon.data.model.RecipeFilters
 import com.justdataplease.spoon.data.model.RecipeNote
 import com.justdataplease.spoon.data.model.ShoppingListItem
+import com.justdataplease.spoon.data.local.RecipeList
+import com.justdataplease.spoon.data.local.RecipeListStore
 import com.justdataplease.spoon.data.preferences.MealPreferenceSettings
 import com.justdataplease.spoon.domain.MealPlanSelection
 import com.justdataplease.spoon.domain.MealPlanner
@@ -53,6 +55,7 @@ import com.justdataplease.spoon.ui.explore.ExploreSourceOptionUi
 import com.justdataplease.spoon.ui.explore.exploreFilterInputs
 import com.justdataplease.spoon.ui.custom.CustomRecipeEditorState
 import com.justdataplease.spoon.ui.custom.CustomRecipeEditorStore
+import com.justdataplease.spoon.ui.custom.RecipePhotoPreparation
 import com.justdataplease.spoon.ui.custom.deleteDraftPhoto
 import com.justdataplease.spoon.ui.custom.draftPhotoDataUri
 import com.justdataplease.spoon.ui.custom.toDomainCustomRecipe
@@ -66,6 +69,8 @@ import java.text.Normalizer
 import java.time.LocalDate
 import java.time.DayOfWeek
 import com.justdataplease.spoon.ui.favorites.FavoritesSearchUiState
+import com.justdataplease.spoon.ui.favorites.RecipeListPickerUi
+import com.justdataplease.spoon.ui.favorites.RecipeListUi
 import com.justdataplease.spoon.ui.week.MealMenuUiState
 import java.time.YearMonth
 import java.util.Locale
@@ -79,8 +84,11 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -160,11 +168,22 @@ private data class ExploreSelection(
     val resultGeneration: Long,
 )
 
+private data class RecipeListPickerTarget(
+    val recipeId: String,
+    val recipeTitle: String,
+)
+
+private data class FavoritesListSelection(
+    val lists: List<RecipeList>,
+    val selectedListId: String?,
+)
+
 @HiltViewModel
 class SpoonViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     @ApplicationContext private val applicationContext: Context,
     private val mealPlanner: MealPlanner,
+    private val recipeListStore: RecipeListStore,
 ) : ViewModel() {
     private val computationScope = CoroutineScope(viewModelScope.coroutineContext + Dispatchers.Default)
     private val exploreSearchState = ExploreSearchState(computationScope)
@@ -174,6 +193,11 @@ class SpoonViewModel @Inject constructor(
     val exploreQueryValue: TextFieldValue get() = exploreSearchState.editorValue
     val favoritesQueryValue: TextFieldValue get() = favoritesSearchState.editorValue
     private val favoritesFilters = MutableStateFlow(ExploreFiltersUi())
+    private val searchWholeWords = MutableStateFlow(false)
+    /** Shared by Explore and the collection search, like a regex `\bterm\b` per query word. */
+    val searchWholeWordsEnabled: StateFlow<Boolean> = searchWholeWords.asStateFlow()
+    private val selectedFavoritesListId = MutableStateFlow<String?>(null)
+    private val recipeListPickerTarget = MutableStateFlow<RecipeListPickerTarget?>(null)
     private val customRecipeEditorStore = CustomRecipeEditorStore(savedStateHandle)
     private var activeDraftOwnerKey = "guest"
     private val recipeLinkState = savedStateHandle
@@ -273,20 +297,53 @@ class SpoonViewModel @Inject constructor(
         PlannerSnapshot(catalog, plans, favorites, backendState, userContent)
     }
 
+    private val favoritesListSelection = combine(
+        recipeListStore.lists,
+        selectedFavoritesListId,
+        ::FavoritesListSelection,
+    )
+
     val favoritesSearchUiState = combine(
         plannerSnapshot,
-        exploreFilterInputs(favoritesSearchState.filterQuery, favoritesFilters),
+        exploreFilterInputs(favoritesSearchState.filterQuery, favoritesFilters, searchWholeWords),
         mealPreferenceSettings,
         mealPlanner.excludedWeeklyRecipeIds,
-    ) { snapshot, input, preferences, excludedWeeklyRecipeIds ->
-        val favorites = snapshot.favoriteIds.mapNotNull(snapshot.catalog.recipesById::get)
+        favoritesListSelection,
+    ) { snapshot, input, preferences, excludedWeeklyRecipeIds, listSelection ->
+        val selectedList = listSelection.lists.firstOrNull { it.id == listSelection.selectedListId }
+        val favorites = snapshot.favoriteIds
+            .filter { selectedList == null || it in selectedList.recipeIds }
+            .mapNotNull(snapshot.catalog.recipesById::get)
         FavoritesSearchUiState(
             filters = input.filters,
-            favorites = ExploreRecipeFilter.filter(favorites, input.filters.toDomain(input.query), preferences)
+            favorites = ExploreRecipeFilter.filter(favorites, input.filters.toDomain(input.query, input.wholeWords), preferences)
                 .map { it.toFavoriteUi().copy(includedInWeeklyPlan = it.id !in excludedWeeklyRecipeIds) },
             totalCount = snapshot.favoriteIds.size,
+            lists = listSelection.lists.map { it.toUi(snapshot.favoriteIds) },
+            selectedListId = selectedList?.id,
         )
     }.stateIn(computationScope, SharingStarted.WhileSubscribed(5_000), FavoritesSearchUiState())
+
+    val recipeListPicker = combine(
+        recipeListPickerTarget,
+        recipeListStore.lists,
+        mealPlanner.favoriteRecipeIds,
+    ) { target, lists, favoriteIds ->
+        target?.let {
+            val isFavorite = target.recipeId in favoriteIds
+            RecipeListPickerUi(
+                recipeId = target.recipeId,
+                recipeTitle = target.recipeTitle,
+                isFavorite = isFavorite,
+                lists = lists.map { it.toUi(favoriteIds) },
+                listIdsWithRecipe = if (isFavorite) {
+                    lists.filter { target.recipeId in it.recipeIds }.mapTo(mutableSetOf(), RecipeList::id)
+                } else {
+                    emptySet()
+                },
+            )
+        }
+    }.stateIn(computationScope, SharingStarted.WhileSubscribed(5_000), null)
 
     val mealMenu = combine(
         mealMenuDate, mealMenuLoading, mealMenuError, plannerSnapshot, mealPreferenceSettings,
@@ -358,6 +415,7 @@ class SpoonViewModel @Inject constructor(
     private val exploreFilterInput = exploreFilterInputs(
         exploreSearchState.filterQuery,
         exploreFilters,
+        searchWholeWords,
     )
 
     private val customRecipeRevisions = mealPlanner.customRecipes
@@ -710,7 +768,7 @@ class SpoonViewModel @Inject constructor(
                 exploreFacetLoadJob = null
                 exploreGeneration++
                 exploreResultGeneration.value = exploreGeneration
-                activeExploreCriteria = input.filters.toDomain(input.query)
+                activeExploreCriteria = input.filters.toDomain(input.query, input.wholeWords)
                 exploreNextOffset = 0
                 exploreRecipeRows.value = emptyList()
                 exploreTotalCount.value = 0
@@ -852,9 +910,73 @@ class SpoonViewModel @Inject constructor(
         }
     }
 
-    fun toggleFavorite(recipeId: String) {
+    /** Every save heart opens the list picker; «Αγαπημένα» always holds the saved recipe. */
+    fun openRecipeListPicker(recipeId: String) {
         if (recipeId.isBlank()) return
-        launchReporting { mealPlanner.toggleFavorite(recipeId) }
+        recipeListPickerTarget.value = RecipeListPickerTarget(recipeId, recipeTitle(recipeId))
+    }
+
+    fun dismissRecipeListPicker() {
+        recipeListPickerTarget.value = null
+    }
+
+    fun saveRecipeToLists(recipeId: String, listIds: Set<String>) {
+        if (recipeId.isBlank()) return
+        recipeListPickerTarget.value = null
+        viewModelScope.launch {
+            runCatching {
+                val wasFavorite = recipeId in mealPlanner.favoriteRecipeIds.first()
+                if (!wasFavorite) check(mealPlanner.toggleFavorite(recipeId))
+                recipeListStore.setRecipeLists(recipeId, listIds)
+                wasFavorite
+            }.onSuccess { wasFavorite ->
+                val names = recipeListStore.lists.value.filter { it.id in listIds }.map(RecipeList::name)
+                message.value = savedToListsMessage(wasFavorite, names)
+            }.onFailure { message.value = it.userMessage() }
+        }
+    }
+
+    fun removeRecipeFromCollection(recipeId: String) {
+        if (recipeId.isBlank()) return
+        recipeListPickerTarget.value = null
+        viewModelScope.launch {
+            runCatching {
+                if (recipeId in mealPlanner.favoriteRecipeIds.first()) check(!mealPlanner.toggleFavorite(recipeId))
+                recipeListStore.removeRecipe(recipeId)
+            }.onSuccess { message.value = "Η συνταγή αφαιρέθηκε από τη συλλογή." }
+                .onFailure { message.value = it.userMessage() }
+        }
+    }
+
+    /** Returns the new list's id, or null when the name is blank, reserved or already used. */
+    fun createRecipeList(name: String): String? = recipeListStore.create(name)?.id
+
+    fun renameRecipeList(listId: String, name: String) {
+        if (recipeListStore.rename(listId, name)) message.value = "Η λίστα μετονομάστηκε."
+    }
+
+    fun deleteRecipeList(listId: String) {
+        recipeListStore.delete(listId)
+        if (selectedFavoritesListId.value == listId) selectedFavoritesListId.value = null
+        message.value = "Η λίστα διαγράφηκε. Οι συνταγές της μένουν στα Αγαπημένα."
+    }
+
+    /** Null shows «Αγαπημένα», every saved recipe. */
+    fun selectFavoritesList(listId: String?) {
+        selectedFavoritesListId.value = listId
+    }
+
+    fun setSearchWholeWords(enabled: Boolean) {
+        searchWholeWords.value = enabled
+    }
+
+    private fun recipeTitle(recipeId: String): String {
+        val state = uiState.value
+        return state.selectedRecipe?.takeIf { it.recipeId == recipeId }?.title
+            ?: catalogProjection.value.recipesById[recipeId]?.title
+            ?: state.exploreRecipes.firstOrNull { it.recipeId == recipeId }?.title
+            ?: state.weekPlans.firstOrNull { it.recipeId == recipeId }?.recipeTitle
+            ?: ""
     }
 
     fun setFavoriteIncludedInWeeklyPlan(recipeId: String, included: Boolean) {
@@ -935,16 +1057,38 @@ class SpoonViewModel @Inject constructor(
             next.recipeId != current.recipeId ||
             next.dataOwnerKey != current.dataOwnerKey ||
             next.dataOwnerKey != activeDraftOwnerKey
-        ) {
-            if (current.selectedPhotoPath != next.selectedPhotoPath) {
-                applicationContext.deleteDraftPhoto(next.selectedPhotoPath)
-            }
+        ) return
+        // Form edits carry a whole copy of the editor; only the photo calls below change the photo.
+        customRecipeEditorStore.set(next.withPhotoOf(current))
+    }
+
+    fun startCustomRecipePhoto() {
+        updateCustomRecipePhoto { it.copy(photoPreparation = RecipePhotoPreparation.PROCESSING, formMessage = null) }
+    }
+
+    fun failCustomRecipePhoto(message: String) {
+        updateCustomRecipePhoto { it.copy(photoPreparation = RecipePhotoPreparation.FAILED, formMessage = message) }
+    }
+
+    fun cancelCustomRecipePhoto() {
+        updateCustomRecipePhoto { it.copy(photoPreparation = RecipePhotoPreparation.READY, formMessage = null) }
+    }
+
+    /** [path] is a compressed draft file, or blank to remove the photo. */
+    fun setCustomRecipePhoto(path: String) {
+        val previousPath = customRecipeEditor.value.selectedPhotoPath
+        if (!updateCustomRecipePhoto { it.withDraftPhoto(path) }) {
+            applicationContext.deleteDraftPhoto(path)
             return
         }
-        customRecipeEditorStore.set(next)
-        if (current.selectedPhotoPath != next.selectedPhotoPath) {
-            applicationContext.deleteDraftPhoto(current.selectedPhotoPath)
-        }
+        if (previousPath != path) applicationContext.deleteDraftPhoto(previousPath)
+    }
+
+    private fun updateCustomRecipePhoto(transform: (CustomRecipeEditorState) -> CustomRecipeEditorState): Boolean {
+        val current = customRecipeEditor.value
+        if (savingCustomRecipe.value || !current.isOpen || current.dataOwnerKey != activeDraftOwnerKey) return false
+        customRecipeEditorStore.set(transform(current))
+        return true
     }
 
     fun dismissCustomRecipeEditor() {
@@ -969,17 +1113,20 @@ class SpoonViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 val saved = withContext(Dispatchers.IO) {
-                    val photoDataUri = when {
-                        editor.selectedPhotoPath.isNotBlank() ->
+                    val draft = when {
+                        editor.selectedPhotoPath.isNotBlank() -> editor.completedDraft(
                             applicationContext.draftPhotoDataUri(editor.selectedPhotoPath)
-                                ?: throw DraftPhotoUnavailableException()
-                        editor.retainExistingPhoto ->
-                            mealPlanner.getRecipeDetails(editor.recipeId)?.imageUrl.orEmpty()
-                        else -> ""
+                                ?: throw DraftPhotoUnavailableException(),
+                        ).toDomainCustomRecipe()
+                        editor.retainExistingPhoto -> {
+                            // A kept photo may be the local JPEG, its Cloud Storage URL, or both.
+                            val existing = mealPlanner.customRecipes.first().firstOrNull { it.id == editor.recipeId }
+                            editor.completedDraft(existing?.photoDataUri.orEmpty()).toDomainCustomRecipe()
+                                .copy(photoUrl = existing?.photoUrl.orEmpty())
+                        }
+                        else -> editor.completedDraft(photoDataUri = "").toDomainCustomRecipe()
                     }
-                    mealPlanner.saveCustomRecipe(
-                        editor.completedDraft(photoDataUri).toDomainCustomRecipe(),
-                    )
+                    mealPlanner.saveCustomRecipe(draft)
                 }
                 message.value = "Η δική σου συνταγή αποθηκεύτηκε."
                 clearCustomRecipeEditor()
@@ -1064,6 +1211,10 @@ class SpoonViewModel @Inject constructor(
         viewModelScope.launch {
             mealPlanner.accountState.collect { account ->
                 activeDraftOwnerKey = account.ownerUidOrNull()?.let { "account:$it" } ?: "guest"
+                recipeListStore.selectOwner(activeDraftOwnerKey)
+                if (selectedFavoritesListId.value !in recipeListStore.lists.value.map(RecipeList::id)) {
+                    selectedFavoritesListId.value = null
+                }
                 // Saved-state restoration must also reject a draft from a different owner.
                 if (customRecipeEditor.value.isOpen && customRecipeEditor.value.dataOwnerKey != activeDraftOwnerKey) {
                     clearCustomRecipeEditor()
@@ -1394,6 +1545,20 @@ private fun Recipe.withCatalogClassification(catalogRecipe: Recipe?): Recipe {
     )
 }
 
+private fun RecipeList.toUi(favoriteIds: Set<String>) = RecipeListUi(
+    id = id,
+    name = name,
+    // A list only groups saved recipes; one removed elsewhere stops counting at once.
+    recipeCount = recipeIds.count(favoriteIds::contains),
+)
+
+internal fun savedToListsMessage(wasFavorite: Boolean, listNames: List<String>): String = when {
+    wasFavorite -> "Οι λίστες της συνταγής ενημερώθηκαν."
+    listNames.isEmpty() -> "Αποθηκεύτηκε στα Αγαπημένα."
+    listNames.size == 1 -> "Αποθηκεύτηκε στα Αγαπημένα και στη λίστα «${listNames.single()}»."
+    else -> "Αποθηκεύτηκε στα Αγαπημένα και σε ${listNames.size} λίστες."
+}
+
 private fun Recipe.toFavoriteUi() = FavoriteUi(
     recipeId = id,
     title = title,
@@ -1548,8 +1713,9 @@ private fun String.facetDisplayQuality(): Int =
 
 private val FacetWhitespace = Regex("\\s+")
 
-internal fun ExploreFiltersUi.toDomain(query: String) = ExploreCriteria(
+internal fun ExploreFiltersUi.toDomain(query: String, wholeWords: Boolean = false) = ExploreCriteria(
     query = query,
+    wholeWords = wholeWords,
     category = categoryKey.toDomainCategoryKey(),
     easeLevel = ease.toDomainEaseKey(),
     minRating = minRating10.coerceIn(0, 9).toDouble(),

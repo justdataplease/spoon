@@ -211,7 +211,7 @@ private fun RichRecipeHero(
                 }
                 HeroCircleButton(
                     icon = if (recipe.isFavorite) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
-                    description = if (recipe.isFavorite) "Αφαίρεση από τη συλλογή" else "Προσθήκη στη συλλογή",
+                    description = if (recipe.isFavorite) "Λίστες συνταγής" else "Αποθήκευση στη συλλογή",
                     onClick = onToggleFavorite,
                     tint = if (recipe.isFavorite) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
                 )

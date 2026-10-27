@@ -57,6 +57,21 @@ data class CustomRecipeEditorState(
         RecipePhotoPreparation.READY -> completedDraft(photoDataUri = "").validationMessage()
     }
 
+    /** A newly chosen (or removed, when blank) photo replaces any photo the recipe had. */
+    fun withDraftPhoto(path: String): CustomRecipeEditorState = copy(
+        selectedPhotoPath = path,
+        photoPreparation = RecipePhotoPreparation.READY,
+        retainExistingPhoto = false,
+        formMessage = null,
+    )
+
+    /** Keeps this state's photo fields; form edits must not overwrite a photo picked meanwhile. */
+    fun withPhotoOf(other: CustomRecipeEditorState): CustomRecipeEditorState = copy(
+        selectedPhotoPath = other.selectedPhotoPath,
+        photoPreparation = other.photoPreparation,
+        retainExistingPhoto = other.retainExistingPhoto,
+    )
+
     fun completedDraft(photoDataUri: String): CustomRecipeDraftUi = CustomRecipeDraftUi(
         recipeId = recipeId,
         title = title.trim(),

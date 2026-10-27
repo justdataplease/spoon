@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -52,10 +53,14 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableLongState
+import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -99,6 +104,29 @@ internal fun shouldLoadNextExplorePage(
         totalItemCount > 0 &&
         lastVisibleItemIndex >= totalItemCount - 1 - EXPLORE_PREFETCH_DISTANCE
 
+/**
+ * Hoisted above the destination switch: opening a recipe removes Explore from composition, and
+ * coming back must restore the same scroll position instead of treating the results as new.
+ */
+@Stable
+class ExploreListPosition internal constructor(
+    val listState: LazyListState,
+    private val shownGeneration: MutableLongState,
+) {
+    internal var shownResultGeneration: Long
+        get() = shownGeneration.longValue
+        set(value) {
+            shownGeneration.longValue = value
+        }
+}
+
+@Composable
+fun rememberExploreListPosition(): ExploreListPosition {
+    val listState = rememberLazyListState()
+    val shownGeneration = rememberSaveable { mutableLongStateOf(-1L) }
+    return remember(listState, shownGeneration) { ExploreListPosition(listState, shownGeneration) }
+}
+
 @Composable
 fun ExploreScreen(
     query: TextFieldValue,
@@ -116,12 +144,18 @@ fun ExploreScreen(
     onLoadMore: () -> Unit,
     onCreateRecipe: () -> Unit,
     modifier: Modifier = Modifier,
+    wholeWords: Boolean = false,
+    onWholeWordsChange: (Boolean) -> Unit = {},
+    position: ExploreListPosition = rememberExploreListPosition(),
 ) {
     var showFilters by remember { mutableStateOf(false) }
-    val listState = rememberLazyListState()
+    val listState = position.listState
     var searchFocused by remember { mutableStateOf(false) }
 
     LaunchedEffect(resultGeneration) {
+        // Returning from a recipe re-enters composition with the same results: keep the spot.
+        if (position.shownResultGeneration == resultGeneration) return@LaunchedEffect
+        position.shownResultGeneration = resultGeneration
         // Keep the editor where the keyboard brought it while results refresh.
         if (!searchFocused && (listState.firstVisibleItemIndex != 0 || listState.firstVisibleItemScrollOffset != 0)) {
             listState.scrollToItem(0)
@@ -160,6 +194,8 @@ fun ExploreScreen(
                 onQueryChange = onQueryChange,
                 onShowFilters = { showFilters = true },
                 onFocusChange = { searchFocused = it },
+                wholeWords = wholeWords,
+                onWholeWordsChange = onWholeWordsChange,
             )
         }
         if (filters.activeCount > 0) {
@@ -176,7 +212,7 @@ fun ExploreScreen(
             }
         } else if (recipes.isEmpty()) {
             item {
-                EmptyExploreState(onClear = {
+                EmptyExploreState(wholeWords = wholeWords, onClear = {
                     onQueryChange(TextFieldValue())
                     onApplyFilters(ExploreFiltersUi())
                 })
@@ -292,7 +328,7 @@ private fun ExploreRecipeCard(
                     IconButton(onClick = onToggleFavorite, modifier = Modifier.size(38.dp)) {
                         Icon(
                             if (recipe.isFavorite) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
-                            contentDescription = if (recipe.isFavorite) "Αφαίρεση από τη συλλογή" else "Προσθήκη στη συλλογή",
+                            contentDescription = if (recipe.isFavorite) "Λίστες συνταγής" else "Αποθήκευση στη συλλογή",
                             tint = if (recipe.isFavorite) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
@@ -352,7 +388,7 @@ internal fun ActiveFilterSummary(filters: ExploreFiltersUi, onClear: () -> Unit)
 }
 
 @Composable
-private fun EmptyExploreState(onClear: () -> Unit) {
+private fun EmptyExploreState(wholeWords: Boolean, onClear: () -> Unit) {
     Column(
         modifier = Modifier.fillMaxWidth().padding(vertical = 54.dp, horizontal = 24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -363,7 +399,11 @@ private fun EmptyExploreState(onClear: () -> Unit) {
         }
         Text("Δεν βρέθηκε συνταγή", style = MaterialTheme.typography.headlineMedium)
         Text(
-            "Δοκίμασε διαφορετική αναζήτηση ή λιγότερα φίλτρα.",
+            if (wholeWords) {
+                "Δοκίμασε χωρίς «Ολόκληρες λέξεις», διαφορετική αναζήτηση ή λιγότερα φίλτρα."
+            } else {
+                "Δοκίμασε διαφορετική αναζήτηση ή λιγότερα φίλτρα."
+            },
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -661,7 +701,10 @@ private fun FilterTitle(text: String) {
 private fun Set<String>.toggled(value: String): Set<String> =
     if (value in this) this - value else this + value
 
-/** Shared search field, filter button, and active count for Explore and Favorites. */
+/**
+ * Shared title search, whole-word switch, filter button, and active count for Explore and
+ * Favorites. Titles match in Greek, Greeklish or Latin script, ignoring accents.
+ */
 @Composable
 internal fun RecipeSearchControls(
     query: TextFieldValue,
@@ -670,6 +713,30 @@ internal fun RecipeSearchControls(
     onShowFilters: () -> Unit,
     filterDescription: String = "Φίλτρα εξερεύνησης",
     onFocusChange: (Boolean) -> Unit = {},
+    wholeWords: Boolean = false,
+    onWholeWordsChange: (Boolean) -> Unit = {},
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        SearchFieldRow(query, filters, onQueryChange, onShowFilters, filterDescription, onFocusChange)
+        FilterChip(
+            selected = wholeWords,
+            onClick = { onWholeWordsChange(!wholeWords) },
+            label = { Text("Ολόκληρες λέξεις") },
+            leadingIcon = if (wholeWords) {
+                { Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(17.dp)) }
+            } else null,
+        )
+    }
+}
+
+@Composable
+private fun SearchFieldRow(
+    query: TextFieldValue,
+    filters: ExploreFiltersUi,
+    onQueryChange: (TextFieldValue) -> Unit,
+    onShowFilters: () -> Unit,
+    filterDescription: String,
+    onFocusChange: (Boolean) -> Unit,
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -690,8 +757,8 @@ internal fun RecipeSearchControls(
                     }
                 }
             } else null,
-            placeholder = { Text("Αναζήτηση συνταγής ή υλικού") },
-            label = { Text("Αναζήτηση") },
+            placeholder = { Text("π.χ. ράμεν ή ramen") },
+            label = { Text("Αναζήτηση στον τίτλο") },
         )
         Surface(
             onClick = onShowFilters,

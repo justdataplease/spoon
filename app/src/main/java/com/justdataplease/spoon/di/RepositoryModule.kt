@@ -3,6 +3,8 @@ package com.justdataplease.spoon.di
 import android.content.Context
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.storage.FirebaseStorage
+import com.justdataplease.spoon.data.remote.FirebaseCustomRecipePhotoStorage
 import com.justdataplease.spoon.BuildConfig
 import com.justdataplease.spoon.data.local.BundledRecipeCatalog
 import com.justdataplease.spoon.data.local.LocalSpoonRepository
@@ -44,6 +46,9 @@ object RepositoryModule {
         val firestore = firebaseApp?.let { runCatching {
             configurePersistentPersonalCache(FirebaseFirestore.getInstance(it))
         }.getOrNull() }
+        val photoStorage = firebaseApp?.let { runCatching {
+            FirebaseCustomRecipePhotoStorage(FirebaseStorage.getInstance(it))
+        }.getOrNull() }
         val legacy = localRepository(context, json, recipeCatalog, preferenceStore)
         return FirestoreSpoonRepository(
             auth = firebaseAuth,
@@ -71,6 +76,7 @@ object RepositoryModule {
                     cookedHistory = legacy.cookedHistory.first(),
                 )
             },
+            photoStorage = photoStorage,
         )
     }
 

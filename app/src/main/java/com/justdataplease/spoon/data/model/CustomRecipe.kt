@@ -1,6 +1,7 @@
 package com.justdataplease.spoon.data.model
 
 import com.google.firebase.firestore.DocumentId
+import com.google.firebase.firestore.Exclude
 import com.google.firebase.firestore.IgnoreExtraProperties
 import java.util.UUID
 import kotlinx.serialization.Serializable
@@ -11,8 +12,9 @@ const val MAX_CUSTOM_RECIPE_PHOTO_DATA_URI_LENGTH = 700_000
 /**
  * A private recipe authored by the current user.
  *
- * [photoDataUri] is an optional compressed JPEG data URI. Keeping the bounded image in the
- * owner-scoped document makes it available on another device without a separate Storage setup.
+ * [photoDataUri] is the compressed JPEG kept on this device, so a photo works offline and
+ * without an account. When a signed-in recipe syncs, the JPEG moves to Cloud Storage and the
+ * synced document carries only [photoUrl]; legacy documents may still hold the data URI.
  */
 @Serializable
 @IgnoreExtraProperties
@@ -30,9 +32,15 @@ data class CustomRecipe(
     val active: Boolean = true,
     val createdAtEpochMillis: Long = 0L,
     val updatedAtEpochMillis: Long = 0L,
+    /** HTTPS download URL of the photo in Cloud Storage, once a signed-in sync uploaded it. */
+    val photoUrl: String = "",
 ) {
+    /** The local copy wins, so a just-saved photo shows before (and without) any upload. */
+    @get:Exclude
+    val photoSource: String get() = photoDataUri.ifBlank { photoUrl }
+
     fun toRecipe(): Recipe {
-        val imageUrls = photoDataUri.takeIf(String::isNotBlank)?.let(::listOf).orEmpty()
+        val imageUrls = photoSource.takeIf(String::isNotBlank)?.let(::listOf).orEmpty()
         return Recipe(
             id = id,
             title = title,
@@ -43,7 +51,7 @@ data class CustomRecipe(
             totalMinutes = prepMinutes + cookMinutes,
             preparationCount = methodSections.size,
             language = "el",
-            imageUrl = photoDataUri,
+            imageUrl = photoSource,
             sourceName = "Προσωπική συνταγή",
             source = "personal",
             sourceKey = "personal",

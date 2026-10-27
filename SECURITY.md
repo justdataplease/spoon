@@ -30,6 +30,13 @@ different project.
 - Firestore denies unauthenticated access, isolates personal data by account,
   validates client writes, and blocks client changes to the recipe catalog.
   Raw imported payloads are inaccessible to mobile clients.
+- Personal recipe photos of signed-in users are uploaded to Cloud Storage under
+  `spoon/{uid}/customRecipes/{recipeId}/`. `storage.rules` lets only the owner
+  read or write there, accepts only JPEGs up to 525,000 bytes, and denies every
+  other path. The recipe document keeps only the download URL; the Firestore
+  rules require it to point at the owner's own recipe path. Until Storage, its
+  rules and the client key's `firebasestorage.googleapis.com` permission are in
+  place, the app keeps syncing the photo inline as before.
 - GitHub secret scanning and push protection are enabled. Workflow runs from
   external pull-request contributors require approval. The catalog workflow
   uses short-lived Google credentials restricted to this repository's immutable
@@ -43,7 +50,7 @@ request comes from an unmodified app.
 ## Costs and limits
 
 **Billing is enabled. These abuse protections are not a monetary spending cap.**
-Firestore operations, storage, and scheduled catalog imports can still incur
+Firestore operations, Cloud Storage photos, and scheduled catalog imports can still incur
 charges. Firestore's free daily allowance does not cap paid usage on a billed
 project. Budget alerts do not stop usage.
 

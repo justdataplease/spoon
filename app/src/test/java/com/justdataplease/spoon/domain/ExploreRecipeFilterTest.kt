@@ -28,15 +28,13 @@ class ExploreRecipeFilterTest {
     }
 
     @Test
-    fun `search ignores Greek case accents and final sigma in text and tags`() {
+    fun `search reads the title in any script ignoring case accents and final sigma`() {
         val recipe = recipe(
             id = "searchable",
-            title = "ΚΡΈΑΣ κατσαρόλας",
-            description = "Λεμονάτη σάλτσα",
-            tags = listOf("Σπιτική επιλογή"),
+            title = "ΚΡΈΑΣ κατσαρόλας με ramen",
         )
 
-        listOf("κρεασ", "ΛΕΜΟΝΑΤΗ", "σπιτικη").forEach { query ->
+        listOf("κρεασ", "kreas", "katsarolas", "ΡΑΜΕΝ").forEach { query ->
             assertEquals(
                 listOf(recipe),
                 ExploreRecipeFilter.filter(listOf(recipe), ExploreCriteria(query = query)),
@@ -45,24 +43,41 @@ class ExploreRecipeFilterTest {
     }
 
     @Test
-    fun `search includes every official facet`() {
+    fun `search ignores description tags and facets`() {
         val recipe = recipe(
             id = "facets",
+            title = "Σαλάτα",
+            description = "Λεμονάτη σάλτσα",
+            tags = listOf("Σπιτική επιλογή"),
             dietLabels = listOf("Χωρίς γλουτένη"),
             mealTypeLabels = listOf("Πρωινό"),
-            occasionLabels = listOf("Πάρτι"),
-            methodLabels = listOf("Στον φούρνο"),
             cuisineLabels = listOf("Μεξικάνικη"),
             ingredientLabels = listOf("Αβοκάντο"),
         )
 
-        listOf("γλουτενη", "πρωινο", "παρτι", "φουρνο", "μεξικανικη", "αβοκαντο")
+        listOf("λεμονατη", "σπιτικη", "γλουτενη", "πρωινο", "μεξικανικη", "αβοκαντο")
             .forEach { query ->
                 assertEquals(
-                    listOf(recipe),
+                    emptyList<Recipe>(),
                     ExploreRecipeFilter.filter(listOf(recipe), ExploreCriteria(query = query)),
                 )
             }
+    }
+
+    @Test
+    fun `whole words drop partial matches and word starts rank first`() {
+        val dried = recipe(id = "dried", title = "Αποξηραμένα φρούτα", rating = 9.0)
+        val ramen = recipe(id = "ramen", title = "Σούπα ράμεν", rating = 7.0)
+
+        assertEquals(
+            listOf("ramen", "dried"),
+            ExploreRecipeFilter.filter(listOf(dried, ramen), ExploreCriteria(query = "ραμεν")).map(Recipe::id),
+        )
+        assertEquals(
+            listOf("ramen"),
+            ExploreRecipeFilter.filter(listOf(dried, ramen), ExploreCriteria(query = "ramen", wholeWords = true))
+                .map(Recipe::id),
+        )
     }
 
     @Test

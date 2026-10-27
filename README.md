@@ -12,12 +12,15 @@ from that source when Android asks.
 
 - **Plan a week of meals.** Get suggestions for each day, replace a single dish or
   refresh the week, and lock meals you want to keep. Add sides and desserts for a full menu.
-- **Find something that fits.** Search in Greek and filter by category, preparation
-  time, effort, rating, diet, cuisine, ingredients, and more. Choose which publishers
-  appear in new suggestions, or plan using only your favorites.
-- **Keep your own collection.** Save favorites, choose which ones are used when
-  planning from your collection, add private recipe notes, and create personal
-  recipes with ingredients, steps, and a photo.
+- **Find something that fits.** Search recipe titles in Greek, Greeklish, or Latin
+  script — accents don't matter, so «ράμεν» also finds "Ramen" — optionally as
+  whole words only. Filter by category, preparation time, effort, rating, diet,
+  cuisine, ingredients, and more. Choose which publishers appear in new
+  suggestions, or plan using only your favorites.
+- **Keep your own collection.** Save recipes to «Αγαπημένα» and to your own named
+  lists, choose which ones are used when planning from your collection, add
+  private recipe notes, and create personal recipes with ingredients, steps, and
+  a photo. Lists are kept on the device.
 - **Make shopping easier.** Add a recipe's ingredients to your shopping list in one
   tap, add your own items, and tick things off as you go.
 - **Remember what you cooked.** Mark meals as cooked, revisit your history, and
@@ -36,7 +39,8 @@ shopping lists, and cooking history work offline. Photos and videos may need an
 internet connection.
 
 With Firebase configured, you can optionally sign in with an email/password
-account to synchronize personal data across devices. Existing local data carries
+account to synchronize personal data across devices; personal recipe photos are
+stored in Cloud Storage. Existing local data carries
 across when you sign in, and offline changes sync when connectivity returns.
 **New account registration is currently disabled on the maintainer's Firebase
 project; local use remains available to everyone.**

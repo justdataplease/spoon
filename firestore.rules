@@ -185,7 +185,17 @@ service cloud.firestore {
         validEpochMillis(data.updatedAtEpochMillis);
     }
 
-    function validCustomRecipe(data, recipeId) {
+    // A synced photo lives in Cloud Storage under the owner's recipe path; see storage.rules.
+    function validCustomRecipePhotoUrl(data, recipeId, uid) {
+      let photoUrl = data.get('photoUrl', '');
+      return photoUrl is string &&
+        photoUrl.size() <= 2048 &&
+        (photoUrl == '' || photoUrl.matches(
+          '^https://firebasestorage[.]googleapis[.]com/v0/b/[a-z0-9._-]+/o/spoon%2F' + uid +
+            '%2FcustomRecipes%2F' + recipeId + '%2F[0-9a-f]{32}[.]jpg[?]alt=media&token=[A-Za-z0-9-]+$'));
+    }
+
+    function validCustomRecipe(data, recipeId, uid) {
       return data.keys().hasAll([
           'title',
           'description',
@@ -210,11 +220,13 @@ service cloud.firestore {
           'ingredientSections',
           'methodSections',
           'photoDataUri',
+          'photoUrl',
           'active',
           'createdAtEpochMillis',
           'updatedAtEpochMillis'
         ]) &&
         validCustomRecipeId(recipeId) &&
+        validCustomRecipePhotoUrl(data, recipeId, uid) &&
         validText(data.title, 1, 300) &&
         validText(data.description, 0, 10000) &&
         data.category is string &&
@@ -474,7 +486,7 @@ service cloud.firestore {
     match /spoon/{uid}/customRecipes/{recipeId} {
       allow get, list: if isOwner(uid);
       allow create, update: if isOwner(uid) &&
-        validCustomRecipe(request.resource.data, recipeId);
+        validCustomRecipe(request.resource.data, recipeId, uid);
       allow delete: if isOwner(uid);
     }
 

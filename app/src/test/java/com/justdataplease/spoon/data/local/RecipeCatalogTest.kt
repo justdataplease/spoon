@@ -67,7 +67,22 @@ class RecipeCatalogTest {
         assertTrue(sql.whereSql.contains("r.source_key IN (?,?)"))
         assertTrue(sql.whereSql.contains("f.facet_type = ?"))
         assertTrue(sql.whereSql.contains("f.token IN (?,?)"))
-        assertTrue(sql.arguments.containsAll(listOf("ψαρι", "λεμονι", "ελληνικη", "ιταλικη")))
+        assertTrue(sql.arguments.containsAll(listOf("psari", "lemoni", "ελληνικη", "ιταλικη")))
+    }
+
+    @Test
+    fun `explore SQL searches transliterated title keys and ranks word starts`() {
+        val partial = CatalogSqlBuilder.forExplore(ExploreCriteria(query = "Ράμεν"))
+        val whole = CatalogSqlBuilder.forExplore(ExploreCriteria(query = "Ράμεν", wholeWords = true))
+
+        assertTrue(partial.whereSql.contains("FROM $TITLE_KEY_TABLE title"))
+        assertFalse(partial.whereSql.contains("search_text"))
+        // The title term binds first; default meal preferences add their own arguments after it.
+        assertEquals("ramen", partial.arguments.first())
+        assertEquals(listOf(" ramen"), partial.rankArguments)
+        assertTrue(partial.rankSql.endsWith("DESC, "))
+        assertEquals(" ramen ", whole.arguments.first())
+        assertEquals("", whole.rankSql)
     }
 
     @Test

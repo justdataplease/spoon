@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.TextButton
 import androidx.compose.ui.Alignment
@@ -44,11 +45,14 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.justdataplease.spoon.data.model.isCustomRecipeId
 import com.justdataplease.spoon.ui.account.AccountScreen
 import com.justdataplease.spoon.ui.calendar.CalendarScreen
+import com.justdataplease.spoon.ui.custom.CustomRecipePhotoEvents
 import com.justdataplease.spoon.ui.custom.CustomRecipeScreen
 import com.justdataplease.spoon.ui.details.RecipeDetailsScreen
 import com.justdataplease.spoon.ui.explore.ExploreScreen
+import com.justdataplease.spoon.ui.explore.rememberExploreListPosition
 import com.justdataplease.spoon.ui.favorites.FavoriteReplacementSheet
 import com.justdataplease.spoon.ui.favorites.FavoritesScreen
+import com.justdataplease.spoon.ui.favorites.SaveToListDialog
 import com.justdataplease.spoon.ui.history.HistoryScreen
 import com.justdataplease.spoon.ui.model.SpoonUiState
 import com.justdataplease.spoon.ui.model.RecipeDetailUi
@@ -104,6 +108,11 @@ fun SpoonApp(
     val mealPreferenceSettings by viewModel.mealPreferenceSettings.collectAsStateWithLifecycle()
     val calendarSelectedDate by viewModel.calendarSelectedDate.collectAsStateWithLifecycle()
     val calendarNavigationDate by viewModel.calendarNavigationDate.collectAsStateWithLifecycle()
+    val searchWholeWords by viewModel.searchWholeWordsEnabled.collectAsStateWithLifecycle()
+    val recipeListPicker by viewModel.recipeListPicker.collectAsStateWithLifecycle()
+    // Kept above the conditional destinations, so returning from a recipe restores each list's spot.
+    val exploreListPosition = rememberExploreListPosition()
+    val favoritesListState = rememberLazyListState()
 
     LaunchedEffect(calendarNavigationDate) {
         calendarNavigationDate?.let { date ->
@@ -182,12 +191,20 @@ fun SpoonApp(
                 onStateChange = viewModel::updateCustomRecipeEditor,
                 onSave = viewModel::saveCustomRecipeEditor,
                 modifier = Modifier.padding(padding),
+                photoEvents = remember(viewModel) {
+                    CustomRecipePhotoEvents(
+                        onProcessingStarted = viewModel::startCustomRecipePhoto,
+                        onPhotoChanged = viewModel::setCustomRecipePhoto,
+                        onFailed = viewModel::failCustomRecipePhoto,
+                        onCancelled = viewModel::cancelCustomRecipePhoto,
+                    )
+                },
             )
 
             selectedRecipe != null -> RecipeDetailsScreen(
                 recipe = selectedRecipe,
                 onBack = viewModel::dismissRecipeDetails,
-                onToggleFavorite = { viewModel.toggleFavorite(selectedRecipe.recipeId) },
+                onToggleFavorite = { viewModel.openRecipeListPicker(selectedRecipe.recipeId) },
                 onOpenSource = { onOpenRecipe(selectedRecipe.sourceUrl) },
                 onShare = if (RecipeShareLink.create(selectedRecipe.recipeId) != null) {
                     { onShareRecipe(selectedRecipe) }
@@ -223,7 +240,7 @@ fun SpoonApp(
                 onOpenRecipe = viewModel::showRecipeDetails,
                 onRetry = { viewModel.showMealMenu(mealMenu!!.date) },
                 onReroll = viewModel::rerollMenuCourse,
-                onToggleFavorite = viewModel::toggleFavorite,
+                onToggleFavorite = viewModel::openRecipeListPicker,
                 onChooseFavorite = { viewModel.showFavoriteReplacement(mealMenu!!.date, it) },
                 onToggleLock = viewModel::toggleMenuLock,
                 onToggleCompleted = viewModel::toggleMenuCompleted,
@@ -243,7 +260,7 @@ fun SpoonApp(
                     onBlankDay = viewModel::setDayBlank,
                     onReroll = viewModel::reroll,
                     onEdit = viewModel::editFilters,
-                    onToggleFavorite = viewModel::toggleFavorite,
+                    onToggleFavorite = viewModel::openRecipeListPicker,
                     onToggleCompleted = viewModel::toggleCompleted,
                     onOpenRecipe = viewModel::showRecipeDetails,
                     onShuffleWeek = viewModel::shuffleWeek,
@@ -265,10 +282,13 @@ fun SpoonApp(
                     onQueryChange = viewModel::updateExploreQuery,
                     onApplyFilters = viewModel::applyExploreFilters,
                     onOpenRecipe = viewModel::showRecipeDetails,
-                    onToggleFavorite = viewModel::toggleFavorite,
+                    onToggleFavorite = viewModel::openRecipeListPicker,
                     onLoadMore = viewModel::loadMoreExplore,
                     onCreateRecipe = viewModel::createCustomRecipe,
                     modifier = Modifier.padding(padding),
+                    wholeWords = searchWholeWords,
+                    onWholeWordsChange = viewModel::setSearchWholeWords,
+                    position = exploreListPosition,
                 )
 
                 PrimaryDestination.FAVORITES -> FavoritesScreen(
@@ -280,9 +300,18 @@ fun SpoonApp(
                     onQueryChange = viewModel::updateFavoritesQuery,
                     onApplyFilters = viewModel::applyFavoritesFilters,
                     onOpenRecipe = viewModel::showRecipeDetails,
-                    onRemoveFavorite = viewModel::toggleFavorite,
+                    onOpenListPicker = viewModel::openRecipeListPicker,
                     onSetIncludedInWeeklyPlan = viewModel::setFavoriteIncludedInWeeklyPlan,
                     modifier = Modifier.padding(padding),
+                    wholeWords = searchWholeWords,
+                    onWholeWordsChange = viewModel::setSearchWholeWords,
+                    lists = favoritesSearch.lists,
+                    selectedListId = favoritesSearch.selectedListId,
+                    onSelectList = viewModel::selectFavoritesList,
+                    onCreateList = viewModel::createRecipeList,
+                    onRenameList = viewModel::renameRecipeList,
+                    onDeleteList = viewModel::deleteRecipeList,
+                    listState = favoritesListState,
                 )
 
                 PrimaryDestination.SHOPPING -> ShoppingScreen(
@@ -358,6 +387,16 @@ fun SpoonApp(
             favorites = state.favorites,
             onSelect = viewModel::replaceWithFavorite,
             onDismiss = viewModel::dismissFavoriteReplacement,
+        )
+    }
+
+    recipeListPicker?.let { picker ->
+        SaveToListDialog(
+            picker = picker,
+            onCreateList = viewModel::createRecipeList,
+            onSave = { listIds -> viewModel.saveRecipeToLists(picker.recipeId, listIds) },
+            onRemove = { viewModel.removeRecipeFromCollection(picker.recipeId) },
+            onDismiss = viewModel::dismissRecipeListPicker,
         )
     }
 }

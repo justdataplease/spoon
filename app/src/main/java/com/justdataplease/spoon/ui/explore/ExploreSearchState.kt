@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 
@@ -24,6 +25,7 @@ private const val MAX_EXPLORE_QUERY_LENGTH = 160
 internal data class ExploreFilterInput(
     val query: String,
     val filters: ExploreFiltersUi,
+    val wholeWords: Boolean = false,
 )
 
 /**
@@ -74,9 +76,10 @@ internal fun Flow<String>.debouncedDistinctExploreQueries(
         .distinctUntilChanged()
 }
 
-/** Filter chips remain immediate and combine with the latest settled text query. */
+/** Filter chips and the whole-word switch stay immediate and join the latest settled text query. */
 internal fun exploreFilterInputs(
     filterQuery: Flow<String>,
     filters: Flow<ExploreFiltersUi>,
-): Flow<ExploreFilterInput> = combine(filterQuery, filters, ::ExploreFilterInput)
+    wholeWords: Flow<Boolean> = flowOf(false),
+): Flow<ExploreFilterInput> = combine(filterQuery, filters, wholeWords, ::ExploreFilterInput)
     .distinctUntilChanged()
