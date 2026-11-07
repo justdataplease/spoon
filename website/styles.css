@@ -121,3 +121,36 @@ footer {
   line-height: 1.6;
   text-align: center;
 }
+
+.recipe-photo {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  margin-top: 26px;
+  border-radius: 18px;
+  object-fit: cover;
+  background: #f3e7d8;
+}
+
+.recipe .eyebrow { margin-top: 24px; }
+.recipe .description { margin-bottom: 12px; }
+
+.source {
+  margin: 0 0 26px;
+  color: #685b52;
+  font-size: 14px;
+}
+
+.source a {
+  color: #b8442e;
+  font-weight: 650;
+  text-underline-offset: 4px;
+}
+
+.button.secondary {
+  margin-top: 12px;
+  color: #8d2e1e;
+  background: #fbefe4;
+}
+
+.button.secondary:hover { background: #f3e1d0; }

@@ -10,7 +10,32 @@ against package `com.spoon.app` and the existing personal-release signing
 certificate. The verified URL is
 `https://justdataplease.github.io/spoon/recipe/<id>`.
 
-GitHub Pages serves `404.html` for recipe paths. It only offers the explicit
+## Recipe pages
+
+`build_recipe_pages.py` writes one small page per catalog recipe to
+`spoon/recipe/<id>.html`, which GitHub Pages serves at the shared link. It shows
+the name, photo (loaded from the publisher), category, time, a short
+description and the publisher, with buttons to open the recipe in the app or on
+the publisher's site. Ingredients and steps are not published. The pages carry
+Open Graph tags, so chat apps show the dish photo and name in link previews.
+Pages are `noindex` and need no JavaScript.
+
+Publish or refresh them after a catalog change:
+
+```powershell
+git clone https://github.com/justdataplease/justdataplease.github.io <site>
+# copy .nojekyll, .well-known, *.html, *.mjs, styles.css, app-icon.* into <site>
+python website/build_recipe_pages.py --out <site>
+# commit and push <site>
+```
+
+The script removes pages of recipes that left the catalog. Run its checks with
+`python -m unittest discover -s website/tests -p "test_*.py"`.
+
+## Fallback page
+
+Links to IDs that have no page (for example from a newer app catalog) get
+`404.html`. GitHub Pages serves `404.html` for those paths. It only offers the explicit
 app intent for canonical public recipe IDs: ASCII letters/digits first,
 letters/digits/underscores/hyphens thereafter, maximum 128 characters, excluding
 the private `custom_` prefix. Query strings, fragments, extra segments, trailing
@@ -27,9 +52,8 @@ node --test website/tests/recipe-link.test.mjs
 ```
 
 After publishing, verify that the association returns HTTP 200 with JSON content,
-and exercise a shared link on a release-signed Android install. A browser visit to
-a recipe path deliberately returns the Pages custom 404 document; Android App
-Links route directly into the verified app before loading that fallback page.
+and exercise a shared link on a release-signed Android install. Android App Links route
+directly into the verified app before loading any page.
 
 The landing and recipe pages use the Android app name, terracotta color, and the
 same plate/question-mark launcher icon. `app-icon.svg` is the browser favicon and
