@@ -34,6 +34,13 @@ class RecipePagesTest(unittest.TestCase):
                 "totalMinutes": 80,
                 "imageUrl": "https://example.gr/p.jpg",
                 "canonicalUrl": "https://www.argiro.gr/recipe/pita/",
+                "servings": "6",
+                "ingredientSections": [
+                    {"title": "", "ingredients": [{"quantity": "250", "unit": "γρ.", "title": "νερό", "info": "χλιαρό"}]},
+                    {"title": "Για τη γέμιση", "ingredients": [{"quantity": "", "title": "200 γρ. φέτα <b>"}]},
+                ],
+                "methodSections": [{"title": "", "steps": ["Ανακατεύουμε.", "  ", "Ψήνουμε."]}],
+                "tips": ["1", "Σερβίρουμε ζεστή."],
             },
             "argiro",
             0,
@@ -42,7 +49,13 @@ class RecipePagesTest(unittest.TestCase):
         self.assertNotIn("<script>", page)
         self.assertIn("Νόστιμη πίτα.</p>", page)
         self.assertNotIn("#", page.split("<body>")[1].split("intent://")[0])
-        self.assertIn("Πίτες · 1 ώρα και 20 λεπτά", page)
+        self.assertIn("Πίτες · 1 ώρα και 20 λεπτά · 6 μερίδες", page)
+        self.assertIn("<li>250 γρ. νερό, χλιαρό</li>", page)
+        self.assertIn("<h3>Για τη γέμιση</h3>", page)
+        self.assertIn("<li>200 γρ. φέτα &lt;b&gt;</li>", page)
+        self.assertRegex(page, r'<ol class="steps">\s*<li>Ανακατεύουμε\.</li>\s*<li>Ψήνουμε\.</li>\s*</ol>')
+        self.assertIn("<li>Σερβίρουμε ζεστή.</li>", page)
+        self.assertNotIn("<li>1</li>", page)
         self.assertIn("Αργυρώ Μπαρμπαρίγου", page)
         self.assertIn('href="https://www.argiro.gr/recipe/pita/"', page)
         self.assertIn('content="https://example.gr/p.jpg"', page)
@@ -61,6 +74,7 @@ class RecipePagesTest(unittest.TestCase):
         self.assertNotIn("recipe-photo", page)
         self.assertIn("app-icon.png", page)
         self.assertIn("Μια συνταγή από Cookpad.", page)
+        self.assertNotIn("<h2>", page)
 
     def test_private_or_bad_ids_get_no_page(self):
         for recipe_id in ["custom_1", "_a", "a/b", "a.b", ""]:

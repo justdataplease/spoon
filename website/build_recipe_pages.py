@@ -2,9 +2,8 @@
 
 Each page lives at spoon/recipe/<id>.html, which GitHub Pages serves at the
 shared link https://justdataplease.github.io/spoon/recipe/<id>. It shows the
-recipe's name, photo, category, time, a short description and the publisher,
-links to the original recipe and opens it in the app. Ingredients and steps stay
-with the publisher and in the app.
+whole recipe (name, photo, category, time, servings, description, ingredients,
+steps and tips), credits and links the publisher, and opens it in the app.
 
 Usage:
     python website/build_recipe_pages.py --out <clone of justdataplease.github.io>
@@ -93,6 +92,56 @@ def description_of(recipe: dict, publisher: str) -> str:
     return f"Μια συνταγή από {publisher}."
 
 
+def e(text: str) -> str:
+    return html.escape(text, quote=True)
+
+
+def ingredient_line(item: object) -> str:
+    if not isinstance(item, dict):
+        return clean(item)
+    main = " ".join(part for part in (clean(item.get(k)) for k in ("quantity", "unit", "title")) if part)
+    info = clean(item.get("info"))
+    return f"{main}, {info}" if main and info else main or info
+
+
+def section_title(section: dict) -> str:
+    title = clean(section.get("title"))
+    return f"\n        <h3>{e(title)}</h3>" if title else ""
+
+
+def ingredients_html(recipe: dict) -> str:
+    parts = []
+    for section in recipe.get("ingredientSections") or []:
+        if not isinstance(section, dict):
+            continue
+        items = [line for line in map(ingredient_line, section.get("ingredients") or []) if line]
+        if items:
+            rows = "".join(f"\n          <li>{e(line)}</li>" for line in items)
+            parts.append(f'{section_title(section)}\n        <ul class="ingredients">{rows}\n        </ul>')
+    return f'\n      <section>\n        <h2>Υλικά</h2>{"".join(parts)}\n      </section>' if parts else ""
+
+
+def steps_html(recipe: dict) -> str:
+    parts = []
+    for section in recipe.get("methodSections") or []:
+        if not isinstance(section, dict):
+            continue
+        steps = [step for step in map(clean, section.get("steps") or []) if step]
+        if steps:
+            rows = "".join(f"\n          <li>{e(step)}</li>" for step in steps)
+            parts.append(f'{section_title(section)}\n        <ol class="steps">{rows}\n        </ol>')
+    return f'\n      <section>\n        <h2>Εκτέλεση</h2>{"".join(parts)}\n      </section>' if parts else ""
+
+
+def tips_html(recipe: dict) -> str:
+    # Some sources store placeholders such as "1"; keep only real sentences.
+    tips = [tip for tip in map(clean, recipe.get("tips") or []) if len(tip) > 3 and not tip.isdigit()]
+    if not tips:
+        return ""
+    rows = "".join(f"\n          <li>{e(tip)}</li>" for tip in tips)
+    return f'\n      <section>\n        <h2>Συμβουλές</h2>\n        <ul class="tips">{rows}\n        </ul>\n      </section>'
+
+
 def render(recipe_id: str, recipe: dict, source_key: str, prep_minutes: int) -> str | None:
     title = clean(recipe.get("title"))
     if not title or not is_shareable_id(recipe_id):
@@ -101,10 +150,14 @@ def render(recipe_id: str, recipe: dict, source_key: str, prep_minutes: int) -> 
     original = https_or_none(recipe.get("canonicalUrl")) or https_or_none(recipe.get("sourceUrl"))
     image = https_or_none(recipe.get("imageUrl"))
     description = description_of(recipe, publisher)
-    meta = [clean(recipe.get("categoryLabel")), minutes_label(recipe_minutes(recipe, prep_minutes))]
+    servings = clean(recipe.get("servings"))
+    meta = [
+        clean(recipe.get("categoryLabel")),
+        minutes_label(recipe_minutes(recipe, prep_minutes)),
+        f"{servings} μερίδες" if servings else "",
+    ]
     meta_line = " · ".join(part for part in meta if part)
 
-    e = lambda text: html.escape(text, quote=True)  # noqa: E731
     link = f"{SITE}/{RECIPE_DIR}/{recipe_id}"
     intent = f"intent://recipe/{recipe_id}#Intent;scheme=spoon;package=com.spoon.app;end"
     og_image = image or f"{SITE}/app-icon.png"
@@ -120,11 +173,13 @@ def render(recipe_id: str, recipe: dict, source_key: str, prep_minutes: int) -> 
         if original
         else f'\n      <p class="source">Από {e(publisher)}</p>'
     )
-    original_button = (
-        f'\n      <a class="button secondary" href="{e(original)}" rel="noopener">Δες την πρωτότυπη συνταγή <span aria-hidden="true">↗</span></a>'
+    credit = (
+        f'\n      <p class="credit">Συνταγή και φωτογραφία: {e(publisher)}. '
+        f'<a href="{e(original)}" rel="noopener">Δες την πρωτότυπη συνταγή <span aria-hidden="true">↗</span></a></p>'
         if original
-        else ""
+        else f'\n      <p class="credit">Συνταγή και φωτογραφία: {e(publisher)}.</p>'
     )
+    body = ingredients_html(recipe) + steps_html(recipe) + tips_html(recipe)
 
     return f"""<!doctype html>
 <html lang="el">
@@ -154,12 +209,11 @@ def render(recipe_id: str, recipe: dict, source_key: str, prep_minutes: int) -> 
     <main class="card recipe">
       <a class="brand home" href="/"><img class="app-icon" src="/app-icon.svg" width="46" height="46" alt=""> {APP_NAME}</a>{photo}{eyebrow}
       <h1>{e(title)}</h1>
-      <p class="description">{e(shorten(description, 280))}</p>{source}
-      <a class="button" href="{e(intent)}">Άνοιγμα στο «{APP_NAME}»</a>{original_button}
+      <p class="description">{e(shorten(description, 600))}</p>{source}{body}{credit}
       <div class="download">
-        <p>Δεν έχεις την εφαρμογή;</p>
+        <p>Οργάνωσε το μενού της εβδομάδας και τη λίστα για ψώνια με την εφαρμογή.</p>
+        <a class="button secondary" href="{e(intent)}">Άνοιγμα στο «{APP_NAME}»</a>
         <a class="download-link" href="{APK_URL}">Λήψη «{APP_NAME}» για Android <span aria-hidden="true">↗</span></a>
-        <p class="hint">Εγκατάστησε την εφαρμογή και πάτησε ξανά τον σύνδεσμο. Η συνταγή θα ανοίξει κατευθείαν εκεί.</p>
       </div>
     </main>
     <footer>Το επόμενο γεύμα ξεκινά με μια ιδέα.</footer>
